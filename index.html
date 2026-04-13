@@ -300,8 +300,16 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
   </div>
   <div class="backup-section">
     <div class="backup-title">💾 Backup y exportación</div>
+    <!-- DRIVE SYNC -->
+    <div id="sync-status" style="display:none;background:rgba(0,200,83,.1);border:1px solid rgba(0,200,83,.3);border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:12px;font-weight:700;color:#00c853;text-align:center"></div>
     <div class="backup-row">
-      <button class="btn btn-green btn-sm" onclick="saveBackup()" style="flex:1;margin:0">💾 Guardar backup</button>
+      <button class="btn btn-orange btn-sm" onclick="syncUp()" id="sync-up-btn" style="flex:1;margin:0;gap:6px">☁️ Subir a Drive</button>
+      <button class="btn btn-dark btn-sm" onclick="syncDown()" id="sync-down-btn" style="flex:1;margin:0;gap:6px">⬇️ Bajar de Drive</button>
+    </div>
+    <div id="sync-last" style="font-size:10px;color:var(--text2);text-align:center;margin-bottom:10px;font-weight:600"></div>
+    <div style="height:1px;background:var(--border);margin-bottom:10px"></div>
+    <div class="backup-row">
+      <button class="btn btn-green btn-sm" onclick="saveBackup()" style="flex:1;margin:0">💾 Backup local</button>
       <label class="btn btn-dark btn-sm" style="flex:1;margin:0;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px">
         📂 Restaurar<input type="file" accept=".json" id="restore-file" style="display:none" onchange="restoreBackup(this)">
       </label>
@@ -548,7 +556,7 @@ function switchTab(tab){
 function init(){
   setNowDatetime();
   document.getElementById('f-lev').value=5;
-  populateSelects();updateTickerDropdown();updatePreviews();updateKPIs();updateOpenCount();
+  populateSelects();updateTickerDropdown();updatePreviews();updateKPIs();updateOpenCount();updateSyncLastTime();
 }
 
 function setNowDatetime(){
@@ -1028,6 +1036,104 @@ function updatePreviews(){document.getElementById('strat-preview').textContent=D
 function saveBackup(){const b=new Blob([JSON.stringify(D,null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='tradingpro_backup.json';a.click();URL.revokeObjectURL(a.href);}
 function restoreBackup(input){const f=input.files[0];if(!f)return;const r=new FileReader();r.onload=e=>{try{const p=JSON.parse(e.target.result);if(!p.trades)throw new Error('Formato inválido');if(!confirm(`¿Restaurar? Se reemplazarán ${D.trades.length} trades por ${p.trades.length}.`))return;D=p;persist(D);populateSelects();updatePreviews();updateKPIs();populateFilterDropdowns();alert('✅ Restaurado.');}catch(err){alert('❌ Archivo inválido: '+err.message);}};r.readAsText(f);input.value='';}
 function exportExcel(){const h=['Fecha','Ticker','Posicion','Margen','Entrada','Actual','Apalancamiento','Temporalidad','Estrategia','Salida','Timing','Resultado%','PnL$','Abierto','10%','Observaciones'];const rows=D.trades.map(t=>[t.fecha,t.ticker,t.pos,t.margen,t.entrada||'',t.actual||'',t.lev,t.temp,t.estrategia,t.salida||'',t.timing||'',t.resultado.toFixed(2),(t.margen*t.resultado/100).toFixed(2),t.open?'SI':'NO',t.p10?'SI':'NO',t.obs||'']);const csv=[h,...rows].map(r=>r.map(v=>`"${v}"`).join(',')).join('\n');const b=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8;'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='trading_journal.csv';a.click();}
+
+// ══ GOOGLE DRIVE SYNC ══
+function showSyncStatus(msg, color='#00c853', duration=3000){
+  const el=document.getElementById('sync-status');
+  if(!el)return;
+  el.textContent=msg;
+  el.style.color=color;
+  el.style.borderColor=color.replace(')',', .3)').replace('rgb','rgba').replace('#00c853','rgba(0,200,83,.3)').replace('#ff3d57','rgba(255,61,87,.3)').replace('#ff6b00','rgba(255,107,0,.3)');
+  el.style.background=color==='#00c853'?'rgba(0,200,83,.1)':color==='#ff3d57'?'rgba(255,61,87,.1)':'rgba(255,107,0,.1)';
+  el.style.display='block';
+  if(duration>0)setTimeout(()=>{if(el)el.style.display='none';},duration);
+}
+
+function updateSyncLastTime(){
+  const el=document.getElementById('sync-last');
+  if(!el)return;
+  const ts=localStorage.getItem('tpro_sync_ts');
+  if(ts){
+    const d=new Date(parseInt(ts));
+    el.textContent=`Última sync: ${d.toLocaleDateString('es-AR')} ${d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})}`;
+  } else {
+    el.textContent='Sin sincronización previa';
+  }
+}
+
+async function syncUp(){
+  const btn=document.getElementById('sync-up-btn');
+  btn.disabled=true;
+  btn.textContent='☁️ Subiendo...';
+  showSyncStatus('⏳ Subiendo datos a Drive...','#ff6b00',-1);
+  try{
+    const payload=JSON.stringify(D);
+    // Use no-cors for local file fallback, but Apps Script needs cors
+    const resp=await fetch(SYNC_URL+'?action=save',{
+      method:'POST',
+      headers:{'Content-Type':'text/plain'},
+      body:payload
+    });
+    const text=await resp.text();
+    let result;
+    try{result=JSON.parse(text);}catch{result={ok:true};}
+    if(result.error)throw new Error(result.error);
+    localStorage.setItem('tpro_sync_ts',Date.now().toString());
+    updateSyncLastTime();
+    showSyncStatus(`✅ ${D.trades.length} trades subidos correctamente`,'#00c853');
+  }catch(e){
+    // Fallback: try GET with encoded data (for CORS-restricted environments)
+    try{
+      const encoded=encodeURIComponent(JSON.stringify(D));
+      await fetch(`${SYNC_URL}?action=save&data=${encoded}`);
+      localStorage.setItem('tpro_sync_ts',Date.now().toString());
+      updateSyncLastTime();
+      showSyncStatus(`✅ ${D.trades.length} trades subidos`,'#00c853');
+    }catch(e2){
+      showSyncStatus('❌ Error al subir. Verificá conexión.','#ff3d57',5000);
+    }
+  }
+  btn.disabled=false;
+  btn.textContent='☁️ Subir a Drive';
+}
+
+async function syncDown(){
+  const btn=document.getElementById('sync-down-btn');
+  btn.disabled=true;
+  btn.textContent='⬇️ Bajando...';
+  showSyncStatus('⏳ Descargando datos de Drive...','#ff6b00',-1);
+  try{
+    const resp=await fetch(SYNC_URL+'?action=load',{method:'GET'});
+    const text=await resp.text();
+    let result;
+    try{result=JSON.parse(text);}catch{throw new Error('Respuesta inválida del servidor');}
+    if(result.error==='no_data'){
+      showSyncStatus('ℹ️ No hay datos en Drive todavía. Subí primero.','#ff6b00',4000);
+      btn.disabled=false;btn.textContent='⬇️ Bajar de Drive';return;
+    }
+    if(result.error)throw new Error(result.error);
+    // result IS the data (the Apps Script returns D directly)
+    const parsed=result.trades?result:null;
+    if(!parsed||!parsed.trades)throw new Error('Formato de datos inválido');
+    const localCount=D.trades.length;
+    const remoteCount=parsed.trades.length;
+    if(!confirm(`Drive tiene ${remoteCount} trades. Tu dispositivo tiene ${localCount}.\n¿Reemplazar datos locales con los de Drive?`)){
+      btn.disabled=false;btn.textContent='⬇️ Bajar de Drive';
+      showSyncStatus('','#00c853',0);return;
+    }
+    D=parsed;
+    persist(D);
+    populateSelects();updatePreviews();updateKPIs();updateOpenCount();
+    if(document.getElementById('page-historial').classList.contains('active')){populateFilterDropdowns();renderHistorial();}
+    localStorage.setItem('tpro_sync_ts',Date.now().toString());
+    updateSyncLastTime();
+    showSyncStatus(`✅ ${remoteCount} trades descargados de Drive`,'#00c853');
+  }catch(e){
+    showSyncStatus('❌ Error al bajar: '+e.message,'#ff3d57',5000);
+  }
+  btn.disabled=false;
+  btn.textContent='⬇️ Bajar de Drive';
+}
 
 // ══ DETAIL MODAL ══
 function openDetail(key){
