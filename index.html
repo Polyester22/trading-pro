@@ -421,6 +421,7 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
 <script>
 // ══ DATA ══
 const STORE='tradingpro_v6';
+const SYNC_URL='https://script.google.com/macros/s/AKfycbxB_Nw_CEvQOXKP3repFzim8kFg5skWepBpdBt4MDr57DeVN14VkVvb8jLqEAZe4jXe/exec';
 function load(){try{return JSON.parse(localStorage.getItem(STORE))||defaultData();}catch{return defaultData();}}
 function persist(d){localStorage.setItem(STORE,JSON.stringify(d));}
 
