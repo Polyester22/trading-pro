@@ -4,6 +4,17 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <title>Trading PRO</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Trading PRO">
+<meta name="theme-color" content="#1a1a2e">
+
+<!-- FAVICON inline SVG -->
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231a1a2e'/%3E%3Crect width='32' height='32' rx='7' fill='url(%23fg)'/%3E%3Cdefs%3E%3ClinearGradient id='fg' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0%25' stop-color='%231a1a2e'/%3E%3Cstop offset='100%25' stop-color='%230f3460'/%3E%3C/linearGradient%3E%3ClinearGradient id='arr' x1='0' y1='1' x2='1' y2='0'%3E%3Cstop offset='0%25' stop-color='%2300aaff'/%3E%3Cstop offset='100%25' stop-color='%2300ddff'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect x='5' y='20' width='4' height='7' rx='1' fill='%23ff6b00'/%3E%3Crect x='11' y='16' width='4' height='11' rx='1' fill='%23ff8c00'/%3E%3Crect x='17' y='12' width='4' height='15' rx='1' fill='%23ffa500'/%3E%3Cpolyline points='6,20 13,13 19,16 27,6' fill='none' stroke='url(%23arr)' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpolygon points='27,6 22,7 26,11' fill='url(%23arr)'/%3E%3C/svg%3E">
+
+<!-- PWA icons inline (base64 generated below) -->
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='40' fill='%231a1a2e'/%3E%3Cdefs%3E%3ClinearGradient id='bg2' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0%25' stop-color='%231a1a2e'/%3E%3Cstop offset='100%25' stop-color='%230f3460'/%3E%3C/linearGradient%3E%3ClinearGradient id='bar1' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop offset='0%25' stop-color='%23ff9500'/%3E%3Cstop offset='100%25' stop-color='%23e05a00'/%3E%3C/linearGradient%3E%3ClinearGradient id='bar2' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop offset='0%25' stop-color='%23ffb700'/%3E%3Cstop offset='100%25' stop-color='%23ff6b00'/%3E%3C/linearGradient%3E%3ClinearGradient id='arr2' x1='0' y1='1' x2='1' y2='0'%3E%3Cstop offset='0%25' stop-color='%2300aaff'/%3E%3Cstop offset='100%25' stop-color='%2366ddff'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='192' height='192' rx='40' fill='url(%23bg2)'/%3E%3Crect x='28' y='118' width='28' height='46' rx='5' fill='url(%23bar1)'/%3E%3Crect x='66' y='94' width='28' height='70' rx='5' fill='url(%23bar2)'/%3E%3Crect x='104' y='70' width='28' height='94' rx='5' fill='url(%23bar1)'/%3E%3Cpolyline points='38,116 80,74 118,92 162,36' fill='none' stroke='url(%23arr2)' stroke-width='13' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpolygon points='162,36 138,42 155,62' fill='url(%23arr2)'/%3E%3C/svg%3E">
+
 <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet">
 <style>
 /* ── TOKENS ── */
@@ -25,7 +36,7 @@ body:not(.desktop-mode){max-width:480px;margin:0 auto}
 .desktop-grid{display:block}
 /* HEADER */
 .app-header{background:var(--surface);border-bottom:1px solid var(--border);padding:13px 16px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:50;box-shadow:0 2px 8px var(--shadow)}
-.app-logo{display:flex;align-items:center;gap:8px;font-size:18px;font-weight:900;letter-spacing:-.5px}
+.app-logo{display:flex;align-items:center;gap:10px;font-size:18px;font-weight:900;letter-spacing:-.5px}
 .header-btns{display:flex;gap:8px;align-items:center}
 .theme-btn,.desktop-btn{background:var(--surface2);border:1px solid var(--border);border-radius:20px;padding:6px 14px;font-family:'Nunito',sans-serif;font-size:13px;font-weight:700;color:var(--text);cursor:pointer;display:flex;align-items:center;gap:6px;white-space:nowrap}
 /* KPI BAR */
@@ -203,7 +214,31 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
 <body>
 
 <div class="app-header">
-  <div class="app-logo">📈 Trading <span style="color:#ff6b00">PRO</span></div>
+  <div class="app-logo">
+    <svg width="32" height="32" viewBox="0 0 192 192" style="flex-shrink:0;border-radius:8px">
+      <defs>
+        <linearGradient id="hbg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#1a1a2e"/>
+          <stop offset="100%" stop-color="#0f3460"/>
+        </linearGradient>
+        <linearGradient id="hbar" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#ffb700"/>
+          <stop offset="100%" stop-color="#e05a00"/>
+        </linearGradient>
+        <linearGradient id="harr" x1="0" y1="1" x2="1" y2="0">
+          <stop offset="0%" stop-color="#00aaff"/>
+          <stop offset="100%" stop-color="#66ddff"/>
+        </linearGradient>
+      </defs>
+      <rect width="192" height="192" rx="40" fill="url(#hbg)"/>
+      <rect x="28" y="118" width="28" height="46" rx="5" fill="url(#hbar)"/>
+      <rect x="66" y="94" width="28" height="70" rx="5" fill="url(#hbar)"/>
+      <rect x="104" y="70" width="28" height="94" rx="5" fill="url(#hbar)"/>
+      <polyline points="38,116 80,74 118,92 162,36" fill="none" stroke="url(#harr)" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/>
+      <polygon points="162,36 138,42 155,62" fill="url(#harr)"/>
+    </svg>
+    <span>Trading <span style="color:#ff6b00">PRO</span></span>
+  </div>
   <div class="header-btns">
     <button class="desktop-btn" onclick="toggleDesktop()" id="desktop-btn">🖥️ PC</button>
     <button class="theme-btn" onclick="toggleTheme()" id="theme-btn"><span id="theme-icon">☀️</span><span id="theme-text">Claro</span></button>
@@ -300,11 +335,10 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
   </div>
   <div class="backup-section">
     <div class="backup-title">💾 Backup y exportación</div>
-    <!-- DRIVE SYNC -->
-    <div id="sync-status" style="display:none;background:rgba(0,200,83,.1);border:1px solid rgba(0,200,83,.3);border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:12px;font-weight:700;color:#00c853;text-align:center"></div>
+    <div id="sync-status" style="display:none;border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:12px;font-weight:700;text-align:center"></div>
     <div class="backup-row">
-      <button class="btn btn-orange btn-sm" onclick="syncUp()" id="sync-up-btn" style="flex:1;margin:0;gap:6px">☁️ Subir a Drive</button>
-      <button class="btn btn-dark btn-sm" onclick="syncDown()" id="sync-down-btn" style="flex:1;margin:0;gap:6px">⬇️ Bajar de Drive</button>
+      <button class="btn btn-orange btn-sm" onclick="syncUp()" id="sync-up-btn" style="flex:1;margin:0">☁️ Subir a Drive</button>
+      <button class="btn btn-dark btn-sm" onclick="syncDown()" id="sync-down-btn" style="flex:1;margin:0">⬇️ Bajar de Drive</button>
     </div>
     <div id="sync-last" style="font-size:10px;color:var(--text2);text-align:center;margin-bottom:10px;font-weight:600"></div>
     <div style="height:1px;background:var(--border);margin-bottom:10px"></div>
@@ -1038,101 +1072,70 @@ function restoreBackup(input){const f=input.files[0];if(!f)return;const r=new Fi
 function exportExcel(){const h=['Fecha','Ticker','Posicion','Margen','Entrada','Actual','Apalancamiento','Temporalidad','Estrategia','Salida','Timing','Resultado%','PnL$','Abierto','10%','Observaciones'];const rows=D.trades.map(t=>[t.fecha,t.ticker,t.pos,t.margen,t.entrada||'',t.actual||'',t.lev,t.temp,t.estrategia,t.salida||'',t.timing||'',t.resultado.toFixed(2),(t.margen*t.resultado/100).toFixed(2),t.open?'SI':'NO',t.p10?'SI':'NO',t.obs||'']);const csv=[h,...rows].map(r=>r.map(v=>`"${v}"`).join(',')).join('\n');const b=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8;'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='trading_journal.csv';a.click();}
 
 // ══ GOOGLE DRIVE SYNC ══
-function showSyncStatus(msg, color='#00c853', duration=3000){
-  const el=document.getElementById('sync-status');
-  if(!el)return;
-  el.textContent=msg;
-  el.style.color=color;
-  el.style.borderColor=color.replace(')',', .3)').replace('rgb','rgba').replace('#00c853','rgba(0,200,83,.3)').replace('#ff3d57','rgba(255,61,87,.3)').replace('#ff6b00','rgba(255,107,0,.3)');
-  el.style.background=color==='#00c853'?'rgba(0,200,83,.1)':color==='#ff3d57'?'rgba(255,61,87,.1)':'rgba(255,107,0,.1)';
+function showSyncStatus(msg,color,duration){
+  const el=document.getElementById('sync-status');if(!el)return;
+  el.textContent=msg;el.style.color=color;
+  const bg={'#00c853':'rgba(0,200,83,.1)','#ff3d57':'rgba(255,61,87,.1)','#ff6b00':'rgba(255,107,0,.1)'};
+  const br={'#00c853':'rgba(0,200,83,.3)','#ff3d57':'rgba(255,61,87,.3)','#ff6b00':'rgba(255,107,0,.3)'};
+  el.style.background=bg[color]||'rgba(255,107,0,.1)';
+  el.style.border='1px solid '+(br[color]||'rgba(255,107,0,.3)');
   el.style.display='block';
   if(duration>0)setTimeout(()=>{if(el)el.style.display='none';},duration);
 }
-
 function updateSyncLastTime(){
-  const el=document.getElementById('sync-last');
-  if(!el)return;
+  const el=document.getElementById('sync-last');if(!el)return;
   const ts=localStorage.getItem('tpro_sync_ts');
-  if(ts){
-    const d=new Date(parseInt(ts));
-    el.textContent=`Última sync: ${d.toLocaleDateString('es-AR')} ${d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})}`;
-  } else {
-    el.textContent='Sin sincronización previa';
-  }
+  if(ts){const d=new Date(parseInt(ts));el.textContent='Última sync: '+d.toLocaleDateString('es-AR')+' '+d.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});}
+  else el.textContent='Sin sincronización previa';
 }
-
 async function syncUp(){
   const btn=document.getElementById('sync-up-btn');
-  btn.disabled=true;
-  btn.textContent='☁️ Subiendo...';
+  btn.disabled=true;btn.textContent='☁️ Subiendo...';
   showSyncStatus('⏳ Subiendo datos a Drive...','#ff6b00',-1);
   try{
     const payload=JSON.stringify(D);
-    // Use no-cors for local file fallback, but Apps Script needs cors
-    const resp=await fetch(SYNC_URL+'?action=save',{
-      method:'POST',
-      headers:{'Content-Type':'text/plain'},
-      body:payload
-    });
-    const text=await resp.text();
-    let result;
-    try{result=JSON.parse(text);}catch{result={ok:true};}
+    const resp=await fetch(SYNC_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:payload});
+    const result=await resp.json();
     if(result.error)throw new Error(result.error);
     localStorage.setItem('tpro_sync_ts',Date.now().toString());
     updateSyncLastTime();
-    showSyncStatus(`✅ ${D.trades.length} trades subidos correctamente`,'#00c853');
+    showSyncStatus('✅ '+D.trades.length+' trades subidos correctamente','#00c853',3000);
   }catch(e){
-    // Fallback: try GET with encoded data (for CORS-restricted environments)
+    // fallback GET
     try{
-      const encoded=encodeURIComponent(JSON.stringify(D));
-      await fetch(`${SYNC_URL}?action=save&data=${encoded}`);
+      const enc=encodeURIComponent(JSON.stringify(D));
+      const resp2=await fetch(SYNC_URL+'?action=save&data='+enc);
+      const r2=await resp2.json();
+      if(r2.error)throw new Error(r2.error);
       localStorage.setItem('tpro_sync_ts',Date.now().toString());
       updateSyncLastTime();
-      showSyncStatus(`✅ ${D.trades.length} trades subidos`,'#00c853');
-    }catch(e2){
-      showSyncStatus('❌ Error al subir. Verificá conexión.','#ff3d57',5000);
-    }
+      showSyncStatus('✅ '+D.trades.length+' trades subidos','#00c853',3000);
+    }catch(e2){showSyncStatus('❌ Error al subir. Verificá conexión.','#ff3d57',5000);}
   }
-  btn.disabled=false;
-  btn.textContent='☁️ Subir a Drive';
+  btn.disabled=false;btn.textContent='☁️ Subir a Drive';
 }
-
 async function syncDown(){
   const btn=document.getElementById('sync-down-btn');
-  btn.disabled=true;
-  btn.textContent='⬇️ Bajando...';
+  btn.disabled=true;btn.textContent='⬇️ Bajando...';
   showSyncStatus('⏳ Descargando datos de Drive...','#ff6b00',-1);
   try{
-    const resp=await fetch(SYNC_URL+'?action=load',{method:'GET'});
+    const resp=await fetch(SYNC_URL+'?action=load');
     const text=await resp.text();
-    let result;
-    try{result=JSON.parse(text);}catch{throw new Error('Respuesta inválida del servidor');}
-    if(result.error==='no_data'){
-      showSyncStatus('ℹ️ No hay datos en Drive todavía. Subí primero.','#ff6b00',4000);
-      btn.disabled=false;btn.textContent='⬇️ Bajar de Drive';return;
-    }
+    let result;try{result=JSON.parse(text);}catch{throw new Error('Respuesta inválida');}
+    if(result.error==='no_data'){showSyncStatus('ℹ️ No hay datos en Drive aún. Subí primero.','#ff6b00',4000);btn.disabled=false;btn.textContent='⬇️ Bajar de Drive';return;}
     if(result.error)throw new Error(result.error);
-    // result IS the data (the Apps Script returns D directly)
     const parsed=result.trades?result:null;
-    if(!parsed||!parsed.trades)throw new Error('Formato de datos inválido');
-    const localCount=D.trades.length;
-    const remoteCount=parsed.trades.length;
-    if(!confirm(`Drive tiene ${remoteCount} trades. Tu dispositivo tiene ${localCount}.\n¿Reemplazar datos locales con los de Drive?`)){
-      btn.disabled=false;btn.textContent='⬇️ Bajar de Drive';
-      showSyncStatus('','#00c853',0);return;
+    if(!parsed||!parsed.trades)throw new Error('Formato inválido');
+    if(!confirm('Drive tiene '+parsed.trades.length+' trades. Tu dispositivo tiene '+D.trades.length+'.\n¿Reemplazar datos locales con los de Drive?')){
+      btn.disabled=false;btn.textContent='⬇️ Bajar de Drive';showSyncStatus('','#00c853',0);return;
     }
-    D=parsed;
-    persist(D);
-    populateSelects();updatePreviews();updateKPIs();updateOpenCount();
+    D=parsed;persist(D);populateSelects();updatePreviews();updateKPIs();updateOpenCount();
     if(document.getElementById('page-historial').classList.contains('active')){populateFilterDropdowns();renderHistorial();}
     localStorage.setItem('tpro_sync_ts',Date.now().toString());
     updateSyncLastTime();
-    showSyncStatus(`✅ ${remoteCount} trades descargados de Drive`,'#00c853');
-  }catch(e){
-    showSyncStatus('❌ Error al bajar: '+e.message,'#ff3d57',5000);
-  }
-  btn.disabled=false;
-  btn.textContent='⬇️ Bajar de Drive';
+    showSyncStatus('✅ '+parsed.trades.length+' trades descargados de Drive','#00c853',3000);
+  }catch(e){showSyncStatus('❌ Error: '+e.message,'#ff3d57',5000);}
+  btn.disabled=false;btn.textContent='⬇️ Bajar de Drive';
 }
 
 // ══ DETAIL MODAL ══
