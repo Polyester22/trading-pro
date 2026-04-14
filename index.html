@@ -275,17 +275,23 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
       <div class="field"><label>Posición</label>
         <select id="f-pos" onchange="calcResult()"><option value="Long">Long</option><option value="Short">Short</option></select>
       </div>
-      <div class="field"><label>Margen ($)</label><input type="number" id="f-margen" placeholder="50"></div>
+      <div class="field"><label>Margen ($)</label><input type="number" id="f-margen" placeholder="50" oninput="onMargenChange()"></div>
     </div>
     <div class="row2">
       <div class="field"><label>Precio entrada</label><input type="number" id="f-entrada" placeholder="Opcional" step="any" oninput="calcResult()"></div>
-      <div class="field"><label>Precio actual/cierre</label><input type="number" id="f-actual" placeholder="Opcional" step="any" oninput="calcResult()"></div>
+      <div class="field"><label>Precio cierre/actual</label><input type="number" id="f-actual" placeholder="Opcional" step="any" oninput="calcResult()"></div>
     </div>
-    <div class="field">
-      <label>Resultado % <span style="color:var(--text2);font-weight:600;text-transform:none;font-size:10px">(auto o manual)</span></label>
-      <input type="number" id="f-resultado" placeholder="ej: 15.20 o -9.90" step="any" oninput="onResultManual()">
-      <div class="note-small" id="result-note">Ingresá precios para calcular, o escribí directo.</div>
+    <div class="row2">
+      <div class="field">
+        <label>Resultado % <span style="color:var(--text2);font-weight:600;text-transform:none;font-size:9px">(auto o manual)</span></label>
+        <input type="number" id="f-resultado" placeholder="ej: 15.20" step="any" oninput="onResultManual('pct')">
+      </div>
+      <div class="field">
+        <label>P&L $ <span style="color:var(--text2);font-weight:600;text-transform:none;font-size:9px">(auto o manual)</span></label>
+        <input type="number" id="f-pnl" placeholder="ej: 7.50" step="any" oninput="onResultManual('pnl')">
+      </div>
     </div>
+    <div class="note-small" id="result-note">Ingresá precios, R% o P&L$ — se calculan entre sí.</div>
     <div class="field"><label>Resultado en tiempo real</label><div class="result-live zero" id="result-live">— %</div></div>
     <div class="row2">
       <div class="field"><label>Apalancamiento</label><input type="number" id="f-lev" placeholder="5" min="1" max="125" value="5" oninput="calcResult()"></div>
@@ -603,12 +609,13 @@ function init(){
 }
 
 function setNowDatetime(){
+  // Use device local time (works correctly on any device timezone)
   const now=new Date();
-  // For date-only display (new trade default)
-  document.getElementById('f-fecha').value=now.toISOString().slice(0,10);
-  // For datetime-local (used in edit mode and stored)
-  const local=new Date(now.getTime()-now.getTimezoneOffset()*60000).toISOString().slice(0,16);
-  document.getElementById('f-fechahora').value=local;
+  const pad=n=>String(n).padStart(2,'0');
+  const dateStr=`${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}`;
+  const timeStr=`${pad(now.getHours())}:${pad(now.getMinutes())}`;
+  document.getElementById('f-fecha').value=dateStr;
+  document.getElementById('f-fechahora').value=`${dateStr}T${timeStr}`;
 }
 
 // Extract just the date part (YYYY-MM-DD) from either input
@@ -741,8 +748,72 @@ function sortBy(col){if(sortCol===col)sortDir*=-1;else{sortCol=col;sortDir=-1;}r
 // ══ CALC RESULT ══
 function calcPct(en,ac,pos,lev){if(!en||!ac||en===0)return null;let p=((ac-en)/en)*100*(lev||1);if(pos==='Short')p=-p;return p;}
 function applyLive(pct,elId='result-live'){const el=document.getElementById(elId);if(pct===null){el.textContent='— %';el.className='result-live zero';return;}el.textContent=(pct>=0?'+':'')+pct.toFixed(2)+'%';el.className='result-live '+(pct>0?'pos':pct<0?'neg':'zero');}
-function calcResult(){if(resultManualMode)return;const pct=calcPct(parseFloat(document.getElementById('f-entrada').value),parseFloat(document.getElementById('f-actual').value),document.getElementById('f-pos').value,parseFloat(document.getElementById('f-lev').value));if(pct!==null){document.getElementById('f-resultado').value=pct.toFixed(2);applyLive(pct);document.getElementById('result-note').textContent='✅ Calculado automáticamente.';}else{applyLive(null);document.getElementById('result-note').textContent='Ingresá precios para calcular, o escribí directo.';}}
-function onResultManual(){const v=parseFloat(document.getElementById('f-resultado').value);if(!isNaN(v)){resultManualMode=true;applyLive(v);document.getElementById('result-note').textContent='✏️ Resultado editado manualmente.';}else{resultManualMode=false;calcResult();}}
+function calcResult(){
+  if(resultManualMode)return;
+  const pct=calcPct(
+    parseFloat(document.getElementById('f-entrada').value),
+    parseFloat(document.getElementById('f-actual').value),
+    document.getElementById('f-pos').value,
+    parseFloat(document.getElementById('f-lev').value)
+  );
+  if(pct!==null){
+    document.getElementById('f-resultado').value=pct.toFixed(2);
+    const margen=parseFloat(document.getElementById('f-margen').value)||0;
+    if(margen) document.getElementById('f-pnl').value=(margen*pct/100).toFixed(2);
+    applyLive(pct);
+    // calc precio de salida from entry + pct
+    _updatePrecioSalida(pct);
+    document.getElementById('result-note').textContent='✅ Calculado desde precios.';
+  } else {
+    applyLive(null);
+    document.getElementById('result-note').textContent='Ingresá precios, R% o P&L$ — se calculan entre sí.';
+  }
+}
+
+function onResultManual(source){
+  const margen=parseFloat(document.getElementById('f-margen').value)||0;
+  if(source==='pct'){
+    const v=parseFloat(document.getElementById('f-resultado').value);
+    if(!isNaN(v)){
+      resultManualMode=true;
+      applyLive(v);
+      if(margen) document.getElementById('f-pnl').value=(margen*v/100).toFixed(2);
+      _updatePrecioSalida(v);
+      document.getElementById('result-note').textContent='✏️ R% ingresado manualmente.';
+    } else { resultManualMode=false; calcResult(); }
+  } else if(source==='pnl'){
+    const pnlVal=parseFloat(document.getElementById('f-pnl').value);
+    if(!isNaN(pnlVal)&&margen){
+      resultManualMode=true;
+      const pct=(pnlVal/margen)*100;
+      document.getElementById('f-resultado').value=pct.toFixed(2);
+      applyLive(pct);
+      _updatePrecioSalida(pct);
+      document.getElementById('result-note').textContent='✏️ P&L$ ingresado — R% calculado.';
+    } else { resultManualMode=false; calcResult(); }
+  }
+}
+
+function _updatePrecioSalida(pct){
+  // If entry price is known, back-calculate exit price
+  const entrada=parseFloat(document.getElementById('f-entrada').value);
+  const lev=parseFloat(document.getElementById('f-lev').value)||1;
+  const pos=document.getElementById('f-pos').value;
+  if(!entrada||!lev)return;
+  const rawPct=pos==='Short'?-pct/lev:pct/lev;
+  const salida=entrada*(1+rawPct/100);
+  if(salida>0&&isFinite(salida)){
+    document.getElementById('f-actual').value=salida.toFixed(salida>=100?2:salida>=1?4:6);
+  }
+}
+// onResultManual defined above
+function onMargenChange(){
+  const margen=parseFloat(document.getElementById('f-margen').value)||0;
+  const pct=parseFloat(document.getElementById('f-resultado').value);
+  if(margen&&!isNaN(pct))
+    document.getElementById('f-pnl').value=(margen*pct/100).toFixed(2);
+  calcResult();
+}
 
 // ══ SAVE TRADE ══
 function saveTrade(){
@@ -793,6 +864,7 @@ function loadTradeForEdit(id){
     document.getElementById('f-10p').checked=t.p10||false;
     document.getElementById('f-obs').value=t.obs||'';
     document.getElementById('f-resultado').value=t.resultado;
+    document.getElementById('f-pnl').value=t.margen?((t.margen*t.resultado)/100).toFixed(2):'';
     applyLive(t.resultado);
     document.getElementById('result-note').textContent='✏️ Podés editar manual o actualizar precios.';
     document.getElementById('btn-save').innerHTML='💾 Guardar cambios';
@@ -801,7 +873,7 @@ function loadTradeForEdit(id){
 }
 function resetForm(){
   editingId=null;resultManualMode=false;
-  ['f-ticker','f-margen','f-entrada','f-actual','f-obs','f-resultado'].forEach(id=>document.getElementById(id).value='');
+  ['f-ticker','f-margen','f-entrada','f-actual','f-obs','f-resultado','f-pnl'].forEach(id=>document.getElementById(id).value='');
   document.getElementById('f-lev').value=5;
   document.getElementById('f-open').checked=false;
   document.getElementById('f-10p').checked=false;
@@ -812,7 +884,7 @@ function resetForm(){
   document.getElementById('f-hora-label').style.display='none';
   setNowDatetime();
   applyLive(null);
-  document.getElementById('result-note').textContent='Ingresá precios para calcular, o escribí directo.';
+  document.getElementById('result-note').textContent='Ingresá precios, R% o P&L$ — se calculan entre sí.';
   document.getElementById('btn-save').innerHTML='➕ Agregar Trade';
   document.getElementById('btn-cancel').style.display='none';
   document.getElementById('edit-banner').style.display='none';
@@ -1242,10 +1314,28 @@ function renderGraficos(){
   const tpPct=n?(tpCount/n*100).toFixed(0):0;
   const bySalida={};T.filter(t=>t.salida).forEach(t=>{bySalida[t.salida]=(bySalida[t.salida]||0)+1;});const mxE=Math.max(...Object.values(bySalida),1);
   const byStrat={};T.forEach(t=>{if(!byStrat[t.estrategia])byStrat[t.estrategia]=[];byStrat[t.estrategia].push(t.resultado);});
-  const stratData=Object.entries(byStrat).map(([k,v])=>({name:k,avg:v.reduce((a,x)=>a+x,0)/v.length,count:v.length,wins:v.filter(x=>x>0).length})).sort((a,b)=>b.avg-a.avg);
+  const stratData=Object.entries(byStrat).map(([k,v])=>{
+    const avg=v.reduce((a,x)=>a+x,0)/v.length;
+    const wins=v.filter(x=>x>0).length;
+    const wr=wins/v.length;
+    const avgWinS=wins?v.filter(x=>x>0).reduce((a,x)=>a+x,0)/wins:0;
+    const avgLossS=v.length-wins?v.filter(x=>x<=0).reduce((a,x)=>a+x,0)/(v.length-wins):0;
+    const ev=wr*avgWinS+(1-wr)*avgLossS;
+    return{name:k,avg,count:v.length,wins,ev};
+  }).sort((a,b)=>b.ev-a.ev);
   const mxS=Math.max(...stratData.map(d=>Math.abs(d.avg)),1);
+  // Ticker rank: sort by EV-weighted score (avg × √trades) to reward consistency
   const byTicker={};T.forEach(t=>{if(!byTicker[t.ticker])byTicker[t.ticker]=[];byTicker[t.ticker].push(t.resultado);});
-  const tickerRank=Object.entries(byTicker).map(([k,v])=>({name:k,avg:v.reduce((a,x)=>a+x,0)/v.length,count:v.length,wins:v.filter(x=>x>0).length})).sort((a,b)=>b.avg-a.avg).slice(0,8);
+  const tickerRank=Object.entries(byTicker).map(([k,v])=>{
+    const avg=v.reduce((a,x)=>a+x,0)/v.length;
+    const wr=v.filter(x=>x>0).length/v.length;
+    const lossRate=1-wr;
+    const avgWinT=v.filter(x=>x>0).length?v.filter(x=>x>0).reduce((a,x)=>a+x,0)/v.filter(x=>x>0).length:0;
+    const avgLossT=v.filter(x=>x<0).length?v.filter(x=>x<0).reduce((a,x)=>a+x,0)/v.filter(x=>x<0).length:0;
+    const ev=wr*avgWinT+lossRate*avgLossT;
+    const score=ev*Math.sqrt(v.length); // weight by volume
+    return{name:k,avg,count:v.length,wins:v.filter(x=>x>0).length,wr,ev,score};
+  }).sort((a,b)=>b.score-a.score).slice(0,10);
   const byTemp={};T.forEach(t=>{if(!byTemp[t.temp])byTemp[t.temp]=[];byTemp[t.temp].push(t.resultado);});
   const tempData=Object.entries(byTemp).map(([k,v])=>{const w=v.filter(x=>x>0).length;const ev2=(w/v.length)*v.filter(x=>x>0).reduce((a,x)=>a+x,0)/Math.max(w,1)+(v.length-w)/v.length*v.filter(x=>x<=0).reduce((a,x)=>a+x,0)/Math.max(v.length-w,1);return{name:k,avg:v.reduce((a,x)=>a+x,0)/v.length,count:v.length,wins:w,wr:(w/v.length*100),ev:ev2};}).sort((a,b)=>b.ev-a.ev);
   const mxT=Math.max(...tempData.map(d=>Math.abs(d.avg)),1);
@@ -1263,6 +1353,25 @@ function renderGraficos(){
   // Timing stats
   const timingData=computeTimingStats(T);
   const mxTiming=timingData.length?Math.max(...timingData.map(d=>Math.abs(d.avg)),1):1;
+  // Trade duration stats (for closed trades with fechahora)
+  const durData=T.filter(t=>!t.open&&t.fechahora).map(t=>{
+    const opened=new Date(t.fechahora);
+    // estimate close: use actual date (fecha) + guess noon if no close time stored
+    const closed=new Date(t.fecha+'T12:00:00');
+    const diffMins=Math.max(0,(closed-opened)/(1000*60));
+    return{mins:diffMins,resultado:t.resultado,pos:t.pos,temp:t.temp};
+  }).filter(d=>d.mins>0&&d.mins<43200); // ignore >30 days (data error)
+  const avgDurMins=durData.length?durData.reduce((s,d)=>s+d.mins,0)/durData.length:null;
+  function fmtDur(mins){
+    if(mins===null)return'—';
+    if(mins<60)return Math.round(mins)+'m';
+    if(mins<1440)return Math.round(mins/60)+'h '+Math.round(mins%60)+'m';
+    return Math.round(mins/1440)+'d '+Math.round((mins%1440)/60)+'h';
+  }
+  const winDur=durData.filter(d=>d.resultado>0);
+  const lossDur=durData.filter(d=>d.resultado<0);
+  const avgWinDur=winDur.length?winDur.reduce((s,d)=>s+d.mins,0)/winDur.length:null;
+  const avgLossDur=lossDur.length?lossDur.reduce((s,d)=>s+d.mins,0)/lossDur.length:null;
   // Equity
   const eqPts=[0,...s.sorted.map((()=>{let c=0;return t=>(c+=t.resultado,c);})())];
   // Insights
@@ -1270,8 +1379,8 @@ function renderGraficos(){
   if(s.rr>0)insights.push({icon:'⚖️',text:`Ratio R/B: ${s.rr.toFixed(2)}`,sub:s.rr>=2?'✅ Ganás más del doble de lo que perdés':s.rr>=1?'🟡 Ganás más de lo que perdés':'🔴 Perdés más de lo que ganás'});
   if(s.streak.current!==0)insights.push({icon:s.streak.current>0?'🔥':'❄️',text:`Racha actual: ${Math.abs(s.streak.current)} ${s.streak.current>0?'ganadores':'perdedores'}`,sub:`Mejor racha ganadora: ${s.streak.bestWin} · Peor perdedora: ${s.streak.bestLoss}`});
   const open=T.filter(t=>t.open);if(open.length)insights.push({icon:'🟢',text:`${open.length} trade${open.length>1?'s':''} abierto${open.length>1?'s':''}`,sub:open.map(t=>t.ticker+'('+t.pos+')').join(', ')});
-  if(stratData.length)insights.push({icon:'🏆',text:`Mejor estrategia: ${stratData[0].name} (${stratData[0].avg>=0?'+':''}${stratData[0].avg.toFixed(1)}%)`,sub:`${stratData[0].count} trades · WR ${(stratData[0].wins/stratData[0].count*100).toFixed(0)}%`});
-  if(tickerRank.length)insights.push({icon:'💎',text:`Mejor ticker: ${tickerRank[0].name} (${tickerRank[0].avg>=0?'+':''}${tickerRank[0].avg.toFixed(1)}%)`,sub:`${tickerRank[0].count} trades · WR ${(tickerRank[0].wins/tickerRank[0].count*100).toFixed(0)}%`});
+  if(stratData.length)insights.push({icon:'🏆',text:`Mejor estrategia: ${stratData[0].name} (EV ${stratData[0].ev>=0?'+':''}${stratData[0].ev.toFixed(1)}%)`,sub:`${stratData[0].count} trades · WR ${(stratData[0].wins/stratData[0].count*100).toFixed(0)}%`});
+  if(tickerRank.length)insights.push({icon:'💎',text:`Mejor ticker: ${tickerRank[0].name} (EV ${tickerRank[0].ev>=0?'+':''}${tickerRank[0].ev.toFixed(1)}%)`,sub:`${tickerRank[0].count} trades · WR ${(tickerRank[0].wr*100).toFixed(0)}%`});
   if(tempData.length)insights.push({icon:'⏱️',text:`Mejor timeframe: ${tempData[0].name} (EV ${tempData[0].ev>=0?'+':''}${tempData[0].ev.toFixed(1)}%)`,sub:`${tempData[0].count} trades · WR ${tempData[0].wr.toFixed(0)}%`});
 
   el.innerHTML=`<div class="desktop-grid">
@@ -1300,11 +1409,19 @@ function renderGraficos(){
       <div class="stat-card" onclick="openDetail('wr')" style="padding:10px"><div class="stat-lbl">Win Rate</div><div class="stat-v" style="font-size:26px;color:${s.winRate>=.5?'#00c853':'#ff3d57'}">${(s.winRate*100).toFixed(0)}%</div></div>
       <div class="stat-card" onclick="openDetail('pnl')" style="padding:10px"><div class="stat-lbl">P&L Total $</div><div class="stat-v" style="font-size:22px;color:${s.totalPnl>=0?'#00c853':'#ff3d57'}">${s.totalPnl>=0?'+':''}$${s.totalPnl.toFixed(0)}</div></div>
       <div class="stat-card" style="cursor:default;padding:10px"><div class="stat-lbl">Ratio R/B</div><div class="stat-v" style="font-size:26px;color:${s.rr>=1?'#00c853':'#ff3d57'}">${s.rr.toFixed(2)}</div></div>
-      <div class="stat-card" style="cursor:default;padding:10px"><div class="stat-lbl">Llegaron 10%</div><div class="stat-v" style="font-size:22px;color:#ffd100">${p10c} <span style="font-size:14px">(${n?(p10c/n*100).toFixed(0):0}%)</span></div></div>
+      <div class="stat-card" style="cursor:default;padding:10px"><div class="stat-lbl">Llegaron 10%</div><div class="stat-v" style="font-size:18px;color:#ffd100">${p10c} de ${n}<br><span style="font-size:13px">(${n?(p10c/n*100).toFixed(0):0}%)</span></div></div>
       <div class="stat-card" style="cursor:default;padding:10px"><div class="stat-lbl">Avg Ganador</div><div class="stat-v" style="font-size:24px;color:#00c853">+${s.avgWin.toFixed(1)}%</div></div>
       <div class="stat-card" style="cursor:default;padding:10px"><div class="stat-lbl">Avg Perdedor</div><div class="stat-v" style="font-size:24px;color:#ff3d57">${s.avgLoss.toFixed(1)}%</div></div>
       <div class="stat-card" style="cursor:default;padding:10px"><div class="stat-lbl">Long avg</div><div class="stat-v" style="font-size:24px;color:${(avgLong||0)>=0?'#00c853':'#ff3d57'}">${avgLong!==null?(avgLong>=0?'+':'')+avgLong.toFixed(1)+'%':'—'}</div></div>
       <div class="stat-card" style="cursor:default;padding:10px"><div class="stat-lbl">Short avg</div><div class="stat-v" style="font-size:24px;color:${(avgShort||0)>=0?'#00c853':'#ff3d57'}">${avgShort!==null?(avgShort>=0?'+':'')+avgShort.toFixed(1)+'%':'—'}</div></div>
+      <div class="stat-card" style="cursor:default;padding:10px"><div class="stat-lbl">⏱ Duración promedio</div><div class="stat-v" style="font-size:20px;color:#ff6b00">${fmtDur(avgDurMins)}</div></div>
+      <div class="stat-card" style="cursor:default;padding:10px">
+        <div class="stat-lbl">⏱ Dur. Win / Loss</div>
+        <div style="display:flex;justify-content:space-around;margin-top:4px">
+          <div style="text-align:center"><div style="font-size:9px;color:#00c853;font-weight:700">WIN</div><div style="font-size:14px;font-weight:900;color:#00c853">${fmtDur(avgWinDur)}</div></div>
+          <div style="text-align:center"><div style="font-size:9px;color:#ff3d57;font-weight:700">LOSS</div><div style="font-size:14px;font-weight:900;color:#ff3d57">${fmtDur(avgLossDur)}</div></div>
+        </div>
+      </div>
     </div>
   </div></div>
 
@@ -1367,13 +1484,17 @@ function renderGraficos(){
   <div>
   <div class="chart-box" style="cursor:default">
     <div class="chart-label">⚙️ Estrategias — resultado promedio</div>
-    ${stratData.map(d=>`<div class="bar-row"><div class="bar-name" title="${d.name}">${d.name}</div><div class="bar-track"><div class="bar-fill ${d.avg>=0?'pos':'neg'}" style="width:${Math.abs(d.avg)/mxS*100}%">${Math.abs(d.avg)>2?(d.avg>=0?'+':'')+d.avg.toFixed(1)+'%':''}</div></div><div class="bar-count">${d.count}t</div></div>`).join('')}
+    ${stratData.map(d=>{
+      const w=mxS>0?Math.max(Math.abs(d.avg)/mxS*100,3):3;
+      const label=(d.avg>=0?'+':'')+d.avg.toFixed(1)+'%';
+      return`<div class="bar-row"><div class="bar-name" title="${d.name}">${d.name}</div><div class="bar-track"><div class="bar-fill ${d.avg>=0?'pos':'neg'}" style="width:${w}%">${w>15?label:''}</div></div><div style="font-size:10px;font-weight:800;color:${d.avg>=0?'#00c853':'#ff3d57'};width:50px;text-align:right;flex-shrink:0">${label}</div><div class="bar-count">${d.count}t</div></div>`;
+    }).join('')}
   </div></div>
 
   <div>
   <div class="chart-box" style="cursor:default">
     <div class="chart-label">⚙️ Estrategias — win rate</div>
-    ${stratData.map(d=>{const wr=d.count?d.wins/d.count*100:0;return`<div class="bar-row"><div class="bar-name" title="${d.name}">${d.name}</div><div class="bar-track"><div class="bar-fill ${wr>=50?'pos':'neg'}" style="width:${wr}%">${wr>10?wr.toFixed(0)+'%':''}</div></div><div class="bar-count">${d.count}t</div></div>`;}).join('')}
+    ${stratData.map(d=>{const wr=d.count?d.wins/d.count*100:0;return`<div class="bar-row"><div class="bar-name" title="${d.name}">${d.name}</div><div class="bar-track"><div class="bar-fill ${wr>=50?'pos':'neg'}" style="width:${Math.max(wr,3)}%">${wr>20?wr.toFixed(0)+'%':''}</div></div><div style="font-size:10px;font-weight:800;color:${wr>=50?'#00c853':'#ff3d57'};width:36px;text-align:right;flex-shrink:0">${wr.toFixed(0)}%</div><div class="bar-count">${d.count}t</div></div>`;}).join('')}
   </div></div>
 
   <!-- ⑤ MOTIVOS SALIDA -->
@@ -1450,13 +1571,26 @@ function renderGraficos(){
   <!-- ⑨ RANKING TICKERS -->
   <div class="desktop-col-full">
   <div class="chart-box" style="cursor:default">
-    <div class="chart-label">🏅 Ranking tickers — mejor rendimiento promedio</div>
-    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:6px">
-    ${tickerRank.map((d,i)=>{const wr=d.count?d.wins/d.count*100:0;return`<div style="background:var(--surface2);border-radius:8px;padding:10px;display:flex;align-items:center;gap:10px">
-      <div style="font-size:18px;font-weight:900;color:#ff6b00;width:22px">${i+1}</div>
-      <div style="flex:1"><div style="font-size:14px;font-weight:800">${d.name}</div><div style="font-size:10px;color:var(--text2)">${d.count}t · WR ${wr.toFixed(0)}%</div></div>
-      <div style="font-size:15px;font-weight:900" class="${d.avg>=0?'pos':'neg'}">${d.avg>=0?'+':''}${d.avg.toFixed(1)}%</div>
-    </div>`;}).join('')}
+    <div class="chart-label">🏅 Ranking tickers — por EV ponderado (rendimiento × volumen)</div>
+    <div style="font-size:10px;color:var(--text2);margin-bottom:10px">Ordenado por EV × √trades — penaliza tickers con pocas operaciones y premia consistencia</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:6px">
+    ${tickerRank.map((d,i)=>{
+      const wrPct=(d.wr*100).toFixed(0);
+      const evColor=d.ev>=0?'#00c853':'#ff3d57';
+      const medal=i===0?'🥇':i===1?'🥈':i===2?'🥉':'';
+      return`<div style="background:var(--surface2);border-radius:10px;padding:10px;display:flex;align-items:center;gap:10px">
+        <div style="font-size:20px;font-weight:900;color:#ff6b00;width:28px;text-align:center">${medal||i+1}</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:15px;font-weight:900">${d.name}</div>
+          <div style="font-size:10px;color:var(--text2);margin-top:2px">${d.count} trade${d.count>1?'s':''} · WR ${wrPct}%</div>
+          <div style="font-size:10px;color:var(--text2)">Avg ${d.avg>=0?'+':''}${d.avg.toFixed(1)}%</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:16px;font-weight:900;color:${evColor}">EV ${d.ev>=0?'+':''}${d.ev.toFixed(1)}%</div>
+          <div style="font-size:9px;color:var(--text2);margin-top:2px">score ${d.score>=0?'+':''}${d.score.toFixed(0)}</div>
+        </div>
+      </div>`;
+    }).join('')}
     </div>
   </div></div>
 
