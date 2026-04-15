@@ -350,6 +350,87 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
   </div>
 </div>
 
+
+  <!-- GESTIÓN DE RIESGO -->
+  <div class="card" id="risk-guide-card">
+    <div class="section-header">
+      <div class="section-title">🛡️ Gestión de Riesgo</div>
+      <button class="btn btn-dark btn-sm" onclick="toggleRiskGuide()">Ver guía</button>
+    </div>
+    <div id="risk-guide-content" style="display:none">
+
+      <!-- REGLA 1 -->
+      <div style="background:var(--surface2);border-radius:10px;padding:14px;margin-bottom:10px;border-left:3px solid #ff6b00">
+        <div style="font-size:13px;font-weight:900;color:#ff6b00;margin-bottom:6px">📏 Regla 1 — Riesgo por trade</div>
+        <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:4px">Nunca arriesgues más del 1-2% de tu capital total en un solo trade.</div>
+        <div style="font-size:11px;color:var(--text2);line-height:1.6">Si tu cuenta tiene $1.000, tu margen máximo por trade debería ser $10-$20. Con apalancamiento 5x, eso te da $50-$100 de exposición. Así podés perder 10 trades seguidos y seguir operando.</div>
+        <div id="risk-calc-box" style="margin-top:10px">
+          <div style="font-size:11px;font-weight:700;color:var(--text2);margin-bottom:6px">CALCULÁ TU RIESGO MÁXIMO</div>
+          <div class="row2">
+            <div class="field" style="margin:0">
+              <label>Capital ($)</label>
+              <input type="number" id="rc-capital" placeholder="1000" oninput="calcRiskGuide()" style="font-size:13px;padding:8px 10px">
+            </div>
+            <div class="field" style="margin:0">
+              <label>Riesgo %</label>
+              <select id="rc-pct" onchange="calcRiskGuide()" style="font-size:13px;padding:8px 10px">
+                <option value="1">1% (conservador)</option>
+                <option value="2" selected>2% (moderado)</option>
+                <option value="3">3% (agresivo)</option>
+              </select>
+            </div>
+          </div>
+          <div id="rc-result" style="background:var(--input-bg);border-radius:8px;padding:10px;margin-top:8px;font-size:12px;color:var(--text2);text-align:center">Ingresá tu capital para calcular</div>
+        </div>
+      </div>
+
+      <!-- REGLA 2 -->
+      <div style="background:var(--surface2);border-radius:10px;padding:14px;margin-bottom:10px;border-left:3px solid #00c853">
+        <div style="font-size:13px;font-weight:900;color:#00c853;margin-bottom:6px">⚖️ Regla 2 — Ratio Riesgo/Beneficio</div>
+        <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:4px">Buscá trades con R/B mínimo de 1:2 (ganás el doble de lo que arriesgás).</div>
+        <div style="font-size:11px;color:var(--text2);line-height:1.6">Si tu SL está a -10%, tu TP debería estar al menos en +20%. Con un WR del 50%, un R/B de 1:2 te hace rentable. Con un WR del 40% y R/B 1:3, también sos rentable. Tu R/B actual: <span id="rg-rr" style="font-weight:900;color:#ff6b00">calculando...</span></div>
+      </div>
+
+      <!-- REGLA 3 -->
+      <div style="background:var(--surface2);border-radius:10px;padding:14px;margin-bottom:10px;border-left:3px solid #ffd100">
+        <div style="font-size:13px;font-weight:900;color:#ffd100;margin-bottom:6px">🎯 Regla 3 — Stop Loss siempre</div>
+        <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:4px">Un trade sin SL no es un trade — es una apuesta.</div>
+        <div style="font-size:11px;color:var(--text2);line-height:1.6">Tus trades cerrados por SL: <span id="rg-sl" style="font-weight:900;color:#ffd100">calculando...</span>. Un SL alto puede indicar entradas tardías o niveles mal calculados.</div>
+      </div>
+
+      <!-- REGLA 4 -->
+      <div style="background:var(--surface2);border-radius:10px;padding:14px;margin-bottom:10px;border-left:3px solid #ff3d57">
+        <div style="font-size:13px;font-weight:900;color:#ff3d57;margin-bottom:6px">🚫 Regla 4 — Drawdown máximo diario</div>
+        <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:4px">Si perdés 3% de tu capital en un día, pará de operar.</div>
+        <div style="font-size:11px;color:var(--text2);line-height:1.6">Las rachas perdedoras son normales, pero operar emocionalmente las amplifica. Definí un límite diario y respetalo. Tu racha perdedora máxima registrada: <span id="rg-streak" style="font-weight:900;color:#ff3d57">calculando...</span> trades consecutivos.</div>
+      </div>
+
+      <!-- REGLA 5 -->
+      <div style="background:var(--surface2);border-radius:10px;padding:14px;margin-bottom:10px;border-left:3px solid #00aaff">
+        <div style="font-size:13px;font-weight:900;color:#00aaff;margin-bottom:6px">📊 Regla 5 — Diversificación de trades</div>
+        <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:4px">No abras más de 3-4 trades simultáneos con el mismo capital en riesgo.</div>
+        <div style="font-size:11px;color:var(--text2);line-height:1.6">Cuando el mercado se mueve en una dirección, todos los activos cripto tienden a moverse juntos (correlación alta). Tener 5 trades long en simultáneo no diversifica — multiplica el riesgo.</div>
+      </div>
+
+      <!-- SIZING FORMULA -->
+      <div style="background:rgba(255,107,0,.08);border:1px solid rgba(255,107,0,.3);border-radius:10px;padding:14px">
+        <div style="font-size:13px;font-weight:900;color:#ff6b00;margin-bottom:8px">📐 Fórmula de sizing</div>
+        <div style="font-family:monospace;font-size:12px;background:var(--input-bg);border-radius:6px;padding:10px;color:var(--text);line-height:2">
+          Margen = (Capital × Riesgo%) ÷ (SL% × Apalancamiento)<br>
+          <span style="color:var(--text2)">Ej: ($1000 × 2%) ÷ (10% × 5x) = $4 de margen</span>
+        </div>
+        <div class="row2" style="margin-top:10px">
+          <div class="field" style="margin:0"><label>Capital $</label><input type="number" id="sz-cap" placeholder="1000" oninput="calcSizing()" style="font-size:13px;padding:8px 10px"></div>
+          <div class="field" style="margin:0"><label>Riesgo %</label><input type="number" id="sz-risk" placeholder="2" step="0.1" oninput="calcSizing()" style="font-size:13px;padding:8px 10px"></div>
+          <div class="field" style="margin:0"><label>SL %</label><input type="number" id="sz-sl" placeholder="10" step="0.1" oninput="calcSizing()" style="font-size:13px;padding:8px 10px"></div>
+          <div class="field" style="margin:0"><label>Apal.</label><input type="number" id="sz-lev" placeholder="5" oninput="calcSizing()" style="font-size:13px;padding:8px 10px"></div>
+        </div>
+        <div id="sz-result" style="background:var(--input-bg);border-radius:8px;padding:10px;margin-top:8px;font-size:13px;color:var(--text2);text-align:center">Completá los campos para calcular</div>
+      </div>
+
+    </div>
+  </div>
+
 <!-- ══ HISTORIAL ══ -->
 <div class="page" id="page-historial">
   <!-- hidden date inputs, controlled via modal -->
@@ -422,6 +503,7 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
     <div style="font-size:12px;color:var(--text2);font-weight:700">Tocá un trade para editarlo</div>
     <button onclick="refreshPrices()" id="refresh-btn" class="btn btn-dark btn-sm" style="gap:6px">⟳ Actualizar precios</button>
   </div>
+  <div id="whatif-summary" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:10px"></div>
   <div id="open-trades-list"></div>
   <div id="open-empty" style="display:none" class="empty-state">
     <div class="empty-icon">🟢</div>
@@ -971,8 +1053,14 @@ function renderOpenTrades(){
         </div>
       </div>
       ${t.obs?`<div style="margin-top:8px;font-size:11px;color:var(--text2);font-style:italic;padding:0 2px">${t.obs}</div>`:''}
+      <div style="display:flex;gap:6px;margin-top:10px" onclick="event.stopPropagation()">
+        <button class="btn btn-dark btn-sm" style="flex:1;font-size:12px" onclick="openMCP('${t.id}',false)">📉 Cierre parcial</button>
+        <button class="btn btn-orange btn-sm" style="flex:1;font-size:12px" onclick="openMCP('${t.id}',true)">✅ Cerrar trade</button>
+      </div>
     </div>`;
   }).join('');
+  // render what-if summary
+  renderWhatIfSummary(open);
 }
 
 function fmtPriceShort(v){
@@ -1354,13 +1442,14 @@ function renderGraficos(){
   const timingData=computeTimingStats(T);
   const mxTiming=timingData.length?Math.max(...timingData.map(d=>Math.abs(d.avg)),1):1;
   // Trade duration stats (for closed trades with fechahora)
-  const durData=T.filter(t=>!t.open&&t.fechahora).map(t=>{
+  // Duration: needs both open time AND close time — use closedHora if stored, else skip
+  const durData=T.filter(t=>!t.open&&t.fechahora&&t.closedHora).map(t=>{
     const opened=new Date(t.fechahora);
-    // estimate close: use actual date (fecha) + guess noon if no close time stored
-    const closed=new Date(t.fecha+'T12:00:00');
+    const closed=new Date(t.closedHora);
     const diffMins=Math.max(0,(closed-opened)/(1000*60));
     return{mins:diffMins,resultado:t.resultado,pos:t.pos,temp:t.temp};
-  }).filter(d=>d.mins>0&&d.mins<43200); // ignore >30 days (data error)
+  }).filter(d=>d.mins>0&&d.mins<43200);
+  const durNote=durData.length===0?'(registrá trades con hora de apertura y cierre)':'';
   const avgDurMins=durData.length?durData.reduce((s,d)=>s+d.mins,0)/durData.length:null;
   function fmtDur(mins){
     if(mins===null)return'—';
@@ -1409,12 +1498,12 @@ function renderGraficos(){
       <div class="stat-card" onclick="openDetail('wr')" style="padding:10px"><div class="stat-lbl">Win Rate</div><div class="stat-v" style="font-size:26px;color:${s.winRate>=.5?'#00c853':'#ff3d57'}">${(s.winRate*100).toFixed(0)}%</div></div>
       <div class="stat-card" onclick="openDetail('pnl')" style="padding:10px"><div class="stat-lbl">P&L Total $</div><div class="stat-v" style="font-size:22px;color:${s.totalPnl>=0?'#00c853':'#ff3d57'}">${s.totalPnl>=0?'+':''}$${s.totalPnl.toFixed(0)}</div></div>
       <div class="stat-card" style="cursor:default;padding:10px"><div class="stat-lbl">Ratio R/B</div><div class="stat-v" style="font-size:26px;color:${s.rr>=1?'#00c853':'#ff3d57'}">${s.rr.toFixed(2)}</div></div>
-      <div class="stat-card" style="cursor:default;padding:10px"><div class="stat-lbl">Llegaron al 10%</div><div class="stat-v" style="font-size:18px;color:#ffd100">${p10c} de ${n}<br><span style="font-size:13px">(${n?(p10c/n*100).toFixed(0):0}%)</span></div></div>
+      <div class="stat-card" style="cursor:default;padding:10px"><div class="stat-lbl">Llegaron 10%</div><div class="stat-v" style="font-size:18px;color:#ffd100">${p10c} de ${n}<br><span style="font-size:13px">(${n?(p10c/n*100).toFixed(0):0}%)</span></div></div>
       <div class="stat-card" style="cursor:default;padding:10px"><div class="stat-lbl">Avg Ganador</div><div class="stat-v" style="font-size:24px;color:#00c853">+${s.avgWin.toFixed(1)}%</div></div>
       <div class="stat-card" style="cursor:default;padding:10px"><div class="stat-lbl">Avg Perdedor</div><div class="stat-v" style="font-size:24px;color:#ff3d57">${s.avgLoss.toFixed(1)}%</div></div>
       <div class="stat-card" style="cursor:default;padding:10px"><div class="stat-lbl">Long avg</div><div class="stat-v" style="font-size:24px;color:${(avgLong||0)>=0?'#00c853':'#ff3d57'}">${avgLong!==null?(avgLong>=0?'+':'')+avgLong.toFixed(1)+'%':'—'}</div></div>
       <div class="stat-card" style="cursor:default;padding:10px"><div class="stat-lbl">Short avg</div><div class="stat-v" style="font-size:24px;color:${(avgShort||0)>=0?'#00c853':'#ff3d57'}">${avgShort!==null?(avgShort>=0?'+':'')+avgShort.toFixed(1)+'%':'—'}</div></div>
-      <div class="stat-card" style="cursor:default;padding:10px"><div class="stat-lbl">⏱ Duración promedio</div><div class="stat-v" style="font-size:20px;color:#ff6b00">${fmtDur(avgDurMins)}</div></div>
+      <div class="stat-card" style="cursor:default;padding:10px"><div class="stat-lbl">⏱ Duración promedio</div><div class="stat-v" style="font-size:${avgDurMins?'20px':'12px'};color:${avgDurMins?'#ff6b00':'var(--text2)'}">${avgDurMins?fmtDur(avgDurMins):'Cerrá trades desde la pestaña En Curso'}</div></div>
       <div class="stat-card" style="cursor:default;padding:10px">
         <div class="stat-lbl">⏱ Dur. Win / Loss</div>
         <div style="display:flex;justify-content:space-around;margin-top:4px">
@@ -1604,5 +1693,172 @@ function equitySVG(pts){if(pts.length<2)return'';const W=340,H=100,pd=10,mn=Math
 
 init();
 </script>
+
+<!-- MODAL CIERRE PARCIAL -->
+<div class="modal-overlay" id="modal-close-partial">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title" id="mcp-title">Cerrar posición</div>
+    <div id="mcp-body">
+      <div style="background:var(--surface2);border-radius:10px;padding:12px 14px;margin-bottom:14px" id="mcp-summary"></div>
+      <div class="row2" style="margin-bottom:12px">
+        <div class="field">
+          <label>% a cerrar</label>
+          <select id="mcp-pct" onchange="mcpCalc()">
+            <option value="25">25%</option>
+            <option value="50">50%</option>
+            <option value="75">75%</option>
+            <option value="100" selected>100% (total)</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Precio de cierre</label>
+          <input type="number" id="mcp-precio" placeholder="Opcional" step="any" oninput="mcpCalc()">
+        </div>
+      </div>
+      <div id="mcp-result" style="background:var(--input-bg);border:1.5px solid var(--border);border-radius:8px;padding:12px;text-align:center;margin-bottom:14px;font-size:13px;color:var(--text2)">
+        Ingresá precio para calcular
+      </div>
+      <div class="field">
+        <label>Motivo de salida</label>
+        <select id="mcp-salida"></select>
+      </div>
+      <div class="field">
+        <label>Observaciones (opcional)</label>
+        <input type="text" id="mcp-obs" placeholder="Notas del cierre...">
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <button class="btn btn-dark" onclick="closeMCP()" style="flex:1;margin:0">Cancelar</button>
+      <button class="btn btn-orange" onclick="saveMCP()" style="flex:1;margin:0">✅ Registrar cierre</button>
+    </div>
+  </div>
+</div>
 </body>
 </html>
+<script>
+// Injected patch — partial close + what-if
+// These override/extend functions defined above
+
+// ── WHAT-IF SUMMARY ──
+function renderWhatIfSummary(openTrades){
+  const box=document.getElementById('whatif-summary');
+  const tradeable=openTrades.filter(t=>t.entrada&&(livePrices[t.ticker]||t.actual));
+  if(!tradeable.length){box.style.display='none';return;}
+  let totalPnl=0,totalMargen=0;
+  tradeable.forEach(t=>{
+    const price=livePrices[t.ticker]||t.actual||0;
+    const pct=calcPct(t.entrada,price,t.pos,t.lev);
+    if(pct!==null){totalPnl+=t.margen*pct/100;totalMargen+=t.margen;}
+  });
+  const col=totalPnl>=0?'#00c853':'#ff3d57';
+  box.style.display='block';
+  box.innerHTML=`<div style="font-size:10px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">📊 Si cerraras todo ahora</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+      <div style="text-align:center"><div style="font-size:9px;color:var(--text2);margin-bottom:3px">P&L TOTAL</div><div style="font-size:18px;font-weight:900;color:${col}">${totalPnl>=0?'+':''}$${totalPnl.toFixed(2)}</div></div>
+      <div style="text-align:center"><div style="font-size:9px;color:var(--text2);margin-bottom:3px">SOBRE MARGEN</div><div style="font-size:18px;font-weight:900;color:${col}">${totalMargen?(totalPnl/totalMargen*100>=0?'+':'')+(totalPnl/totalMargen*100).toFixed(1)+'%':'—'}</div></div>
+      <div style="text-align:center"><div style="font-size:9px;color:var(--text2);margin-bottom:3px">TRADES</div><div style="font-size:18px;font-weight:900;color:#ff6b00">${tradeable.length}</div></div>
+    </div>`;
+}
+
+// ── PARTIAL CLOSE MODAL ──
+let mcpTradeId=null, mcpFullClose=false;
+
+function openMCP(id, fullClose){
+  const t=D.trades.find(x=>x.id===id);
+  if(!t)return;
+  mcpTradeId=id; mcpFullClose=fullClose;
+  const price=livePrices[t.ticker]||t.actual||0;
+  // populate salidas
+  const sl=document.getElementById('mcp-salida');
+  sl.innerHTML='<option value="">Sin especificar</option>'+D.salidas.map(s=>`<option value="${s}">${s}</option>`).join('');
+  // pre-fill
+  document.getElementById('mcp-pct').value=fullClose?'100':'50';
+  document.getElementById('mcp-precio').value=price?price:'';
+  document.getElementById('mcp-obs').value='';
+  // title & summary
+  document.getElementById('mcp-title').textContent=fullClose?`Cerrar ${t.ticker}`:`Cierre parcial ${t.ticker}`;
+  const pct=calcPct(t.entrada,price,t.pos,t.lev);
+  const pnl=pct!==null?t.margen*pct/100:null;
+  const col=pct===null?'var(--text2)':pct>=0?'#00c853':'#ff3d57';
+  document.getElementById('mcp-summary').innerHTML=
+    `<div style="display:flex;justify-content:space-between;align-items:center">
+      <span style="font-weight:800">${t.ticker} ${t.pos} · $${t.margen} · ${t.lev}x</span>
+      <span style="font-weight:900;color:${col}">${pct!==null?(pct>=0?'+':'')+pct.toFixed(2)+'%':''} ${pnl!==null?(pnl>=0?'+':'')+'$'+pnl.toFixed(2):''}</span>
+     </div>`;
+  document.getElementById('mcp-pct').style.display=fullClose?'none':'block';
+  document.getElementById('mcp-pct').previousElementSibling.style.display=fullClose?'none':'block';
+  mcpCalc();
+  document.getElementById('modal-close-partial').classList.add('open');
+}
+
+function closeMCP(){document.getElementById('modal-close-partial').classList.remove('open');}
+
+function mcpCalc(){
+  const t=D.trades.find(x=>x.id===mcpTradeId);
+  if(!t)return;
+  const precio=parseFloat(document.getElementById('mcp-precio').value);
+  const pctClose=mcpFullClose?100:parseFloat(document.getElementById('mcp-pct').value)||100;
+  const resEl=document.getElementById('mcp-result');
+  if(!precio||!t.entrada){resEl.textContent='Ingresá precio de cierre para calcular';resEl.style.color='var(--text2)';return;}
+  const pct=calcPct(t.entrada,precio,t.pos,t.lev);
+  const margenParcial=t.margen*(pctClose/100);
+  const pnl=margenParcial*pct/100;
+  const col=pct>=0?'#00c853':'#ff3d57';
+  resEl.style.color=col;
+  resEl.innerHTML=`<span style="font-size:22px;font-weight:900">${pct>=0?'+':''}${pct.toFixed(2)}%</span>
+    <span style="font-size:16px;font-weight:800;margin-left:10px">${pnl>=0?'+':''}$${pnl.toFixed(2)}</span>
+    ${pctClose<100?`<div style="font-size:10px;color:var(--text2);margin-top:4px">Sobre $${margenParcial.toFixed(2)} (${pctClose}% del margen)</div>`:''}`;
+}
+
+function saveMCP(){
+  const t=D.trades.find(x=>x.id===mcpTradeId);
+  if(!t)return;
+  const precio=parseFloat(document.getElementById('mcp-precio').value)||t.actual||0;
+  const pctClose=mcpFullClose?100:parseFloat(document.getElementById('mcp-pct').value)||100;
+  const salida=document.getElementById('mcp-salida').value;
+  const obs=document.getElementById('mcp-obs').value;
+  const pct=precio&&t.entrada?calcPct(t.entrada,precio,t.pos,t.lev):t.resultado;
+  
+  // Store close time for duration calc
+  const now=new Date();
+  const pad=n=>String(n).padStart(2,'0');
+  const closedHora=`${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
+
+  if(mcpFullClose||pctClose===100){
+    // Full close — update existing trade
+    t.open=false;
+    t.actual=precio||t.actual;
+    t.resultado=pct||t.resultado;
+    if(salida)t.salida=salida;
+    if(obs)t.obs=obs;
+    t.closedHora=closedHora;
+    t.fecha=closedHora.slice(0,10);
+    // mark p10 if reached
+    if(pct>=10)t.p10=true;
+    // merge partial closes into avg if any exist
+    if(t.partialCloses&&t.partialCloses.length){
+      t.partialCloses.push({pct,pctClose,pnl:t.margen*(pctClose/100)*pct/100,precio,closedHora});
+      const allCloses=t.partialCloses;
+      const totalMargen=allCloses.reduce((s,c)=>s+c.pctClose,0);
+      const avgPct=totalMargen>0?allCloses.reduce((s,c)=>s+c.pct*(c.pctClose/100),0)/(totalMargen/100):pct;
+      t.resultado=avgPct;
+      t.obs=`Cierre promedio de ${allCloses.length} cierres. Último: ${obs||salida||'—'}`;
+    }
+  } else {
+    // Partial close — record it, keep trade open with remaining margin
+    if(!t.partialCloses)t.partialCloses=[];
+    t.partialCloses.push({pct,pctClose,pnl:t.margen*(pctClose/100)*pct/100,precio,closedHora,salida,obs});
+    // reduce remaining margin
+    t.margen=parseFloat((t.margen*(1-pctClose/100)).toFixed(2));
+    // update actual price
+    t.actual=precio;
+    // Add note
+    const totalClosed=t.partialCloses.reduce((s,c)=>s+c.pctClose,0);
+    t.obs=`${totalClosed}% cerrado · quedan $${t.margen}`;
+  }
+  
+  persist(D);closeMCP();updateKPIs();updateOpenCount();renderOpenTrades();
+  if(mcpFullClose||pctClose===100) setTimeout(()=>switchTab('historial'),300);
+}
+</script>
