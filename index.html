@@ -470,6 +470,8 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
           <th onclick="sortBy('pos')">Pos<span class="sort-icon" id="sort-pos">↕</span></th>
           <th onclick="sortBy('resultado')">R%<span class="sort-icon" id="sort-resultado">↕</span></th>
           <th>P&L $</th>
+          <th onclick="sortBy('margen')">Margen<span class="sort-icon" id="sort-margen">↕</span></th>
+          <th onclick="sortBy('lev')">Apal.<span class="sort-icon" id="sort-lev">↕</span></th>
           <th onclick="sortBy('temp')">Temp.<span class="sort-icon" id="sort-temp">↕</span></th>
           <th onclick="sortBy('estrategia')">Estrat.<span class="sort-icon" id="sort-estrategia">↕</span></th>
           <th onclick="sortBy('salida')">Salida<span class="sort-icon" id="sort-salida">↕</span></th>
@@ -480,7 +482,7 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
           <th><button id="flt-fecha-btn" onclick="openDateRange()" style="background:var(--input-bg);border:1px solid var(--border);border-radius:5px;color:var(--text2);cursor:pointer;font-size:11px;font-weight:700;padding:4px 6px;width:100%;text-align:left">📅 Rango</button></th>
           <th><select id="flt-ticker" onchange="renderHistorial()"><option value="">Todos</option></select></th>
           <th><select id="flt-pos" onchange="renderHistorial()"><option value="">Todos</option><option value="Long">Long</option><option value="Short">Short</option></select></th>
-          <th></th><th></th>
+          <th></th><th></th><th></th><th></th>
           <th><select id="flt-temp" onchange="renderHistorial()"><option value="">Todas</option><option value="1m">1m</option><option value="5m">5m</option><option value="15m">15m</option><option value="1h">1h</option><option value="4h">4h</option><option value="1d">1d</option></select></th>
           <th><select id="flt-estrat" onchange="renderHistorial()"><option value="">Todas</option></select></th>
           <th><select id="flt-salida" onchange="renderHistorial()"><option value="">Todas</option></select></th>
@@ -503,7 +505,7 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
     <div style="font-size:12px;color:var(--text2);font-weight:700">Tocá un trade para editarlo</div>
     <button onclick="refreshPrices()" id="refresh-btn" class="btn btn-dark btn-sm" style="gap:6px">⟳ Actualizar precios</button>
   </div>
-  <div id="whatif-summary" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:10px"></div>
+  <div id="kpi-projection" style="display:none;background:var(--surface);border:1px solid rgba(255,107,0,.4);border-radius:12px;padding:14px 16px;margin-bottom:12px"></div>
   <div id="open-trades-list"></div>
   <div id="open-empty" style="display:none" class="empty-state">
     <div class="empty-icon">🟢</div>
@@ -1059,8 +1061,8 @@ function renderOpenTrades(){
       </div>
     </div>`;
   }).join('');
-  // render what-if summary
-  renderWhatIfSummary(open);
+  // render KPI projection
+  renderKpiProjection(open);
 }
 
 function fmtPriceShort(v){
@@ -1204,7 +1206,7 @@ function renderHistorial(){
   // sort
   list.sort((a,b)=>{let av=a[sortCol]??'',bv=b[sortCol]??'';if(typeof av==='number')return(av-bv)*sortDir;return av.localeCompare(bv)*sortDir;});
   // update sort icons
-  ['fecha','ticker','pos','resultado','temp','estrategia','salida','timing'].forEach(c=>{const el=document.getElementById('sort-'+c);if(el){el.textContent=c===sortCol?(sortDir===1?'↑':'↓'):'↕';el.parentElement.classList.toggle('sorted',c===sortCol);}});
+  ['fecha','ticker','pos','resultado','temp','margen','lev','estrategia','salida','timing'].forEach(c=>{const el=document.getElementById('sort-'+c);if(el){el.textContent=c===sortCol?(sortDir===1?'↑':'↓'):'↕';el.parentElement.classList.toggle('sorted',c===sortCol);}});
   // summary bar
   const s=computeStats(list);
   const sb=document.getElementById('hist-summary');
@@ -1220,7 +1222,7 @@ function renderHistorial(){
   }else{sb.style.display='none';}
 
   const tbody=document.getElementById('trades-tbody');
-  if(!list.length){tbody.innerHTML=`<tr><td colspan="10" style="text-align:center;padding:30px;color:var(--text2)">Sin trades con esos filtros</td></tr>`;return;}
+  if(!list.length){tbody.innerHTML=`<tr><td colspan="12" style="text-align:center;padding:30px;color:var(--text2)">Sin trades con esos filtros</td></tr>`;return;}
   tbody.innerHTML=list.map(t=>{
     const pnl=(t.margen*t.resultado/100).toFixed(2);
     const rc=t.resultado>0?'pos':t.resultado<0?'neg':'neutral';
@@ -1233,6 +1235,8 @@ function renderHistorial(){
       <td><span class="badge badge-${t.pos.toLowerCase()}">${t.pos}</span></td>
       <td class="${rc}">${t.resultado>=0?'+':''}${t.resultado.toFixed(2)}%</td>
       <td class="${rc}">${parseFloat(pnl)>=0?'+':''}$${pnl}</td>
+      <td style="font-size:11px;font-weight:700;color:#ff6b00">$${t.margen||'—'}</td>
+      <td style="font-size:11px;color:var(--text2)">${t.lev||1}x</td>
       <td style="font-size:11px;color:var(--text2)">${t.temp||'—'}</td>
       <td style="font-size:11px;color:var(--text2)">${t.estrategia||'—'}</td>
       <td style="font-size:11px;color:var(--text2)">${t.salida||'—'}</td>
@@ -1740,26 +1744,7 @@ init();
 // Injected patch — partial close + what-if
 // These override/extend functions defined above
 
-// ── WHAT-IF SUMMARY ──
-function renderWhatIfSummary(openTrades){
-  const box=document.getElementById('whatif-summary');
-  const tradeable=openTrades.filter(t=>t.entrada&&(livePrices[t.ticker]||t.actual));
-  if(!tradeable.length){box.style.display='none';return;}
-  let totalPnl=0,totalMargen=0;
-  tradeable.forEach(t=>{
-    const price=livePrices[t.ticker]||t.actual||0;
-    const pct=calcPct(t.entrada,price,t.pos,t.lev);
-    if(pct!==null){totalPnl+=t.margen*pct/100;totalMargen+=t.margen;}
-  });
-  const col=totalPnl>=0?'#00c853':'#ff3d57';
-  box.style.display='block';
-  box.innerHTML=`<div style="font-size:10px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">📊 Si cerraras todo ahora</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
-      <div style="text-align:center"><div style="font-size:9px;color:var(--text2);margin-bottom:3px">P&L TOTAL</div><div style="font-size:18px;font-weight:900;color:${col}">${totalPnl>=0?'+':''}$${totalPnl.toFixed(2)}</div></div>
-      <div style="text-align:center"><div style="font-size:9px;color:var(--text2);margin-bottom:3px">SOBRE MARGEN</div><div style="font-size:18px;font-weight:900;color:${col}">${totalMargen?(totalPnl/totalMargen*100>=0?'+':'')+(totalPnl/totalMargen*100).toFixed(1)+'%':'—'}</div></div>
-      <div style="text-align:center"><div style="font-size:9px;color:var(--text2);margin-bottom:3px">TRADES</div><div style="font-size:18px;font-weight:900;color:#ff6b00">${tradeable.length}</div></div>
-    </div>`;
-}
+// what-if replaced by renderKpiProjection
 
 // ── PARTIAL CLOSE MODAL ──
 let mcpTradeId=null, mcpFullClose=false;
@@ -1861,4 +1846,135 @@ function saveMCP(){
   persist(D);closeMCP();updateKPIs();updateOpenCount();renderOpenTrades();
   if(mcpFullClose||pctClose===100) setTimeout(()=>switchTab('historial'),300);
 }
+
+// ══ KPI PROJECTION (En Curso tab) ══
+function renderKpiProjection(openTrades){
+  const box=document.getElementById('kpi-projection');
+  if(!box)return;
+  const tradeable=openTrades.filter(t=>t.entrada&&(livePrices[t.ticker]||t.actual));
+  if(!tradeable.length){box.style.display='none';return;}
+
+  // Current stats (closed trades only)
+  const current=computeStats(D.trades);
+  // Projected: all trades including open ones closed at current price
+  const projected=[...D.trades];
+  tradeable.forEach(t=>{
+    const idx=projected.findIndex(x=>x.id===t.id);
+    const price=livePrices[t.ticker]||t.actual||0;
+    const pct=calcPct(t.entrada,price,t.pos,t.lev);
+    if(pct!==null&&idx>=0){
+      projected[idx]={...projected[idx],resultado:pct,open:false};
+    }
+  });
+  const proj=computeStats(projected);
+  if(!current||!proj){box.style.display='none';return;}
+
+  function kpiDelta(cur,nw,higherBetter=true){
+    const diff=nw-cur;
+    const better=higherBetter?diff>=0:diff<=0;
+    const col=better?'#00c853':'#ff3d57';
+    const arrow=diff>0?'↑':diff<0?'↓':'→';
+    return{col,arrow,diff};
+  }
+
+  const pfCur=current.pf>=999?'∞':current.pf.toFixed(2);
+  const pfNew=proj.pf>=999?'∞':proj.pf.toFixed(2);
+  const pfD=kpiDelta(current.pf,proj.pf);
+  const wrCur=(current.winRate*100).toFixed(0)+'%';
+  const wrNew=(proj.winRate*100).toFixed(0)+'%';
+  const wrD=kpiDelta(current.winRate,proj.winRate);
+  const evCur=(current.ev>=0?'+':'')+current.ev.toFixed(1)+'%';
+  const evNew=(proj.ev>=0?'+':'')+proj.ev.toFixed(1)+'%';
+  const evD=kpiDelta(current.ev,proj.ev);
+  const ddCur=current.maxDDeq.toFixed(1)+'%';
+  const ddNew=proj.maxDDeq.toFixed(1)+'%';
+  const ddD=kpiDelta(current.maxDDeq,proj.maxDDeq,false);
+  const pnlCur=(current.totalPnl>=0?'+':'')+'$'+current.totalPnl.toFixed(2);
+  const pnlNew=(proj.totalPnl>=0?'+':'')+'$'+proj.totalPnl.toFixed(2);
+  const pnlD=kpiDelta(current.totalPnl,proj.totalPnl);
+
+  function kpiCard(label,cur,nw,d){
+    return`<div style="background:var(--surface2);border-radius:10px;padding:10px;text-align:center">
+      <div style="font-size:9px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">${label}</div>
+      <div style="font-size:15px;font-weight:900;color:var(--text2);text-decoration:line-through;opacity:.7">${cur}</div>
+      <div style="font-size:11px;color:var(--text2);margin:2px 0">${d.arrow}</div>
+      <div style="font-size:18px;font-weight:900;color:${d.col}">${nw}</div>
+    </div>`;
+  }
+
+  box.style.display='block';
+  box.innerHTML=`
+    <div style="font-size:10px;font-weight:800;color:#ff6b00;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">
+      📊 Si cerraras todo ahora — impacto en métricas
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-bottom:7px">
+      ${kpiCard('Profit Factor',pfCur,pfNew,pfD)}
+      ${kpiCard('Win Rate',wrCur,wrNew,wrD)}
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px">
+      ${kpiCard('EV / Trade',evCur,evNew,evD)}
+      ${kpiCard('Max Drawdown',ddCur,ddNew,ddD)}
+      ${kpiCard('P&L Total',pnlCur,pnlNew,pnlD)}
+    </div>`;
+}
+
+// ══ RISK GUIDE ══
+function toggleRiskGuide(){
+  const el=document.getElementById('risk-guide-content');
+  if(!el)return;
+  const btn=document.querySelector('[onclick="toggleRiskGuide()"]');
+  const open=el.style.display==='none';
+  el.style.display=open?'block':'none';
+  if(btn)btn.textContent=open?'Cerrar':'Ver guía';
+  if(open)updateRiskGuide();
+}
+
+function updateRiskGuide(){
+  const s=computeStats(D.trades);
+  if(!s)return;
+  const rrEl=document.getElementById('rg-rr');
+  if(rrEl){
+    const col=s.rr>=2?'#00c853':s.rr>=1?'#ffd100':'#ff3d57';
+    rrEl.style.color=col;
+    rrEl.textContent=s.rr.toFixed(2)+'x '+(s.rr>=2?'✅ Excelente':s.rr>=1?'🟡 Aceptable':'🔴 Mejorar');
+  }
+  const slEl=document.getElementById('rg-sl');
+  if(slEl){
+    const slN=D.trades.filter(t=>t.salida==='SL').length;
+    const slPct=s.n?Math.round(slN/s.n*100):0;
+    const col=slPct<30?'#00c853':slPct<50?'#ffd100':'#ff3d57';
+    slEl.style.color=col;
+    slEl.textContent=slN+' de '+s.n+' ('+slPct+'%) '+(slPct<30?'✅ Bajo':slPct<50?'🟡 Moderado':'🔴 Alto');
+  }
+  const stEl=document.getElementById('rg-streak');
+  if(stEl)stEl.textContent=s.streak.bestLoss+' seguidos';
+}
+
+function calcRiskGuide(){
+  const cap=parseFloat(document.getElementById('rc-capital').value)||0;
+  const pct=parseFloat(document.getElementById('rc-pct').value)||2;
+  const el=document.getElementById('rc-result');
+  if(!el)return;
+  if(!cap){el.textContent='Ingresá tu capital para calcular';return;}
+  const maxRisk=cap*pct/100;
+  el.innerHTML=`<span style="font-size:16px;font-weight:900;color:#ff6b00">Margen máximo: $${maxRisk.toFixed(2)}</span><br>
+    <span style="color:var(--text2);font-size:11px">Con 5x → exposición $${(maxRisk*5).toFixed(2)} · Pérdida máx = -${pct}% de tu capital</span>`;
+}
+
+function calcSizing(){
+  const cap=parseFloat(document.getElementById('sz-cap').value)||0;
+  const risk=parseFloat(document.getElementById('sz-risk').value)||0;
+  const sl=parseFloat(document.getElementById('sz-sl').value)||0;
+  const lev=parseFloat(document.getElementById('sz-lev').value)||1;
+  const el=document.getElementById('sz-result');
+  if(!el)return;
+  if(!cap||!risk||!sl||!lev){el.textContent='Completá los campos para calcular';el.style.color='var(--text2)';return;}
+  const margen=(cap*risk/100)/(sl/100*lev);
+  const exposure=margen*lev;
+  const maxLoss=margen*sl/100;
+  el.style.color=margen>0?'#ff6b00':'#ff3d57';
+  el.innerHTML=`<span style="font-size:18px;font-weight:900;color:#ff6b00">Margen: $${margen.toFixed(2)}</span><br>
+    <span style="font-size:11px;color:var(--text2)">Exposición: $${exposure.toFixed(2)} · Pérdida máx: $${maxLoss.toFixed(2)} (${risk}% del capital)</span>`;
+}
+
 </script>
