@@ -331,6 +331,31 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
     <div class="section-header"><div class="section-title">🚪 Motivos de salida</div><button class="btn btn-dark btn-sm" onclick="openManage('exit')">Gestionar</button></div>
     <div id="exit-preview" style="color:var(--text2);font-size:13px;font-weight:600"></div>
   </div>
+
+  <div class="card">
+    <div class="section-header">
+      <div class="section-title">🛡️ Recomendaciones</div>
+      <button class="btn btn-dark btn-sm" onclick="toggleRiskGuide()" id="rg-toggle-btn">Ver análisis</button>
+    </div>
+    <div id="risk-guide-content" style="display:none">
+      <div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:10px">
+        <div class="row2">
+          <div class="field" style="margin:0"><label>Capital ($)</label><input type="number" id="rg-capital" placeholder="ej: 1000" oninput="renderRiskRecs()" style="font-size:14px;padding:9px 12px"></div>
+          <div class="field" style="margin:0"><label>Riesgo por trade</label><select id="rg-risk-pct" onchange="renderRiskRecs()" style="font-size:14px;padding:9px 12px"><option value="1">1% conservador</option><option value="2" selected>2% moderado</option><option value="3">3% agresivo</option></select></div>
+        </div>
+      </div>
+      <div id="rg-recs"></div>
+      <div style="background:rgba(255,107,0,.08);border:1px solid rgba(255,107,0,.3);border-radius:10px;padding:12px;margin-top:8px">
+        <div style="font-size:12px;font-weight:900;color:#ff6b00;margin-bottom:8px">📐 Calculadora de sizing</div>
+        <div class="row2">
+          <div class="field" style="margin:0"><label>SL %</label><input type="number" id="sz-sl" placeholder="10" step="0.1" oninput="calcSizing()" style="font-size:13px;padding:8px 10px"></div>
+          <div class="field" style="margin:0"><label>Apalancamiento</label><input type="number" id="sz-lev" placeholder="5" oninput="calcSizing()" style="font-size:13px;padding:8px 10px"></div>
+        </div>
+        <div id="sz-result" style="background:var(--input-bg);border-radius:8px;padding:10px;margin-top:8px;font-size:13px;color:var(--text2);text-align:center">Completá tu capital y los campos para calcular</div>
+      </div>
+    </div>
+  </div>
+
   <div class="backup-section">
     <div class="backup-title">💾 Backup y exportación</div>
     <div id="sync-status" style="display:none;border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:12px;font-weight:700;text-align:center"></div>
@@ -350,86 +375,6 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
   </div>
 </div>
 
-
-  <!-- GESTIÓN DE RIESGO -->
-  <div class="card" id="risk-guide-card">
-    <div class="section-header">
-      <div class="section-title">🛡️ Gestión de Riesgo</div>
-      <button class="btn btn-dark btn-sm" onclick="toggleRiskGuide()">Ver guía</button>
-    </div>
-    <div id="risk-guide-content" style="display:none">
-
-      <!-- REGLA 1 -->
-      <div style="background:var(--surface2);border-radius:10px;padding:14px;margin-bottom:10px;border-left:3px solid #ff6b00">
-        <div style="font-size:13px;font-weight:900;color:#ff6b00;margin-bottom:6px">📏 Regla 1 — Riesgo por trade</div>
-        <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:4px">Nunca arriesgues más del 1-2% de tu capital total en un solo trade.</div>
-        <div style="font-size:11px;color:var(--text2);line-height:1.6">Si tu cuenta tiene $1.000, tu margen máximo por trade debería ser $10-$20. Con apalancamiento 5x, eso te da $50-$100 de exposición. Así podés perder 10 trades seguidos y seguir operando.</div>
-        <div id="risk-calc-box" style="margin-top:10px">
-          <div style="font-size:11px;font-weight:700;color:var(--text2);margin-bottom:6px">CALCULÁ TU RIESGO MÁXIMO</div>
-          <div class="row2">
-            <div class="field" style="margin:0">
-              <label>Capital ($)</label>
-              <input type="number" id="rc-capital" placeholder="1000" oninput="calcRiskGuide()" style="font-size:13px;padding:8px 10px">
-            </div>
-            <div class="field" style="margin:0">
-              <label>Riesgo %</label>
-              <select id="rc-pct" onchange="calcRiskGuide()" style="font-size:13px;padding:8px 10px">
-                <option value="1">1% (conservador)</option>
-                <option value="2" selected>2% (moderado)</option>
-                <option value="3">3% (agresivo)</option>
-              </select>
-            </div>
-          </div>
-          <div id="rc-result" style="background:var(--input-bg);border-radius:8px;padding:10px;margin-top:8px;font-size:12px;color:var(--text2);text-align:center">Ingresá tu capital para calcular</div>
-        </div>
-      </div>
-
-      <!-- REGLA 2 -->
-      <div style="background:var(--surface2);border-radius:10px;padding:14px;margin-bottom:10px;border-left:3px solid #00c853">
-        <div style="font-size:13px;font-weight:900;color:#00c853;margin-bottom:6px">⚖️ Regla 2 — Ratio Riesgo/Beneficio</div>
-        <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:4px">Buscá trades con R/B mínimo de 1:2 (ganás el doble de lo que arriesgás).</div>
-        <div style="font-size:11px;color:var(--text2);line-height:1.6">Si tu SL está a -10%, tu TP debería estar al menos en +20%. Con un WR del 50%, un R/B de 1:2 te hace rentable. Con un WR del 40% y R/B 1:3, también sos rentable. Tu R/B actual: <span id="rg-rr" style="font-weight:900;color:#ff6b00">calculando...</span></div>
-      </div>
-
-      <!-- REGLA 3 -->
-      <div style="background:var(--surface2);border-radius:10px;padding:14px;margin-bottom:10px;border-left:3px solid #ffd100">
-        <div style="font-size:13px;font-weight:900;color:#ffd100;margin-bottom:6px">🎯 Regla 3 — Stop Loss siempre</div>
-        <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:4px">Un trade sin SL no es un trade — es una apuesta.</div>
-        <div style="font-size:11px;color:var(--text2);line-height:1.6">Tus trades cerrados por SL: <span id="rg-sl" style="font-weight:900;color:#ffd100">calculando...</span>. Un SL alto puede indicar entradas tardías o niveles mal calculados.</div>
-      </div>
-
-      <!-- REGLA 4 -->
-      <div style="background:var(--surface2);border-radius:10px;padding:14px;margin-bottom:10px;border-left:3px solid #ff3d57">
-        <div style="font-size:13px;font-weight:900;color:#ff3d57;margin-bottom:6px">🚫 Regla 4 — Drawdown máximo diario</div>
-        <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:4px">Si perdés 3% de tu capital en un día, pará de operar.</div>
-        <div style="font-size:11px;color:var(--text2);line-height:1.6">Las rachas perdedoras son normales, pero operar emocionalmente las amplifica. Definí un límite diario y respetalo. Tu racha perdedora máxima registrada: <span id="rg-streak" style="font-weight:900;color:#ff3d57">calculando...</span> trades consecutivos.</div>
-      </div>
-
-      <!-- REGLA 5 -->
-      <div style="background:var(--surface2);border-radius:10px;padding:14px;margin-bottom:10px;border-left:3px solid #00aaff">
-        <div style="font-size:13px;font-weight:900;color:#00aaff;margin-bottom:6px">📊 Regla 5 — Diversificación de trades</div>
-        <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:4px">No abras más de 3-4 trades simultáneos con el mismo capital en riesgo.</div>
-        <div style="font-size:11px;color:var(--text2);line-height:1.6">Cuando el mercado se mueve en una dirección, todos los activos cripto tienden a moverse juntos (correlación alta). Tener 5 trades long en simultáneo no diversifica — multiplica el riesgo.</div>
-      </div>
-
-      <!-- SIZING FORMULA -->
-      <div style="background:rgba(255,107,0,.08);border:1px solid rgba(255,107,0,.3);border-radius:10px;padding:14px">
-        <div style="font-size:13px;font-weight:900;color:#ff6b00;margin-bottom:8px">📐 Fórmula de sizing</div>
-        <div style="font-family:monospace;font-size:12px;background:var(--input-bg);border-radius:6px;padding:10px;color:var(--text);line-height:2">
-          Margen = (Capital × Riesgo%) ÷ (SL% × Apalancamiento)<br>
-          <span style="color:var(--text2)">Ej: ($1000 × 2%) ÷ (10% × 5x) = $4 de margen</span>
-        </div>
-        <div class="row2" style="margin-top:10px">
-          <div class="field" style="margin:0"><label>Capital $</label><input type="number" id="sz-cap" placeholder="1000" oninput="calcSizing()" style="font-size:13px;padding:8px 10px"></div>
-          <div class="field" style="margin:0"><label>Riesgo %</label><input type="number" id="sz-risk" placeholder="2" step="0.1" oninput="calcSizing()" style="font-size:13px;padding:8px 10px"></div>
-          <div class="field" style="margin:0"><label>SL %</label><input type="number" id="sz-sl" placeholder="10" step="0.1" oninput="calcSizing()" style="font-size:13px;padding:8px 10px"></div>
-          <div class="field" style="margin:0"><label>Apal.</label><input type="number" id="sz-lev" placeholder="5" oninput="calcSizing()" style="font-size:13px;padding:8px 10px"></div>
-        </div>
-        <div id="sz-result" style="background:var(--input-bg);border-radius:8px;padding:10px;margin-top:8px;font-size:13px;color:var(--text2);text-align:center">Completá los campos para calcular</div>
-      </div>
-
-    </div>
-  </div>
 
 <!-- ══ HISTORIAL ══ -->
 <div class="page" id="page-historial">
@@ -505,7 +450,12 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
     <div style="font-size:12px;color:var(--text2);font-weight:700">Tocá un trade para editarlo</div>
     <button onclick="refreshPrices()" id="refresh-btn" class="btn btn-dark btn-sm" style="gap:6px">⟳ Actualizar precios</button>
   </div>
-  <div id="kpi-projection" style="display:none;background:var(--surface);border:1px solid rgba(255,107,0,.4);border-radius:12px;padding:14px 16px;margin-bottom:12px"></div>
+  <div style="margin-bottom:10px" id="proj-wrap" style="display:none">
+    <button onclick="toggleProjection()" id="proj-toggle-btn" style="display:none;width:100%;background:var(--surface);border:1px solid rgba(255,107,0,.35);border-radius:10px;padding:9px 14px;color:#ff6b00;font-family:'Nunito',sans-serif;font-size:11px;font-weight:800;cursor:pointer;align-items:center;justify-content:space-between;text-transform:uppercase;letter-spacing:.5px">
+      <span>📊 Si cerraras todo ahora</span><span id="proj-arrow">▼</span>
+    </button>
+    <div id="kpi-projection" style="display:none;background:var(--surface);border:1px solid rgba(255,107,0,.35);border-top:none;border-radius:0 0 10px 10px;padding:10px 12px"></div>
+  </div>
   <div id="open-trades-list"></div>
   <div id="open-empty" style="display:none" class="empty-state">
     <div class="empty-icon">🟢</div>
@@ -1432,7 +1382,7 @@ function renderGraficos(){
   const tempData=Object.entries(byTemp).map(([k,v])=>{const w=v.filter(x=>x>0).length;const ev2=(w/v.length)*v.filter(x=>x>0).reduce((a,x)=>a+x,0)/Math.max(w,1)+(v.length-w)/v.length*v.filter(x=>x<=0).reduce((a,x)=>a+x,0)/Math.max(v.length-w,1);return{name:k,avg:v.reduce((a,x)=>a+x,0)/v.length,count:v.length,wins:w,wr:(w/v.length*100),ev:ev2};}).sort((a,b)=>b.ev-a.ev);
   const mxT=Math.max(...tempData.map(d=>Math.abs(d.avg)),1);
   // Monthly P&L
-  const byMonth={};T.forEach(t=>{const m=t.fecha.slice(0,7);if(!byMonth[m])byMonth[m]=[];byMonth[m].push(t.resultado);});
+  const byMonth={};T.filter(t=>!t.open).forEach(t=>{const m=t.fecha.slice(0,7);if(!byMonth[m])byMonth[m]=[];byMonth[m].push(t.margen*t.resultado/100);});
   const months=Object.keys(byMonth).sort();
   const monthVals=months.map(m=>byMonth[m].reduce((a,x)=>a+x,0));
   const mxM=Math.max(...monthVals.map(Math.abs),1);
@@ -1533,7 +1483,7 @@ function renderGraficos(){
   <div class="chart-box" style="cursor:default">
     <div class="chart-label">📅 P&L mensual</div>
     <div class="month-bar-wrap">
-      ${months.map((m,i)=>{const v=monthVals[i];const h=Math.max(Math.abs(v)/mxM*70,2);const col=v>=0?'#00c853':'#ff3d57';const label=m.slice(5);return`<div class="month-bar-col"><div style="font-size:9px;color:${col};font-weight:800;white-space:nowrap">${v>=0?'+':''}${v.toFixed(0)}</div><div class="month-bar" style="height:${h}px;background:${col};opacity:.8"></div><div class="month-bar-label">${label}</div></div>`;}).join('')}
+      ${months.map((m,i)=>{const v=monthVals[i];const h=Math.max(Math.abs(v)/mxM*70,2);const col=v>=0?'#00c853':'#ff3d57';const label=m.slice(5);return`<div class="month-bar-col"><div style="font-size:9px;color:${col};font-weight:800;white-space:nowrap">${v>=0?'+':''}$${Math.abs(v)<100?v.toFixed(1):v.toFixed(0)}</div><div class="month-bar" style="height:${h}px;background:${col};opacity:.8"></div><div class="month-bar-label">${label}</div></div>`;}).join('')}
     </div>
   </div></div>
 
@@ -1847,134 +1797,115 @@ function saveMCP(){
   if(mcpFullClose||pctClose===100) setTimeout(()=>switchTab('historial'),300);
 }
 
-// ══ KPI PROJECTION (En Curso tab) ══
-function renderKpiProjection(openTrades){
+// ══ KPI PROJECTION ══
+let projectionOpen=false;
+function toggleProjection(){
+  projectionOpen=!projectionOpen;
   const box=document.getElementById('kpi-projection');
-  if(!box)return;
-  const tradeable=openTrades.filter(t=>t.entrada&&(livePrices[t.ticker]||t.actual));
-  if(!tradeable.length){box.style.display='none';return;}
+  const arr=document.getElementById('proj-arrow');
+  if(box)box.style.display=projectionOpen?'block':'none';
+  if(arr)arr.textContent=projectionOpen?'▲':'▼';
+}
 
-  // Current stats (closed trades only)
-  const current=computeStats(D.trades);
-  // Projected: all trades including open ones closed at current price
-  const projected=[...D.trades];
-  tradeable.forEach(t=>{
-    const idx=projected.findIndex(x=>x.id===t.id);
+function renderKpiProjection(openTrades){
+  const btn=document.getElementById('proj-toggle-btn');
+  const box=document.getElementById('kpi-projection');
+  if(!box||!btn)return;
+  const tradeable=openTrades.filter(t=>t.entrada&&(livePrices[t.ticker]||t.actual));
+  if(!tradeable.length){btn.style.display='none';box.style.display='none';return;}
+  btn.style.display='flex';
+  const closedTrades=D.trades.filter(t=>!t.open);
+  const current=computeStats(closedTrades.length?closedTrades:D.trades);
+  const resolvedOpen=tradeable.map(t=>{
     const price=livePrices[t.ticker]||t.actual||0;
     const pct=calcPct(t.entrada,price,t.pos,t.lev);
-    if(pct!==null&&idx>=0){
-      projected[idx]={...projected[idx],resultado:pct,open:false};
-    }
+    return{...t,resultado:pct!==null?pct:0,open:false};
   });
-  const proj=computeStats(projected);
-  if(!current||!proj){box.style.display='none';return;}
-
-  function kpiDelta(cur,nw,higherBetter=true){
-    const diff=nw-cur;
-    const better=higherBetter?diff>=0:diff<=0;
-    const col=better?'#00c853':'#ff3d57';
-    const arrow=diff>0?'↑':diff<0?'↓':'→';
-    return{col,arrow,diff};
-  }
-
-  const pfCur=current.pf>=999?'∞':current.pf.toFixed(2);
-  const pfNew=proj.pf>=999?'∞':proj.pf.toFixed(2);
-  const pfD=kpiDelta(current.pf,proj.pf);
-  const wrCur=(current.winRate*100).toFixed(0)+'%';
-  const wrNew=(proj.winRate*100).toFixed(0)+'%';
-  const wrD=kpiDelta(current.winRate,proj.winRate);
-  const evCur=(current.ev>=0?'+':'')+current.ev.toFixed(1)+'%';
-  const evNew=(proj.ev>=0?'+':'')+proj.ev.toFixed(1)+'%';
-  const evD=kpiDelta(current.ev,proj.ev);
-  const ddCur=current.maxDDeq.toFixed(1)+'%';
-  const ddNew=proj.maxDDeq.toFixed(1)+'%';
-  const ddD=kpiDelta(current.maxDDeq,proj.maxDDeq,false);
-  const pnlCur=(current.totalPnl>=0?'+':'')+'$'+current.totalPnl.toFixed(2);
-  const pnlNew=(proj.totalPnl>=0?'+':'')+'$'+proj.totalPnl.toFixed(2);
-  const pnlD=kpiDelta(current.totalPnl,proj.totalPnl);
-
-  function kpiCard(label,cur,nw,d){
-    return`<div style="background:var(--surface2);border-radius:10px;padding:10px;text-align:center">
-      <div style="font-size:9px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">${label}</div>
-      <div style="font-size:15px;font-weight:900;color:var(--text2);text-decoration:line-through;opacity:.7">${cur}</div>
-      <div style="font-size:11px;color:var(--text2);margin:2px 0">${d.arrow}</div>
-      <div style="font-size:18px;font-weight:900;color:${d.col}">${nw}</div>
-    </div>`;
-  }
-
-  box.style.display='block';
-  box.innerHTML=`
-    <div style="font-size:10px;font-weight:800;color:#ff6b00;text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">
-      📊 Si cerraras todo ahora — impacto en métricas
-    </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-bottom:7px">
-      ${kpiCard('Profit Factor',pfCur,pfNew,pfD)}
-      ${kpiCard('Win Rate',wrCur,wrNew,wrD)}
-    </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px">
-      ${kpiCard('EV / Trade',evCur,evNew,evD)}
-      ${kpiCard('Max Drawdown',ddCur,ddNew,ddD)}
-      ${kpiCard('P&L Total',pnlCur,pnlNew,pnlD)}
-    </div>`;
+  const proj=computeStats([...closedTrades,...resolvedOpen]);
+  if(!current||!proj)return;
+  function d(cur,nw,hi=true){const diff=nw-cur;const ok=hi?diff>=0:diff<=0;return{col:ok?'#00c853':'#ff3d57',arrow:Math.abs(diff)>0.001?(diff>0?'↑':'↓'):'→'};}
+  function chip(lbl,cur,nw,dd){return'<div style="flex:1;min-width:0;background:var(--surface2);border-radius:8px;padding:7px 5px;text-align:center"><div style="font-size:8px;color:var(--text2);font-weight:700;margin-bottom:3px;text-transform:uppercase">'+lbl+'</div><div style="font-size:10px;color:var(--text2);text-decoration:line-through">'+cur+'</div><div style="font-size:9px;color:'+dd.col+'">'+dd.arrow+'</div><div style="font-size:13px;font-weight:900;color:'+dd.col+'">'+nw+'</div></div>';}
+  if(projectionOpen)box.style.display='block';
+  box.innerHTML='<div style="display:flex;gap:4px">'+
+    chip('PF',current.pf>=999?'∞':current.pf.toFixed(2),proj.pf>=999?'∞':proj.pf.toFixed(2),d(current.pf,proj.pf))+
+    chip('WR',(current.winRate*100).toFixed(0)+'%',(proj.winRate*100).toFixed(0)+'%',d(current.winRate,proj.winRate))+
+    chip('EV',(current.ev>=0?'+':'')+current.ev.toFixed(1)+'%',(proj.ev>=0?'+':'')+proj.ev.toFixed(1)+'%',d(current.ev,proj.ev))+
+    chip('DD',current.maxDDeq.toFixed(1)+'%',proj.maxDDeq.toFixed(1)+'%',d(current.maxDDeq,proj.maxDDeq,false))+
+    chip('P&L',(current.totalPnl>=0?'+':'')+'$'+current.totalPnl.toFixed(0),(proj.totalPnl>=0?'+':'')+'$'+proj.totalPnl.toFixed(0),d(current.totalPnl,proj.totalPnl))+
+  '</div>';
 }
 
 // ══ RISK GUIDE ══
 function toggleRiskGuide(){
-  const el=document.getElementById('risk-guide-content');
-  if(!el)return;
-  const btn=document.querySelector('[onclick="toggleRiskGuide()"]');
+  const el=document.getElementById('risk-guide-content');if(!el)return;
   const open=el.style.display==='none';
   el.style.display=open?'block':'none';
-  if(btn)btn.textContent=open?'Cerrar':'Ver guía';
-  if(open)updateRiskGuide();
+  const btn=document.getElementById('rg-toggle-btn');if(btn)btn.textContent=open?'Cerrar':'Ver análisis';
+  if(open)renderRiskRecs();
 }
 
-function updateRiskGuide(){
-  const s=computeStats(D.trades);
-  if(!s)return;
-  const rrEl=document.getElementById('rg-rr');
-  if(rrEl){
-    const col=s.rr>=2?'#00c853':s.rr>=1?'#ffd100':'#ff3d57';
-    rrEl.style.color=col;
-    rrEl.textContent=s.rr.toFixed(2)+'x '+(s.rr>=2?'✅ Excelente':s.rr>=1?'🟡 Aceptable':'🔴 Mejorar');
+function renderRiskRecs(){
+  const el=document.getElementById('rg-recs');if(!el)return;
+  const capital=parseFloat((document.getElementById('rg-capital')||{}).value)||0;
+  const riskPct=parseFloat((document.getElementById('rg-risk-pct')||{}).value)||2;
+  const closed=D.trades.filter(t=>!t.open);
+  const s=computeStats(closed);
+  if(!s||s.n<3){el.innerHTML='<div style="color:var(--text2);font-size:12px;padding:8px">Necesitás al menos 3 trades cerrados para ver recomendaciones.</div>';calcSizing();return;}
+  const recs=[];
+  const closedWithLev=closed.filter(t=>t.lev);
+  const avgLev=closedWithLev.length?closedWithLev.reduce((a,t)=>a+t.lev,0)/closedWithLev.length:5;
+  // Apalancamiento
+  if(s.rr<1){
+    recs.push({col:'#ff3d57',icon:'⚠️',title:'Reducí el apalancamiento',body:'Tu R/B es '+s.rr.toFixed(2)+'x — perdés más de lo que ganás. Con apalancamiento eso se amplifica. Considerá bajar a '+Math.max(1,Math.floor(avgLev*0.6))+'x hasta que el R/B supere 1.5x.'});
+  } else if(s.rr>=2&&s.winRate>=0.55){
+    recs.push({col:'#00c853',icon:'✅',title:'Apalancamiento sólido',body:'R/B '+s.rr.toFixed(2)+'x con WR '+(s.winRate*100).toFixed(0)+'% es bueno. Podés mantener '+avgLev.toFixed(0)+'x. No subas sin 20+ trades consistentes.'});
+  } else {
+    recs.push({col:'#ffd100',icon:'🟡',title:'Apalancamiento: mantené o bajá',body:'R/B '+s.rr.toFixed(2)+'x · WR '+(s.winRate*100).toFixed(0)+'%. Hay margen de mejora antes de subir apalancamiento. Mantené '+avgLev.toFixed(0)+'x o menos.'});
   }
-  const slEl=document.getElementById('rg-sl');
-  if(slEl){
-    const slN=D.trades.filter(t=>t.salida==='SL').length;
-    const slPct=s.n?Math.round(slN/s.n*100):0;
-    const col=slPct<30?'#00c853':slPct<50?'#ffd100':'#ff3d57';
-    slEl.style.color=col;
-    slEl.textContent=slN+' de '+s.n+' ('+slPct+'%) '+(slPct<30?'✅ Bajo':slPct<50?'🟡 Moderado':'🔴 Alto');
+  // Margen
+  if(capital>0){
+    const maxM=capital*riskPct/100;
+    const closedWithM=closed.filter(t=>t.margen);
+    const avgM=closedWithM.length?closedWithM.reduce((a,t)=>a+t.margen,0)/closedWithM.length:0;
+    const ok=avgM<=maxM*1.3;
+    recs.push({col:ok?'#00c853':'#ff3d57',icon:ok?'✅':'⚠️',title:'Margen por trade',body:'Con $'+capital+' y riesgo '+riskPct+'%: margen máximo $'+maxM.toFixed(0)+' por trade. Tu promedio actual: $'+(avgM?avgM.toFixed(0):'—')+'. '+(avgM>maxM*1.3?'Estás arriesgando demasiado.':avgM>0?'Dentro del rango correcto.':'Completá capital para evaluar.')});
   }
-  const stEl=document.getElementById('rg-streak');
-  if(stEl)stEl.textContent=s.streak.bestLoss+' seguidos';
-}
-
-function calcRiskGuide(){
-  const cap=parseFloat(document.getElementById('rc-capital').value)||0;
-  const pct=parseFloat(document.getElementById('rc-pct').value)||2;
-  const el=document.getElementById('rc-result');
-  if(!el)return;
-  if(!cap){el.textContent='Ingresá tu capital para calcular';return;}
-  const maxRisk=cap*pct/100;
-  el.innerHTML=`<span style="font-size:16px;font-weight:900;color:#ff6b00">Margen máximo: $${maxRisk.toFixed(2)}</span><br>
-    <span style="color:var(--text2);font-size:11px">Con 5x → exposición $${(maxRisk*5).toFixed(2)} · Pérdida máx = -${pct}% de tu capital</span>`;
+  // SL
+  const slN=closed.filter(t=>t.salida==='SL').length;
+  const slR=slN/s.n;
+  const avgSLarr=closed.filter(t=>t.salida==='SL');
+  const avgSLpct=avgSLarr.length?avgSLarr.reduce((a,t)=>a+Math.abs(t.resultado),0)/avgSLarr.length:0;
+  if(slR>0.5){recs.push({col:'#ff3d57',icon:'🔴',title:'SL muy frecuente'  ,body:(slR*100).toFixed(0)+'% de tus trades tocan SL (avg -'+avgSLpct.toFixed(1)+'%). Revisá si entrás tarde, si el SL está muy ajustado o si el timing falla.'});}
+  else if(slR<0.15&&s.n>=8){recs.push({col:'#ffd100',icon:'🟡',title:'¿Estás usando SL?',body:'Solo '+(slR*100).toFixed(0)+'% de trades registran SL. Si no lo usás, es un riesgo importante.'});}
+  else{recs.push({col:'#00c853',icon:'✅',title:'SL controlado',body:(slR*100).toFixed(0)+'% de trades con SL a avg -'+avgSLpct.toFixed(1)+'%. Bien.'});}
+  // TP
+  const tpArr=closed.filter(t=>t.salida==='TP');
+  const tpR=tpArr.length/s.n;
+  const avgTP=tpArr.length?tpArr.reduce((a,t)=>a+t.resultado,0)/tpArr.length:0;
+  recs.push({col:tpR>=0.35?'#00c853':'#ffd100',icon:tpR>=0.35?'✅':'🟡',title:'TP rate: '+(tpR*100).toFixed(0)+'%',body:'TP promedio: +'+avgTP.toFixed(1)+'%. '+(tpR>=0.35?'Buen nivel de ejecución.':'Revisá si el TP está muy lejos o si cerrás antes manualmente.')+(avgSLpct>0?' TP recomendado ≥ '+(avgSLpct*Math.max(s.rr,1.5)).toFixed(1)+'% (SL avg × R/B).':'')});
+  // Mejor estrategia
+  const bySt={};closed.forEach(t=>{if(!bySt[t.estrategia])bySt[t.estrategia]=[];bySt[t.estrategia].push(t.resultado);});
+  const stR=Object.entries(bySt).map(([k,v])=>{const w=v.filter(x=>x>0).length,n2=v.length;const ev=(w/n2)*(v.filter(x=>x>0).reduce((a,x)=>a+x,0)/Math.max(w,1))+((n2-w)/n2)*(v.filter(x=>x<=0).reduce((a,x)=>a+x,0)/Math.max(n2-w,1));return{name:k,ev,count:n2,wr:w/n2};}).filter(d=>d.count>=2).sort((a,b)=>b.ev-a.ev);
+  if(stR.length){const best=stR[0],worst=stR[stR.length-1];recs.push({col:'#00aaff',icon:'🎯',title:'Priorizá '+best.name,body:'EV '+(best.ev>=0?'+':'')+best.ev.toFixed(1)+'% · WR '+(best.wr*100).toFixed(0)+'% en '+best.count+' trades.'+(stR.length>1&&worst.ev<0?' Reducí '+worst.name+' (EV '+worst.ev.toFixed(1)+'%).':'')});}
+  // Mejor temporalidad
+  const byTm={};closed.forEach(t=>{if(!byTm[t.temp])byTm[t.temp]=[];byTm[t.temp].push(t.resultado);});
+  const tmR=Object.entries(byTm).map(([k,v])=>{const w=v.filter(x=>x>0).length,n2=v.length;const ev=(w/n2)*(v.filter(x=>x>0).reduce((a,x)=>a+x,0)/Math.max(w,1))+((n2-w)/n2)*(v.filter(x=>x<=0).reduce((a,x)=>a+x,0)/Math.max(n2-w,1));return{name:k,ev,count:n2};}).filter(d=>d.count>=2).sort((a,b)=>b.ev-a.ev);
+  if(tmR.length){recs.push({col:'#ff6b00',icon:'⏱️',title:'Mejor temporalidad: '+tmR[0].name,body:'EV '+(tmR[0].ev>=0?'+':'')+tmR[0].ev.toFixed(1)+'% en '+tmR[0].name+'.'+(tmR.length>1&&tmR[tmR.length-1].ev<0?' Evitá '+tmR[tmR.length-1].name+'.':'')});}
+  el.innerHTML=recs.map(r=>'<div style="border-left:3px solid '+r.col+';background:var(--surface2);border-radius:0 10px 10px 0;padding:10px 12px;margin-bottom:8px"><div style="font-size:12px;font-weight:900;color:'+r.col+';margin-bottom:4px">'+r.icon+' '+r.title+'</div><div style="font-size:11px;color:var(--text);line-height:1.6">'+r.body+'</div></div>').join('');
+  calcSizing();
 }
 
 function calcSizing(){
-  const cap=parseFloat(document.getElementById('sz-cap').value)||0;
-  const risk=parseFloat(document.getElementById('sz-risk').value)||0;
-  const sl=parseFloat(document.getElementById('sz-sl').value)||0;
-  const lev=parseFloat(document.getElementById('sz-lev').value)||1;
-  const el=document.getElementById('sz-result');
-  if(!el)return;
-  if(!cap||!risk||!sl||!lev){el.textContent='Completá los campos para calcular';el.style.color='var(--text2)';return;}
-  const margen=(cap*risk/100)/(sl/100*lev);
-  const exposure=margen*lev;
-  const maxLoss=margen*sl/100;
-  el.style.color=margen>0?'#ff6b00':'#ff3d57';
-  el.innerHTML=`<span style="font-size:18px;font-weight:900;color:#ff6b00">Margen: $${margen.toFixed(2)}</span><br>
-    <span style="font-size:11px;color:var(--text2)">Exposición: $${exposure.toFixed(2)} · Pérdida máx: $${maxLoss.toFixed(2)} (${risk}% del capital)</span>`;
+  const capital=parseFloat((document.getElementById('rg-capital')||{}).value)||0;
+  const riskPct=parseFloat((document.getElementById('rg-risk-pct')||{}).value)||2;
+  const sl=parseFloat((document.getElementById('sz-sl')||{}).value)||0;
+  const lev=parseFloat((document.getElementById('sz-lev')||{}).value)||1;
+  const el=document.getElementById('sz-result');if(!el)return;
+  if(!capital||!sl||!lev){el.textContent='Completá tu capital y los campos para calcular';el.style.color='var(--text2)';return;}
+  const margen=(capital*riskPct/100)/(sl/100*lev);
+  el.style.color='#ff6b00';
+  el.innerHTML='<span style="font-size:18px;font-weight:900;color:#ff6b00">Margen: $'+margen.toFixed(2)+'</span><br><span style="font-size:11px;color:var(--text2)">Exposición: $'+(margen*lev).toFixed(2)+' · Pérdida máx: $'+(margen*sl/100).toFixed(2)+' ('+riskPct+'% del capital)</span>';
 }
-
+function updateRiskGuide(){renderRiskRecs();}
+function calcRiskGuide(){renderRiskRecs();}
 </script>
