@@ -318,6 +318,10 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
     </div>
     <div class="check-row"><input type="checkbox" id="f-open"><label for="f-open">🟢 Trade abierto (en curso)</label></div>
     <div class="check-row"><input type="checkbox" id="f-10p"><label for="f-10p">🏆 Llegó al 10%</label></div>
+    <div class="field" id="f-closedhora-row" style="display:none">
+      <label>Fecha y hora de cierre <span style="color:var(--text2);font-size:9px;font-weight:600">(edición)</span></label>
+      <input type="datetime-local" id="f-closedhora">
+    </div>
     <div class="field"><label>Observaciones</label><input type="text" id="f-obs" placeholder="Notas del trade..."></div>
   </div>
   <button class="btn btn-orange" onclick="saveTrade()" id="btn-save">➕ Agregar Trade</button>
@@ -930,6 +934,11 @@ function loadTradeForEdit(id){
     document.getElementById('f-hora-label').style.display='inline';
     // Fill fechahora: use stored fechahora if exists, else date+T00:00
     document.getElementById('f-fechahora').value=t.fechahora||(t.fecha?t.fecha+'T00:00':'');
+    // Show and fill closedHora field in edit mode
+    const chRow=document.getElementById('f-closedhora-row');
+    const chInput=document.getElementById('f-closedhora');
+    if(chRow){chRow.style.display='block';}
+    if(chInput){chInput.value=t.closedHora||'';}
     document.getElementById('f-fecha').value=t.fecha;
     document.getElementById('f-ticker').value=t.ticker;
     document.getElementById('f-pos').value=t.pos;
@@ -963,6 +972,8 @@ function resetForm(){
   document.getElementById('f-fecha').style.display='block';
   document.getElementById('f-fechahora').style.display='none';
   document.getElementById('f-hora-label').style.display='none';
+  const _chRow=document.getElementById('f-closedhora-row');if(_chRow)_chRow.style.display='none';
+  const _chInp=document.getElementById('f-closedhora');if(_chInp)_chInp.value='';
   setNowDatetime();
   applyLive(null);
   document.getElementById('result-note').textContent='Ingresá precios, R% o P&L$ — se calculan entre sí.';
@@ -1326,7 +1337,7 @@ async function syncDown(){
 
 // ══ DETAIL MODAL ══
 function openDetail(key){
-  const s=computeStats(D.trades);if(!s)return;
+  const s=computeStats(D.trades.filter(t=>!t.open));if(!s)return;
   const el=document.getElementById('modal-detail');
   const title=document.getElementById('detail-title');
   const body=document.getElementById('detail-body');
@@ -1396,7 +1407,7 @@ function closeDetail(){document.getElementById('modal-detail').classList.remove(
 function renderGraficos(){
   const el=document.getElementById('graficos-content');
   if(!D.trades.length){el.innerHTML=`<div class="empty-state"><div class="empty-icon">📊</div><div class="empty-text">Sin datos todavía</div></div>`;return;}
-  const T=D.trades;const s=computeStats(T);const n=s.n;
+  const T=D.trades.filter(t=>!t.open);const s=computeStats(T);if(!s||!T.length){el.innerHTML=`<div class="empty-state"><div class="empty-icon">📊</div><div class="empty-text">Sin trades cerrados todavía</div></div>`;return;}const n=s.n;
   const pfDisplay=s.pf>=999?'∞':s.pf.toFixed(2);
   const longs=T.filter(t=>t.pos==='Long'),shorts=T.filter(t=>t.pos==='Short');
   const avgLong=longs.length?longs.reduce((a,t)=>a+t.resultado,0)/longs.length:null;
