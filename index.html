@@ -906,13 +906,17 @@ function saveTrade(){
   if(!ticker){alert('Ingresá el ticker');return;}
   const resultado=parseFloat(document.getElementById('f-resultado').value)||0;
   const fechahora=getFechaHoraValue();
+  const closedHoraVal=document.getElementById('f-closedhora').value||null;
+  const existingTrade=editingId?D.trades.find(x=>x.id===editingId):null;
+  const closedHoraFinal=closedHoraVal||(existingTrade?existingTrade.closedHora:null)||null;
   const t={id:editingId||uid(),fecha:getFechaValue(),fechahora,ticker,pos:document.getElementById('f-pos').value,
     margen:parseFloat(document.getElementById('f-margen').value)||0,entrada:parseFloat(document.getElementById('f-entrada').value)||0,
     actual:parseFloat(document.getElementById('f-actual').value)||0,lev:parseFloat(document.getElementById('f-lev').value)||5,
     temp:document.getElementById('f-temp').value,estrategia:document.getElementById('f-estrategia').value,
     salida:document.getElementById('f-salida').value,timing:document.getElementById('f-timing').value,
     open:document.getElementById('f-open').checked,
-    p10:document.getElementById('f-10p').checked,obs:document.getElementById('f-obs').value,resultado};
+    p10:document.getElementById('f-10p').checked,obs:document.getElementById('f-obs').value,resultado,
+    ...(closedHoraFinal?{closedHora:closedHoraFinal}:{})};
   if(editingId){const i=D.trades.findIndex(x=>x.id===editingId);D.trades[i]=t;}else{D.trades.push(t);}
   persist(D);const wasEditing=!!editingId;const wasOpen=t.open;resetForm();updateKPIs();updateTickerDropdown();updateOpenCount();
   if(wasEditing)switchTab(wasOpen?'abiertos':'historial');
