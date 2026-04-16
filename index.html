@@ -340,7 +340,7 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
     <div id="risk-guide-content" style="display:none">
       <div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:10px">
         <div class="row2">
-          <div class="field" style="margin:0"><label>Capital ($)</label><input type="number" id="rg-capital" placeholder="ej: 1000" oninput="renderRiskRecs()" style="font-size:14px;padding:9px 12px"></div>
+          <div class="field" style="margin:0"><label>Capital ($)</label><input type="number" id="rg-capital" placeholder="ej: 1000" oninput="saveCapital();renderRiskRecs()" style="font-size:14px;padding:9px 12px"></div>
           <div class="field" style="margin:0"><label>Riesgo por trade</label><select id="rg-risk-pct" onchange="renderRiskRecs()" style="font-size:14px;padding:9px 12px"><option value="1">1% conservador</option><option value="2" selected>2% moderado</option><option value="3">3% agresivo</option></select></div>
         </div>
       </div>
@@ -353,6 +353,48 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
         </div>
         <div id="sz-result" style="background:var(--input-bg);border-radius:8px;padding:10px;margin-top:8px;font-size:13px;color:var(--text2);text-align:center">Completá tu capital y los campos para calcular</div>
       </div>
+    </div>
+  </div>
+
+  <!-- GUÍA DE GESTIÓN DE RIESGO — colapsable, sin duplicar calculadoras -->
+  <div class="card" style="margin-top:0">
+    <div class="section-header">
+      <div class="section-title">📚 Guía de gestión de riesgo</div>
+      <button class="btn btn-dark btn-sm" onclick="toggleRiskGuideStatic()" id="rgs-toggle-btn">Ver guía</button>
+    </div>
+    <div id="risk-guide-static" style="display:none">
+
+      <div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:8px;border-left:3px solid #ff6b00">
+        <div style="font-size:12px;font-weight:900;color:#ff6b00;margin-bottom:4px">📏 Regla 1 — Riesgo por trade (1-2% del capital)</div>
+        <div style="font-size:11px;color:var(--text);line-height:1.6">Nunca arriesgues más del 1-2% de tu capital en un solo trade. Con $1.000, tu margen máximo es $10-$20. Así podés perder 10 seguidos y seguir operando.</div>
+        <div id="rgs-capital-summary" style="margin-top:8px;font-size:12px;font-weight:700;color:#ff6b00;background:var(--input-bg);border-radius:6px;padding:8px;text-align:center"></div>
+      </div>
+
+      <div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:8px;border-left:3px solid #00c853">
+        <div style="font-size:12px;font-weight:900;color:#00c853;margin-bottom:4px">⚖️ Regla 2 — Ratio Riesgo/Beneficio mínimo 1:2</div>
+        <div style="font-size:11px;color:var(--text);line-height:1.6">Si tu SL es -10%, tu TP debe ser al menos +20%. Con WR 50% y R/B 1:2 sos rentable. Con WR 40% necesitás R/B 1:3. <strong style="color:#ff6b00">Tu R/B actual: <span id="rgs-rr">—</span></strong></div>
+      </div>
+
+      <div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:8px;border-left:3px solid #ffd100">
+        <div style="font-size:12px;font-weight:900;color:#ffd100;margin-bottom:4px">🎯 Regla 3 — Stop Loss siempre, sin excepción</div>
+        <div style="font-size:11px;color:var(--text);line-height:1.6">Un trade sin SL no es trading, es una apuesta. El SL protege tu capital de pérdidas catastróficas. Definí el SL ANTES de entrar. <strong style="color:#ffd100">Tus trades con SL: <span id="rgs-sl">—</span></strong></div>
+      </div>
+
+      <div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:8px;border-left:3px solid #ff3d57">
+        <div style="font-size:12px;font-weight:900;color:#ff3d57;margin-bottom:4px">🚫 Regla 4 — Límite de pérdida diaria (3% del capital)</div>
+        <div style="font-size:11px;color:var(--text);line-height:1.6">Si perdés 3% de tu capital en un día, cerrá todo y pará. Las rachas negativas son normales, operar emocionalmente las amplifica. <strong style="color:#ff3d57">Tu racha perdedora máxima: <span id="rgs-streak">—</span> trades</strong></div>
+      </div>
+
+      <div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:8px;border-left:3px solid #00aaff">
+        <div style="font-size:12px;font-weight:900;color:#00aaff;margin-bottom:4px">📊 Regla 5 — Apalancamiento según tu R/B y WR</div>
+        <div style="font-size:11px;color:var(--text);line-height:1.6">El apalancamiento correcto depende de tu sistema. Fórmula segura: <strong>Apal. = (WR × TP%) / (SL% × (1-WR))</strong>. Empezá con 2-3x, subí solo cuando tengas 20+ trades con EV positivo. Con R/B ≥ 2 y WR ≥ 55%, 5x es razonable. Con R/B &lt; 1.5 o WR &lt; 50%, bajá a 2-3x. <strong style="color:#00aaff">Tu apal. óptimo estimado: <span id="rgs-lev">—</span></strong></div>
+      </div>
+
+      <div style="background:var(--surface2);border-radius:10px;padding:12px;border-left:3px solid #9999b8">
+        <div style="font-size:12px;font-weight:900;color:#9999b8;margin-bottom:4px">🧠 Regla 6 — Psicología: no revenge trading</div>
+        <div style="font-size:11px;color:var(--text);line-height:1.6">Después de 2-3 pérdidas seguidas, tomá un descanso de al menos 1 hora. El "revenge trading" (entrar para recuperar pérdidas) es la causa principal de pérdidas grandes. Seguí el sistema, no las emociones.</div>
+      </div>
+
     </div>
   </div>
 
@@ -636,10 +678,12 @@ function switchTab(tab){
 }
 
 // ══ INIT ══
+function saveCapital(){const v=document.getElementById('rg-capital').value;if(v)localStorage.setItem('tpro_capital',v);}
+function loadCapital(){const v=localStorage.getItem('tpro_capital');if(v){const el=document.getElementById('rg-capital');if(el)el.value=v;}}
 function init(){
   setNowDatetime();
   document.getElementById('f-lev').value=5;
-  populateSelects();updateTickerDropdown();updatePreviews();updateKPIs();updateOpenCount();updateSyncLastTime();
+  loadCapital();populateSelects();updateTickerDropdown();updatePreviews();updateKPIs();updateOpenCount();updateSyncLastTime();
 }
 
 function setNowDatetime(){
@@ -1115,7 +1159,7 @@ function computeStats(T){
 
 // ══ KPIs (top bar) ══
 function updateKPIs(){
-  const s=computeStats(D.trades);
+  const s=computeStats(D.trades.filter(t=>!t.open));
   if(!s){document.getElementById('kpi-pf').textContent='—';document.getElementById('kpi-wr').textContent='—';document.getElementById('kpi-ev').textContent='—';return;}
   const pfEl=document.getElementById('kpi-pf');pfEl.textContent=s.pf>=999?'∞':s.pf.toFixed(2);pfEl.className='kpi-val '+(s.pf>=1?'pos':'neg');
   const wrEl=document.getElementById('kpi-wr');wrEl.textContent=(s.winRate*100).toFixed(0)+'%';wrEl.className='kpi-val '+(s.winRate>=.5?'pos':'neg');
@@ -1673,6 +1717,10 @@ init();
       <div id="mcp-result" style="background:var(--input-bg);border:1.5px solid var(--border);border-radius:8px;padding:12px;text-align:center;margin-bottom:14px;font-size:13px;color:var(--text2)">
         Ingresá precio para calcular
       </div>
+      <div class="row2" style="margin-bottom:0">
+        <div class="field"><label>Fecha de cierre</label><input type="date" id="mcp-fecha"></div>
+        <div class="field"><label>Hora de cierre</label><input type="time" id="mcp-hora"></div>
+      </div>
       <div class="field">
         <label>Motivo de salida</label>
         <select id="mcp-salida"></select>
@@ -1710,6 +1758,10 @@ function openMCP(id, fullClose){
   // pre-fill
   document.getElementById('mcp-pct').value=fullClose?'100':'50';
   document.getElementById('mcp-precio').value=price?price:'';
+  // pre-fill close date/time with now (Argentina device time)
+  const _now=new Date();const _pad=n=>String(n).padStart(2,'0');
+  document.getElementById('mcp-fecha').value=`${_now.getFullYear()}-${_pad(_now.getMonth()+1)}-${_pad(_now.getDate())}`;
+  document.getElementById('mcp-hora').value=`${_pad(_now.getHours())}:${_pad(_now.getMinutes())}`;
   document.getElementById('mcp-obs').value='';
   // title & summary
   document.getElementById('mcp-title').textContent=fullClose?`Cerrar ${t.ticker}`:`Cierre parcial ${t.ticker}`;
@@ -1758,7 +1810,9 @@ function saveMCP(){
   // Store close time for duration calc
   const now=new Date();
   const pad=n=>String(n).padStart(2,'0');
-  const closedHora=`${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
+  const mcpFechaVal=document.getElementById('mcp-fecha').value;
+  const mcpHoraVal=document.getElementById('mcp-hora').value;
+  const closedHora=mcpFechaVal?(mcpFechaVal+'T'+(mcpHoraVal||'12:00')):`${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
 
   if(mcpFullClose||pctClose===100){
     // Full close — update existing trade
@@ -1856,11 +1910,11 @@ function renderRiskRecs(){
   const avgLev=closedWithLev.length?closedWithLev.reduce((a,t)=>a+t.lev,0)/closedWithLev.length:5;
   // Apalancamiento
   if(s.rr<1){
-    recs.push({col:'#ff3d57',icon:'⚠️',title:'Reducí el apalancamiento',body:'Tu R/B es '+s.rr.toFixed(2)+'x — perdés más de lo que ganás. Con apalancamiento eso se amplifica. Considerá bajar a '+Math.max(1,Math.floor(avgLev*0.6))+'x hasta que el R/B supere 1.5x.'});
+    recs.push({col:'#ff3d57',icon:'⚠️',title:'Reducí el apalancamiento a 1-2x',body:'R/B '+s.rr.toFixed(2)+'x — perdés más de lo que ganás por trade. Con 5x eso se magnifica: una racha de 3 pérdidas puede eliminar 30%+ del capital. Lógica: el apalancamiento multiplica tanto ganancias COMO pérdidas, y con EV negativa las pérdidas dominan. Bajá a '+Math.max(1,Math.floor(avgLev*0.5))+'x urgente.'});
   } else if(s.rr>=2&&s.winRate>=0.55){
     recs.push({col:'#00c853',icon:'✅',title:'Apalancamiento sólido',body:'R/B '+s.rr.toFixed(2)+'x con WR '+(s.winRate*100).toFixed(0)+'% es bueno. Podés mantener '+avgLev.toFixed(0)+'x. No subas sin 20+ trades consistentes.'});
   } else {
-    recs.push({col:'#ffd100',icon:'🟡',title:'Apalancamiento: mantené o bajá',body:'R/B '+s.rr.toFixed(2)+'x · WR '+(s.winRate*100).toFixed(0)+'%. Hay margen de mejora antes de subir apalancamiento. Mantené '+avgLev.toFixed(0)+'x o menos.'});
+    recs.push({col:'#ffd100',icon:'🟡',title:'Apalancamiento: 3x recomendado',body:'R/B '+s.rr.toFixed(2)+'x · WR '+(s.winRate*100).toFixed(0)+'%. Con estas métricas 5x es riesgoso: si el R/B no llega a 2x, las rachas negativas consumen el capital rápido. Lógica: necesitás que EV×apal supere la varianza. Bajá a 3x hasta tener R/B≥2 en 15+ trades.'});
   }
   // Margen
   if(capital>0){
@@ -1908,4 +1962,57 @@ function calcSizing(){
 }
 function updateRiskGuide(){renderRiskRecs();}
 function calcRiskGuide(){renderRiskRecs();}
+
+// ══ STATIC RISK GUIDE ══
+function toggleRiskGuideStatic(){
+  const el=document.getElementById('risk-guide-static');if(!el)return;
+  const open=el.style.display==='none';
+  el.style.display=open?'block':'none';
+  const btn=document.getElementById('rgs-toggle-btn');if(btn)btn.textContent=open?'Cerrar':'Ver guía';
+  if(open)updateStaticRiskGuide();
+}
+function updateStaticRiskGuide(){
+  const s=computeStats(D.trades.filter(t=>!t.open));
+  // capital summary with PnL auto-update
+  const capEl=document.getElementById('rgs-capital-summary');
+  if(capEl){
+    const capital=parseFloat((document.getElementById('rg-capital')||{}).value)||0;
+    const riskPct=parseFloat((document.getElementById('rg-risk-pct')||{}).value)||2;
+    const sl=parseFloat((document.getElementById('sz-sl')||{}).value)||10;
+    const lev=parseFloat((document.getElementById('sz-lev')||{}).value)||5;
+    const totalPnl=s?s.totalPnl:0;
+    const capitalActual=capital+totalPnl;
+    const maxMargen=capital>0?(capitalActual*riskPct/100)/(sl/100*lev):0;
+    if(capital>0){
+      capEl.innerHTML='Capital inicial: <strong>$'+capital.toFixed(0)+'</strong> + P&L acumulado: <strong style="color:'+(totalPnl>=0?'#00c853':'#ff3d57')+'">'+(totalPnl>=0?'+':'')+'$'+totalPnl.toFixed(2)+'</strong> = Capital actual: <strong style="color:#ff6b00">$'+capitalActual.toFixed(2)+'</strong><br>Margen recomendado: <strong>$'+maxMargen.toFixed(2)+'</strong> por trade (SL '+sl+'% · '+lev+'x)';
+    } else {
+      capEl.textContent='Ingresá tu capital en "Recomendaciones" arriba para ver el cálculo actualizado.';
+    }
+  }
+  if(!s)return;
+  // R/B
+  const rrEl=document.getElementById('rgs-rr');
+  if(rrEl){const col=s.rr>=2?'#00c853':s.rr>=1.5?'#ffd100':'#ff3d57';rrEl.style.color=col;rrEl.textContent=s.rr.toFixed(2)+'x '+(s.rr>=2?'✅':s.rr>=1.5?'🟡':'🔴');}
+  // SL
+  const slEl=document.getElementById('rgs-sl');
+  if(slEl){const n=D.trades.filter(t=>!t.open).length;const slN=D.trades.filter(t=>t.salida==='SL'&&!t.open).length;slEl.textContent=slN+' de '+n+' ('+(n?Math.round(slN/n*100):0)+'%)';}
+  // Streak
+  const stEl=document.getElementById('rgs-streak');
+  if(stEl)stEl.textContent=s.streak.bestLoss;
+  // Optimal leverage justification
+  const levEl=document.getElementById('rgs-lev');
+  if(levEl&&s.n>=5){
+    // Kelly-inspired: optimal leverage = EV / variance approximation
+    // Simple formula: (WR * avgWin - (1-WR) * avgLoss) / avgLoss²  simplified
+    // Practical: if RR>=2 and WR>=0.55 -> 5x; if RR>=1.5 -> 3x; else 2x
+    let optLev,reason;
+    if(s.rr>=2&&s.winRate>=0.55){optLev='5x';reason='R/B '+s.rr.toFixed(1)+'x + WR '+(s.winRate*100).toFixed(0)+'% sólidos';}
+    else if(s.rr>=2&&s.winRate>=0.45){optLev='4x';reason='R/B bueno pero WR mejorable ('+(s.winRate*100).toFixed(0)+'%)';}
+    else if(s.rr>=1.5&&s.winRate>=0.5){optLev='3x';reason='R/B '+s.rr.toFixed(1)+'x aceptable, consolidar más trades';}
+    else if(s.rr>=1){optLev='2x';reason='Sistema rentable pero R/B '+s.rr.toFixed(1)+'x — ser conservador';}
+    else{optLev='1-2x';reason:'R/B < 1 ('+s.rr.toFixed(1)+'x) — mejorar el sistema antes de apalancar';}
+    levEl.textContent=optLev+' ('+reason+')';
+    levEl.style.color=s.rr>=2&&s.winRate>=0.55?'#00c853':s.rr>=1?'#ffd100':'#ff3d57';
+  } else if(levEl){levEl.textContent='Necesitás al menos 5 trades cerrados';}
+}
 </script>
