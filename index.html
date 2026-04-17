@@ -3459,12 +3459,34 @@ function renderSessionStats(T){
   // Europa: 08:00 - 13:59  (London open: 08:00 UTC → 05:00 AR... but we use AR local)
   // NY:     14:00 - 21:59  (NY open: 14:30 UTC → 11:30 AR)
   // Noche:  22:00 - 23:59
+  // ── DST-aware session hours in Argentina time (UTC-3) ──────
+  // US DST: second Sunday of March → first Sunday of November
+  // During US DST: NY opens 10:30 AR, Europe opens 05:00 AR
+  // Outside US DST: NY opens 11:30 AR, Europe opens 06:00 AR
+  function isUSDST(date){
+    var y=date.getFullYear();
+    // Second Sunday of March
+    var mar=new Date(y,2,1);var dstStart=new Date(y,2,1+(7-mar.getDay()+0)%7+7);
+    // First Sunday of November
+    var nov=new Date(y,10,1);var dstEnd=new Date(y,10,1+(7-nov.getDay())%7);
+    return date>=dstStart&&date<dstEnd;
+  }
+  // Use today to determine current DST (applies to all trades as approximation)
+  var dst=isUSDST(new Date());
+  var nyOpen=dst?10:11;    // 10:30 or 11:30 AR → use hour floor
+  var euOpen=dst?5:6;      // 05:00 or 06:00 AR
+  var asiaLabel=dst?'21–06h':'21–06h'; // Tokyo always same relative to AR
+
   var sessions=[
-    {key:'asia',   label:'🌏 Asia',   range:'00–08h', hours:[0,1,2,3,4,5,6,7],   col:'#00aaff', desc:'Baja liquidez en alts'},
-    {key:'europa', label:'🌍 Europa', range:'08–14h', hours:[8,9,10,11,12,13],   col:'#ffd100', desc:'Apertura europea'},
-    {key:'ny',     label:'🌎 NY',     range:'14–22h', hours:[14,15,16,17,18,19,20,21], col:'#00c853', desc:'Mayor volumen del día'},
-    {key:'noche',  label:'🌙 Noche',  range:'22–00h', hours:[22,23],             col:'#9999b8', desc:'Mercado tranquilo'}
+    {key:'asia',    label:'🌏 Asia',    range:'21–06h',           hours:[21,22,23,0,1,2,3,4,5],                col:'#00aaff', desc:'Tokio/Hong Kong · Baja liquidez en alts'},
+    {key:'europa',  label:'🌍 Europa',  range:(euOpen)+'–10h',    hours:Array.from({length:10-euOpen},(_,i)=>euOpen+i), col:'#ffd100', desc:'Londres abre · '+(euOpen)+':00 AR'},
+    {key:'overlap', label:'🔀 Overlap', range:'10–13h',            hours:[10,11,12,13],                         col:'#ff6b00', desc:'Europa+NY · Mayor volumen'},
+    {key:'ny',      label:'🌎 NY',      range:(nyOpen<10?'0':'')+nyOpen+'–17h', hours:Array.from({length:17-(nyOpen+1)+1},(_,i)=>nyOpen+i+1).concat([nyOpen]), col:'#00c853', desc:'Nueva York · '+(nyOpen)+':30 AR'},
+    {key:'tarde',   label:'🌙 Tarde/Noche', range:'17–21h',       hours:[17,18,19,20],                         col:'#9999b8', desc:'NY cierra · Mercado tranquilo'}
   ];
+  // Fix ny hours properly
+  sessions[3].hours=[];for(var h=nyOpen;h<=17;h++)sessions[3].hours.push(h);
+  sessions[3].range=(nyOpen<10?'0'+nyOpen:''+nyOpen)+':30–17h';
 
   function getSessionKey(fechahora){
     var h=new Date(fechahora).getHours();
