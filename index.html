@@ -600,7 +600,7 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
 // ══ DATA ══
 const STORE='tradingpro_v6';
 const SYNC_URL='https://script.google.com/macros/s/AKfycbxB_Nw_CEvQOXKP3repFzim8kFg5skWepBpdBt4MDr57DeVN14VkVvb8jLqEAZe4jXe/exec';
-function load(){try{return JSON.parse(localStorage.getItem(STORE))||defaultData();}catch{return defaultData();}}
+function load(){try{return JSON.parse(localStorage.getItem(STORE))||defaultData();}catch(e){return defaultData();}}
 function persist(d){localStorage.setItem(STORE,JSON.stringify(d));}
 
 function defaultData(){return{trades:[
@@ -745,7 +745,7 @@ function loadCapital(){const v=localStorage.getItem('tpro_capital');if(v){const 
 function init(){
   setNowDatetime();
   document.getElementById('f-lev').value=5;
-  loadCapital();migratePatronFromObs();populateSelects();updateTickerDropdown();updatePreviews();updateKPIs();updateOpenCount();updateSyncLastTime();startCycleMonitor();
+  loadCapital();migratePatronFromObs();populateSelects();updateTickerDropdown();updatePreviews();updateKPIs();updateOpenCount();updateSyncLastTime();setTimeout(startCycleMonitor,2000);
 }
 
 function setNowDatetime(){
@@ -1180,7 +1180,7 @@ async function refreshPrices(){
   const ids=tickers.map(t=>TICKER_MAP[t]).filter(Boolean).join(',');
   if(!ids){if(btn){btn.textContent='⚠️ Tickers no mapeados';btn.disabled=false;}return;}
   try{
-    const res=await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd`);
+    const res=await fetchWithRetry(`https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd`);
     const data=await res.json();
     const revMap={};Object.entries(TICKER_MAP).forEach(([tk,id])=>{revMap[id]=tk;});
     Object.entries(data).forEach(([id,prices])=>{
@@ -1439,7 +1439,7 @@ async function syncDown(){
   try{
     const resp=await fetch(SYNC_URL+'?action=load');
     const text=await resp.text();
-    let result;try{result=JSON.parse(text);}catch{throw new Error('Respuesta inválida');}
+    let result;try{result=JSON.parse(text);}catch(e){throw new Error('Respuesta inválida');}
     if(result.error==='no_data'){showSyncStatus('ℹ️ No hay datos en Drive aún. Subí primero.','#ff6b00',4000);btn.disabled=false;btn.textContent='⬇️ Bajar de Drive';return;}
     if(result.error)throw new Error(result.error);
     const parsed=result.trades?result:null;
@@ -1871,6 +1871,7 @@ function renderGraficos(){
     </div>
   </div></div>
 
+  <div class="desktop-col-full"><div id="best-trade-rec-container"></div></div>
   </div>`; // close desktop-grid
 }
 
@@ -1890,16 +1891,16 @@ function renderPartialClosesEditor(t){
     '<div style="background:var(--surface2);border-radius:9px;padding:10px 12px;margin-bottom:8px" id="pc-row-'+i+'">' +
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">' +
         '<div style="font-size:12px;font-weight:800;color:#ff6b00">Cierre '+(i+1)+' · '+c.pctClose+'%</div>' +
-        '<button onclick="deletePartialClose(\''+t.id+'\','+i+')" style="background:none;border:none;color:#ff3d57;cursor:pointer;font-size:13px;font-weight:700">✕ Eliminar</button>' +
+        '<button onclick="deletePartialClose(&apos;'+t.id+'&apos;,'+i+')" style="background:none;border:none;color:#ff3d57;cursor:pointer;font-size:13px;font-weight:700">✕ Eliminar</button>' +
       '</div>' +
       '<div class="row2">' +
         '<div class="field" style="margin:0"><label>Resultado %</label>' +
-          '<input type="number" step="any" value="'+(c.pct||0).toFixed(2)+'" onchange="updatePartialClose(\''+t.id+'\','+i+',\'pct\',this.value)" style="font-size:13px;padding:8px 10px"></div>' +
+          '<input type="number" step="any" value="'+(c.pct||0).toFixed(2)+'" onchange="updatePartialClose(&apos;'+t.id+'&apos;,'+i+',&apos;pct&apos;,this.value)" style="font-size:13px;padding:8px 10px"></div>' +
         '<div class="field" style="margin:0"><label>Precio cierre</label>' +
-          '<input type="text" inputmode="decimal" value="'+(c.precio||'')+'" onchange="updatePartialClose(\''+t.id+'\','+i+',\'precio\',this.value)" style="font-size:13px;padding:8px 10px"></div>' +
+          '<input type="text" inputmode="decimal" value="'+(c.precio||'')+'" onchange="updatePartialClose(&apos;'+t.id+'&apos;,'+i+',&apos;precio&apos;,this.value)" style="font-size:13px;padding:8px 10px"></div>' +
       '</div>' +
       '<div class="field" style="margin-top:8px"><label>Fecha y hora</label>' +
-        '<input type="datetime-local" value="'+(c.closedHora||'')+'" onchange="updatePartialClose(\''+t.id+'\','+i+',\'closedHora\',this.value)" style="font-size:13px;padding:8px 10px"></div>' +
+        '<input type="datetime-local" value="'+(c.closedHora||'')+'" onchange="updatePartialClose(&apos;'+t.id+'&apos;,'+i+',&apos;closedHora&apos;,this.value)" style="font-size:13px;padding:8px 10px"></div>' +
     '</div>'
   ).join('');
 }
@@ -1949,6 +1950,25 @@ function migratePatronFromObs(){
 }
 
 
+
+// ══ FETCH WITH RETRY (CoinGecko rate limit protection) ══
+async function fetchWithRetry(url, retries=3, delayMs=1500){
+  for(let i=0;i<retries;i++){
+    try{
+      const res=await fetch(url);
+      if(res.status===429){
+        // Rate limited — wait longer
+        await new Promise(r=>setTimeout(r,delayMs*(i+2)));
+        continue;
+      }
+      if(!res.ok)throw new Error('HTTP '+res.status);
+      return await res.json();
+    }catch(e){
+      if(i===retries-1)throw e;
+      await new Promise(r=>setTimeout(r,delayMs*(i+1)));
+    }
+  }
+}
 // ── Silent dot updater (no panel render needed) ──
 async function updateDotSilent(){
   if(!location.protocol.startsWith('https:')){
@@ -1957,12 +1977,11 @@ async function updateDotSilent(){
     return;
   }
   try{
-    const [pr,gr,mr]=await Promise.all([
-      fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&vs_currencies=usd&include_24hr_change=true&include_1hr_change=true'),
-      fetch('https://api.coingecko.com/api/v3/global'),
-      fetch('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=50&page=1&sparkline=false&price_change_percentage=1h,24h')
+    const [pd,gd,md]=await Promise.all([
+      fetchWithRetry('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&vs_currencies=usd&include_24hr_change=true&include_1hr_change=true'),
+      fetchWithRetry('https://api.coingecko.com/api/v3/global'),
+      fetchWithRetry('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=50&page=1&sparkline=false&price_change_percentage=1h,24h')
     ]);
-    const pd=await pr.json(),gd=await gr.json(),md=await mr.json();
     const btc=pd.bitcoin,eth=pd.ethereum;
     if(!btc||!eth)return;
     const btc1h=btc.usd_1h_change||0,btc24=btc.usd_24h_change||0;
@@ -1992,7 +2011,7 @@ async function updateDotSilent(){
     }
     // If panel is open, do full render too
     if(cycleOpen)checkMarketCycle();
-  }catch(e){}
+  }catch(_e){}
 }
 let cycleInterval=null;
 let cycleOpen=false;
@@ -2402,14 +2421,11 @@ async function checkMarketCycle(){
   if(btn){btn.textContent='⟳ Analizando...';btn.disabled=true;}
   try{
     // Fetch in parallel: prices + global (dominance) + top coins (breadth)
-    const [priceRes, globalRes, marketsRes] = await Promise.all([
-      fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&vs_currencies=usd&include_24hr_change=true&include_1hr_change=true'),
-      fetch('https://api.coingecko.com/api/v3/global'),
-      fetch('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=50&page=1&sparkline=false&price_change_percentage=1h,24h')
+    const [priceData, globalData, marketsData] = await Promise.all([
+      fetchWithRetry('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&vs_currencies=usd&include_24hr_change=true&include_1hr_change=true'),
+      fetchWithRetry('https://api.coingecko.com/api/v3/global'),
+      fetchWithRetry('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=50&page=1&sparkline=false&price_change_percentage=1h,24h')
     ]);
-    const priceData=await priceRes.json();
-    const globalData=await globalRes.json();
-    const marketsData=await marketsRes.json();
 
     const btc=priceData.bitcoin, eth=priceData.ethereum;
     if(!btc||!eth)throw new Error('Sin datos de precio');
@@ -2733,7 +2749,7 @@ function showObs(id){
   pop.style.cssText='position:fixed;bottom:80px;left:50%;transform:translateX(-50%);max-width:340px;width:90%;background:var(--card);border:1.5px solid #ff6b00;border-radius:12px;padding:14px 16px;z-index:9999;box-shadow:0 8px 32px rgba(0,0,0,.4);font-family:Nunito,sans-serif';
   pop.innerHTML='<div style="font-size:11px;font-weight:700;color:#ff6b00;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">💬 '+t.ticker+' · '+t.fecha+'</div>'+
     '<div style="font-size:13px;color:var(--text);line-height:1.6">'+t.obs+'</div>'+
-    '<div style="text-align:right;margin-top:8px"><button onclick="document.getElementById(\'obs-popup\').remove()" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:12px;font-weight:700">✕ Cerrar</button></div>';
+    '<div style="text-align:right;margin-top:8px"><button onclick="document.getElementById(&apos;obs-popup&apos;).remove()" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:12px;font-weight:700">✕ Cerrar</button></div>';
   document.body.appendChild(pop);
   // Auto-close after 5s
   setTimeout(()=>{const p=document.getElementById('obs-popup');if(p)p.remove();},5000);
@@ -2764,7 +2780,7 @@ function renderRiskExposure(openTrades){
 
 // ══ CAPITAL TRACKER ══
 function getCapitalMovements(){
-  try{return JSON.parse(localStorage.getItem('tpro_capital_moves')||'[]');}catch{return[];}
+  try{return JSON.parse(localStorage.getItem('tpro_capital_moves')||'[]');}catch(e){return[];}
 }
 function saveCapitalMovements(m){localStorage.setItem('tpro_capital_moves',JSON.stringify(m));}
 
@@ -2825,7 +2841,7 @@ function renderCapitalTracker(){
     listEl.innerHTML=moves.slice().reverse().map(m=>'<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 10px;background:var(--surface2);border-radius:7px;margin-bottom:5px">'+
       '<div><div style="font-size:12px;font-weight:700;color:'+(m.type==='deposit'?'#00c853':'#ff3d57')+'">'+(m.type==='deposit'?'+ Depósito':'- Retiro')+' $'+m.amount.toFixed(0)+'</div>'+
       '<div style="font-size:10px;color:var(--text2)">'+m.date+'</div></div>'+
-      '<button onclick="deleteCapitalMovement(\''+m.id+'\')" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:14px;padding:4px">✕</button>'+
+      '<button onclick="deleteCapitalMovement(&apos;'+m.id+'&apos;)" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:14px;padding:4px">✕</button>'+
     '</div>').join('');
   }
 }
@@ -2933,9 +2949,128 @@ renderGraficos=function(){
   const T=D.trades.filter(t=>!t.open);
   renderHourStats(T);
   renderDrawdownByMonth(T);
-  // Inject cross stats after estrategias section
   const crossEl=document.getElementById('cross-stats-container');
   if(crossEl)crossEl.innerHTML=renderCrossStats(T);
   renderPikachuStatsBlock(T);
+  renderBestTradeRec(T);
 };
+
+// ══ BEST TRADE RECOMMENDATION ══
+function renderBestTradeRec(T){
+  var el=document.getElementById('best-trade-rec-container');
+  if(!el)return;
+  var closed=T.filter(function(t){return!t.open&&t.resultado!==undefined;});
+  if(closed.length<5){el.innerHTML='';return;}
+
+  // ── Find best combinations ──────────────────────────────────
+  function groupBy(arr, keyFn){
+    var map={};
+    arr.forEach(function(t){
+      var k=keyFn(t);
+      if(!map[k])map[k]=[];
+      map[k].push(t);
+    });
+    return map;
+  }
+  function stats(arr){
+    if(!arr.length)return null;
+    var wins=arr.filter(function(t){return t.resultado>0;}).length;
+    var ev=arr.reduce(function(s,t){return s+t.resultado;},0)/arr.length;
+    var pf_g=arr.filter(function(t){return t.resultado>0;}).reduce(function(s,t){return s+t.resultado;},0)||0;
+    var pf_l=Math.abs(arr.filter(function(t){return t.resultado<0;}).reduce(function(s,t){return s+t.resultado;},0))||1;
+    return{n:arr.length,wins:wins,wr:wins/arr.length,ev:ev,pf:pf_g/pf_l};
+  }
+
+  // Best ticker
+  var byTicker=groupBy(closed,function(t){return t.ticker;});
+  var tickerStats=Object.entries(byTicker).map(function(e){var s=stats(e[1]);return{name:e[0],s:s};}).filter(function(x){return x.s&&x.s.n>=3;}).sort(function(a,b){return(b.s.ev*Math.sqrt(b.s.n))-(a.s.ev*Math.sqrt(a.s.n));});
+
+  // Best estrategia
+  var byStrat=groupBy(closed,function(t){return t.estrategia||'—';});
+  var stratStats=Object.entries(byStrat).map(function(e){var s=stats(e[1]);return{name:e[0],s:s};}).filter(function(x){return x.s&&x.s.n>=3;}).sort(function(a,b){return b.s.ev-a.s.ev;});
+
+  // Best temporalidad
+  var byTemp=groupBy(closed,function(t){return t.temp||'—';});
+  var tempStats=Object.entries(byTemp).map(function(e){var s=stats(e[1]);return{name:e[0],s:s};}).filter(function(x){return x.s&&x.s.n>=3;}).sort(function(a,b){return b.s.ev-a.s.ev;});
+
+  // Best motivo de salida
+  var bySalida=groupBy(closed,function(t){return t.salida||'—';});
+  var salidaStats=Object.entries(bySalida).map(function(e){var s=stats(e[1]);return{name:e[0],s:s};}).filter(function(x){return x.s&&x.s.n>=3;}).sort(function(a,b){return b.s.ev-a.s.ev;});
+
+  // Best timing
+  var byTiming=groupBy(closed.filter(function(t){return t.timing;}),function(t){return t.timing;});
+  var timingStats=Object.entries(byTiming).map(function(e){var s=stats(e[1]);return{name:e[0],s:s};}).filter(function(x){return x.s&&x.s.n>=3;}).sort(function(a,b){return b.s.ev-a.s.ev;});
+
+  // Best apalancamiento bucket
+  var levBuckets={'1-3x':[],'4-5x':[],'6-10x':[],'10x+':[]};
+  closed.forEach(function(t){var l=t.lev||5;if(l<=3)levBuckets['1-3x'].push(t);else if(l<=5)levBuckets['4-5x'].push(t);else if(l<=10)levBuckets['6-10x'].push(t);else levBuckets['10x+'].push(t);});
+  var levStats=Object.entries(levBuckets).map(function(e){var s=stats(e[1]);return{name:e[0],s:s};}).filter(function(x){return x.s&&x.s.n>=3;}).sort(function(a,b){return b.s.ev-a.s.ev;});
+
+  // Optimal margin
+  var margins=closed.map(function(t){return t.margenOriginal||t.margen||0;}).filter(function(m){return m>0;});
+  var sortedM=margins.slice().sort(function(a,b){return a-b;});
+  var medianMargen=sortedM[Math.floor(sortedM.length/2)]||0;
+
+  // Average SL% from losing trades
+  var losses=closed.filter(function(t){return t.resultado<0;});
+  var avgSL=losses.length?Math.abs(losses.reduce(function(s,t){return s+t.resultado;},0)/losses.length):10;
+
+  // Average TP% from winning trades
+  var wins2=closed.filter(function(t){return t.resultado>0;});
+  var avgTP=wins2.length?wins2.reduce(function(s,t){return s+t.resultado;},0)/wins2.length:20;
+
+  // ── Build output ─────────────────────────────────────────────
+  function chip(label, value, color){
+    return '<div style="background:var(--surface2);border-radius:9px;padding:10px 12px;display:flex;flex-direction:column;gap:3px">'+
+      '<div style="font-size:9px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px">'+label+'</div>'+
+      '<div style="font-size:15px;font-weight:900;color:'+(color||'#ff6b00')+'">'+value+'</div>'+
+    '</div>';
+  }
+
+  var bestTicker=tickerStats[0];
+  var bestStrat=stratStats[0];
+  var bestTemp=tempStats[0];
+  var bestSalida=salidaStats[0];
+  var bestTiming=timingStats[0];
+  var bestLev=levStats[0];
+
+  // Build insight text
+  var insights=[];
+  if(bestTicker)insights.push('<span style="color:#ff6b00;font-weight:800">'+bestTicker.name+'</span> es tu ticker más rentable (EV '+(bestTicker.s.ev>=0?'+':'')+bestTicker.s.ev.toFixed(1)+'%, WR '+Math.round(bestTicker.s.wr*100)+'%)');
+  if(bestStrat)insights.push('<span style="color:#ff6b00;font-weight:800">'+bestStrat.name+'</span> es tu mejor estrategia (EV '+(bestStrat.s.ev>=0?'+':'')+bestStrat.s.ev.toFixed(1)+'%)');
+  if(bestTemp)insights.push('Temporalidad <span style="color:#ff6b00;font-weight:800">'+bestTemp.name+'</span> te da mejor resultado');
+  if(bestSalida)insights.push('Salir por <span style="color:#ff6b00;font-weight:800">'+bestSalida.name+'</span> es tu motivo de salida más rentable');
+  if(bestTiming)insights.push('Entrar <span style="color:#ff6b00;font-weight:800">'+(bestTiming.name||'').toLowerCase()+'</span> mejora tus resultados');
+
+  el.innerHTML=
+    '<div class="chart-box" style="cursor:default">'+
+      '<div class="chart-label">🏆 Tu trade ideal — basado en tu historial</div>'+
+      '<div style="font-size:11px;color:var(--text2);margin-bottom:12px">Combinación óptima según tus '+closed.length+' trades cerrados</div>'+
+
+      '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px;margin-bottom:14px">'+
+        (bestTicker?chip('Ticker',bestTicker.name):'')+ 
+        (bestStrat?chip('Estrategia',bestStrat.name):'')+ 
+        (bestTemp?chip('Temporalidad',bestTemp.name):'')+ 
+        (bestSalida?chip('Salida ideal',bestSalida.name,'#00c853'):'')+
+        (bestTiming?chip('Timing','Entrar '+bestTiming.name,'#00c853'):'')+
+        (bestLev?chip('Apalancamiento',bestLev.name,'#ffd100'):'')+
+        chip('SL típico','-'+avgSL.toFixed(1)+'%','#ff3d57')+
+        chip('TP típico','+'+avgTP.toFixed(1)+'%','#00c853')+
+        chip('Margen típico','$'+medianMargen.toFixed(0),'#ff6b00')+
+      '</div>'+
+
+      '<div style="background:var(--surface2);border-radius:10px;padding:12px;border-left:3px solid #ff6b00">'+
+        '<div style="font-size:11px;font-weight:700;color:var(--text2);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">💡 Insights clave</div>'+
+        '<div style="font-size:12px;color:var(--text);line-height:1.9">'+
+          insights.map(function(i){return '• '+i;}).join('<br>')+
+        '</div>'+
+      '</div>'+
+
+      '<div style="margin-top:10px;padding:10px 12px;background:rgba(255,107,0,.08);border-radius:9px;border:1px solid rgba(255,107,0,.2)">'+
+        '<div style="font-size:11px;font-weight:900;color:#ff6b00;margin-bottom:4px">⚠️ Recordá</div>'+
+        '<div style="font-size:11px;color:var(--text2);line-height:1.6">El rendimiento pasado no garantiza resultados futuros. Usá esto como guía, no como regla absoluta.</div>'+
+      '</div>'+
+    '</div>';
+}
+
 </script>
