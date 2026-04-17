@@ -752,7 +752,7 @@ function switchTab(tab){
     // Stop auto-refresh when leaving the tab
     if(priceInterval){clearInterval(priceInterval);priceInterval=null;}
   }
-  if(tab==='cargar'){updatePreviews();updateKPIs();startCycleMonitor();}
+  if(tab==='cargar'){updatePreviews();updateKPIs();if(cycleInterval)clearInterval(cycleInterval);cycleInterval=setInterval(checkMarketCycle,300000);}
 }
 
 // ══ INIT ══
@@ -761,7 +761,7 @@ function loadCapital(){const v=localStorage.getItem('tpro_capital');if(v){const 
 function init(){
   setNowDatetime();
   document.getElementById('f-lev').value=5;
-  loadCapital();migratePatronFromObs();populateSelects();updateTickerDropdown();updatePreviews();updateKPIs();updateOpenCount();updateSyncLastTime();
+  loadCapital();migratePatronFromObs();populateSelects();updateTickerDropdown();updatePreviews();updateKPIs();updateOpenCount();updateSyncLastTime();startCycleMonitor();
 }
 
 function setNowDatetime(){
@@ -1964,6 +1964,14 @@ function migratePatronFromObs(){
   if(changed){persist(D);}
 }
 
+function startCycleMonitor(){
+  if(typeof checkMarketCycle==='function'){
+    checkMarketCycle();
+    if(cycleInterval)clearInterval(cycleInterval);
+    cycleInterval=setInterval(checkMarketCycle,300000);
+  }
+}
+
 init();
 </script>
 
@@ -2477,7 +2485,7 @@ async function checkMarketCycle(){
     // ❌ No longear: BTC cayendo fuerte
     const noLongOverride=btc24<-5||btc1h<-3;
 
-    // Update toggle button + dot in Cargar tab
+    // Always update dot color
     const semEl=document.getElementById('cycle-semaphore');
     const titleEl=document.getElementById('cycle-title');
     const subEl=document.getElementById('cycle-subtitle');
@@ -2486,6 +2494,9 @@ async function checkMarketCycle(){
     if(titleEl)titleEl.textContent='Semáforo Altcoins';
     if(subEl){subEl.textContent=action;subEl.style.color=semColor;}
     if(dot){dot.style.background=mode==='long'?'#00c853':mode==='short'?'#ff3d57':'#ffd100';dot.style.boxShadow='0 0 5px '+(mode==='long'?'#00c853':mode==='short'?'#ff3d57':'#ffd100');}
+
+    // Only render detailed panel when expanded
+    if(!cycleOpen)return;
 
     // ── BUILD DETAILED PANEL ──────────────────────────────────
     function condRow(ok, label, detail){
@@ -2608,17 +2619,6 @@ async function checkMarketCycle(){
 }
 
 // Auto-check every 5 minutes when on En Curso tab
-function startCycleMonitor(){
-  if(cycleOpen)checkMarketCycle();
-  if(cycleInterval)clearInterval(cycleInterval);
-  cycleInterval=setInterval(()=>{
-    if(document.getElementById('page-cargar').classList.contains('active')&&cycleOpen)
-      checkMarketCycle();
-    else if(!document.getElementById('page-cargar').classList.contains('active')){
-      clearInterval(cycleInterval);cycleInterval=null;
-    }
-  },300000);
-}
 
 
 // ══ PIKACHU PATRON STATS ══
