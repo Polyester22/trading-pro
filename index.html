@@ -303,7 +303,10 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
         </select>
       </div>
     </div>
-    <div class="field"><label>Estrategia</label><select id="f-estrategia"></select></div>
+    <div class="row2">
+      <div class="field"><label>Estrategia</label><select id="f-estrategia" onchange="onEstrategiaChange()"></select></div>
+      <div class="field" id="f-patron-row" style="display:none"><label>Patrón # <span style="color:var(--text2);font-size:9px">(Pikachu)</span></label><select id="f-patron"><option value="">Sin especificar</option><option value="1">1° Patrón</option><option value="2">2° Patrón</option><option value="3">3° Patrón</option><option value="4">4° Patrón</option><option value="5">5° Patrón</option><option value="6">6° Patrón</option><option value="7">7° Patrón</option><option value="8">8° Patrón</option></select></div>
+    </div>
     <div class="row2">
       <div class="field"><label>Timing de entrada</label>
         <select id="f-timing">
@@ -701,7 +704,7 @@ function loadCapital(){const v=localStorage.getItem('tpro_capital');if(v){const 
 function init(){
   setNowDatetime();
   document.getElementById('f-lev').value=5;
-  loadCapital();populateSelects();updateTickerDropdown();updatePreviews();updateKPIs();updateOpenCount();updateSyncLastTime();
+  loadCapital();migratePatronFromObs();populateSelects();updateTickerDropdown();updatePreviews();updateKPIs();updateOpenCount();updateSyncLastTime();
 }
 
 function setNowDatetime(){
@@ -924,7 +927,7 @@ function saveTrade(){
     margen:parseFloat(document.getElementById('f-margen').value)||0,entrada:parseFloat(document.getElementById('f-entrada').value)||0,
     actual:parseFloat(document.getElementById('f-actual').value)||0,lev:parseFloat(document.getElementById('f-lev').value)||5,
     temp:document.getElementById('f-temp').value,estrategia:document.getElementById('f-estrategia').value,
-    salida:document.getElementById('f-salida').value,timing:document.getElementById('f-timing').value,
+    salida:document.getElementById('f-salida').value,timing:document.getElementById('f-timing').value,patron:document.getElementById('f-patron').value||null,
     open:document.getElementById('f-open').checked,
     p10:document.getElementById('f-10p').checked,obs:document.getElementById('f-obs').value,resultado,
     ...(closedHoraFinal?{closedHora:closedHoraFinal}:{})};
@@ -965,6 +968,8 @@ function loadTradeForEdit(id){
     document.getElementById('f-estrategia').value=t.estrategia;
     document.getElementById('f-salida').value=t.salida||'';
     document.getElementById('f-timing').value=t.timing||'';
+    document.getElementById('f-patron').value=t.patron||'';
+    onEstrategiaChange();
     document.getElementById('f-open').checked=t.open;
     document.getElementById('f-10p').checked=t.p10||false;
     document.getElementById('f-obs').value=t.obs||'';
@@ -983,6 +988,8 @@ function resetForm(){
   document.getElementById('f-open').checked=false;
   document.getElementById('f-10p').checked=false;
   document.getElementById('f-timing').value='';
+  document.getElementById('f-patron').value='';
+  const _pr=document.getElementById('f-patron-row');if(_pr)_pr.style.display='none';
   // Restore date-only input for new trades
   document.getElementById('f-fecha').style.display='block';
   document.getElementById('f-fechahora').style.display='none';
@@ -1729,7 +1736,10 @@ function renderGraficos(){
     })()}
   </div></div>
 
-    <!-- ⑨ RANKING TICKERS -->
+  <!-- PIKACHU PATRON STATS -->
+  <div class="desktop-col-full" id="pikachu-stats-container"></div>
+
+  <!-- ⑨ RANKING TICKERS -->
   <div class="desktop-col-full">
   <div class="chart-box" style="cursor:default">
     <div class="chart-label">🏅 Ranking tickers — por EV ponderado (rendimiento × volumen)</div>
@@ -1756,12 +1766,33 @@ function renderGraficos(){
   </div></div>
 
   </div>`; // close desktop-grid
+  renderPikachuStatsBlock(T);
 }
 
 // ══ HELPERS ══
 function calcStreak(sorted){let cur=0,bW=0,bL=0,bL2=0;sorted.forEach(t=>{if(t.resultado>0)cur=cur>0?cur+1:1;else if(t.resultado<0)cur=cur<0?cur-1:-1;else cur=0;if(cur>bW)bW=cur;if(cur<bL2)bL2=cur;});return{current:cur,bestWin:bW,bestLoss:Math.abs(bL2)};}
 function donut(wins,losses,neutral,total){if(!total)return`<circle cx="50" cy="50" r="38" fill="none" stroke="#2a2a45" stroke-width="20"/>`;const data=[{v:wins,c:'#00c853'},{v:losses,c:'#ff3d57'},{v:neutral,c:'#9999b8'}].filter(d=>d.v>0);const r=38,cx=50,cy=50;let off=-90;return data.map(d=>{const deg=(d.v/total)*360,r1=(off*Math.PI)/180,r2=((off+deg)*Math.PI)/180,x1=cx+r*Math.cos(r1),y1=cy+r*Math.sin(r1),x2=cx+r*Math.cos(r2),y2=cy+r*Math.sin(r2),path=`M${cx},${cy} L${x1},${y1} A${r},${r} 0 ${deg>180?1:0} 1 ${x2},${y2} Z`;off+=deg;return`<path d="${path}" fill="${d.c}" opacity=".85"/>`;}).join('')+`<circle cx="${cx}" cy="${cy}" r="22" fill="var(--card)"/>`;}
 function equitySVG(pts){if(pts.length<2)return'';const W=340,H=100,pd=10,mn=Math.min(...pts),mx=Math.max(...pts),rng=mx-mn||1,xs=pts.map((_,i)=>pd+(i/(pts.length-1))*(W-pd*2)),ys=pts.map(v=>H-pd-((v-mn)/rng)*(H-pd*2)),line=xs.map((x,i)=>`${i===0?'M':'L'}${x},${ys[i]}`).join(' '),fill=line+` L${xs[xs.length-1]},${H} L${xs[0]},${H} Z`,col=pts[pts.length-1]>=pts[0]?'#00c853':'#ff3d57';return`<defs><linearGradient id="eg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${col}" stop-opacity=".35"/><stop offset="100%" stop-color="${col}" stop-opacity="0"/></linearGradient></defs><path d="${fill}" fill="url(#eg)"/><path d="${line}" fill="none" stroke="${col}" stroke-width="2.5" stroke-linejoin="round"/>${xs.slice(1).map((x,i)=>`<circle cx="${x}" cy="${ys[i+1]}" r="3" fill="${col}"/>`).join('')}`;}
+
+// ══ PIKACHU PATRON ══
+function onEstrategiaChange(){
+  const val=document.getElementById('f-estrategia').value;
+  const row=document.getElementById('f-patron-row');
+  if(row)row.style.display=val==='Pikachu'?'block':'none';
+  if(val!=='Pikachu'){const el=document.getElementById('f-patron');if(el)el.value='';}
+}
+
+// Auto-migrate: parse patron from obs for existing Pikachu trades that lack patron field
+function migratePatronFromObs(){
+  let changed=false;
+  D.trades.forEach(t=>{
+    if(t.estrategia==='Pikachu'&&!t.patron&&t.obs){
+      const m=t.obs.match(/(\d+)[^\s]*\s*[Pp]atr/);
+      if(m){t.patron=m[1];changed=true;}
+    }
+  });
+  if(changed){persist(D);}
+}
 
 init();
 </script>
@@ -2187,6 +2218,77 @@ function startCycleMonitor(){
       checkMarketCycle();
     else{clearInterval(cycleInterval);cycleInterval=null;}
   },300000); // every 5 min
+}
+
+
+// ══ PIKACHU PATRON STATS ══
+function getPatronNum(t){
+  if(t.patron)return parseInt(t.patron);
+  if(t.obs){var m=t.obs.match(/(\d+)[^\s]*\s*[Pp]atr/);if(m)return parseInt(m[1]);}
+  return null;
+}
+
+function renderPikachuStatsBlock(T){
+  var el=document.getElementById('pikachu-stats-container');
+  if(!el)return;
+  var pikTrades=T.filter(function(t){return t.estrategia==='Pikachu';});
+  if(!pikTrades.length){el.innerHTML='';return;}
+  var byPatron={};
+  pikTrades.forEach(function(t){
+    var p=getPatronNum(t);
+    if(p){if(!byPatron[p])byPatron[p]=[];byPatron[p].push(t.resultado);}
+  });
+  if(!Object.keys(byPatron).length){
+    el.innerHTML='<div class="chart-box" style="cursor:default"><div class="chart-label">'+
+      '\uD83D\uDCCD Pikachu — rendimiento por patrón</div>'+
+      '<div style="color:var(--text2);font-size:12px">Asigná el número de patrón al cargar trades Pikachu.</div></div>';
+    return;
+  }
+  var patronData=Object.entries(byPatron).map(function(e){
+    var k=e[0],v=e[1];
+    var wins=v.filter(function(x){return x>0;}).length,n2=v.length;
+    var avgWin=wins?v.filter(function(x){return x>0;}).reduce(function(a,x){return a+x;},0)/wins:0;
+    var avgLoss=(n2-wins)?v.filter(function(x){return x<=0;}).reduce(function(a,x){return a+x;},0)/(n2-wins):0;
+    var ev=(wins/n2)*avgWin+((n2-wins)/n2)*avgLoss;
+    return{p:parseInt(k),ev:ev,count:n2,wins:wins,wr:wins/n2*100};
+  }).sort(function(a,b){return a.p-b.p;});
+  var bestEV=patronData.reduce(function(a,b){return b.ev>a.ev?b:a;});
+  var mxEV=Math.max.apply(null,patronData.map(function(d){return Math.abs(d.ev);}));
+  if(mxEV===0)mxEV=1;
+
+  var cards=patronData.map(function(d){
+    var isBest=d.p===bestEV.p;
+    var col=d.ev>=0?'#00c853':'#ff3d57';
+    var border=isBest?'1.5px solid #ff6b00':'1.5px solid transparent';
+    var badge=isBest?'<div style="position:absolute;top:-8px;left:50%;transform:translateX(-50%);font-size:10px;background:#ff6b00;color:white;border-radius:4px;padding:1px 6px;font-weight:800">MEJOR</div>':'';
+    return '<div style="background:var(--surface2);border-radius:10px;padding:10px;text-align:center;border:'+border+';position:relative">'+
+      badge+
+      '<div style="font-size:16px;font-weight:900;margin-bottom:4px">'+d.p+'°</div>'+
+      '<div style="font-size:18px;font-weight:900;color:'+col+'">'+(d.ev>=0?'+':'')+d.ev.toFixed(1)+'%</div>'+
+      '<div style="font-size:9px;color:var(--text2);margin-top:3px">EV · '+d.count+'t</div>'+
+      '<div style="font-size:10px;color:var(--text2)">WR '+d.wr.toFixed(0)+'%</div>'+
+      '</div>';
+  }).join('');
+
+  var bars=patronData.map(function(d){
+    var w=Math.max(Math.abs(d.ev)/mxEV*100,3);
+    var col=d.ev>=0?'#00c853':'#ff3d57';
+    var label=w>20?(d.ev>=0?'+':'')+d.ev.toFixed(1)+'%':'';
+    return '<div class="bar-row">'+
+      '<div class="bar-name" style="width:30px">'+d.p+'°</div>'+
+      '<div class="bar-track"><div class="bar-fill '+(d.ev>=0?'pos':'neg')+'" style="width:'+w+'%">'+label+'</div></div>'+
+      '<div style="font-size:10px;font-weight:800;color:'+col+';width:50px;text-align:right;flex-shrink:0">'+(d.ev>=0?'+':'')+d.ev.toFixed(1)+'%</div>'+
+      '<div class="bar-count">'+d.count+'t · '+d.wr.toFixed(0)+'% WR</div>'+
+      '</div>';
+  }).join('');
+
+  el.innerHTML='<div class="chart-box" style="cursor:default">'+
+    '<div class="chart-label">\uD83D\uDCCD Pikachu — rendimiento por número de patrón</div>'+
+    '<div style="font-size:11px;color:var(--text2);margin-bottom:12px">'+pikTrades.length+' trades Pikachu · '+
+      '<strong style="color:#ff6b00">Mejor: '+bestEV.p+'° Patrón</strong> (EV '+(bestEV.ev>=0?'+':'')+bestEV.ev.toFixed(1)+'%)</div>'+
+    '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px;margin-bottom:14px">'+cards+'</div>'+
+    '<div class="chart-label" style="margin-bottom:8px">EV por patrón</div>'+bars+
+    '</div>';
 }
 
 </script>
