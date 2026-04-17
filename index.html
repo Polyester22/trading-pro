@@ -327,6 +327,11 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
       <label>Fecha y hora de cierre <span style="color:var(--text2);font-size:9px;font-weight:600">(edición)</span></label>
       <input type="datetime-local" id="f-closedhora">
     </div>
+    <!-- PARTIAL CLOSES EDITOR — shown only in edit mode when trade has partial closes -->
+    <div id="f-partial-closes-row" style="display:none">
+      <div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">📉 Cierres parciales</div>
+      <div id="f-partial-closes-list"></div>
+    </div>
     <div class="field"><label>Observaciones</label><textarea id="f-obs" placeholder="Notas del trade..." rows="2" style="resize:vertical;font-family:'Nunito',sans-serif;font-size:14px;padding:10px 12px;background:var(--input-bg);border:1.5px solid var(--border);border-radius:8px;color:var(--text);width:100%;outline:none;transition:border-color .2s" onfocus="this.style.borderColor='#ff6b00'" onblur="this.style.borderColor='var(--border)'"></textarea></div>
   </div>
   <button class="btn btn-orange" onclick="saveTrade()" id="btn-save">➕ Agregar Trade</button>
@@ -558,22 +563,6 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
     <div class="empty-text">No hay trades abiertos</div>
   </div>
 
-  <!-- PRICE ALERTS -->
-  <div style="margin-top:16px">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-      <div style="font-size:11px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.5px">🔔 Alertas de precio</div>
-      <button onclick="toggleAlertsPanel()" id="alerts-toggle-btn" class="btn btn-dark btn-sm" style="font-size:10px">+ Nueva</button>
-    </div>
-    <div id="alerts-new-panel" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:8px">
-      <div class="row2">
-        <div class="field" style="margin:0"><label>Ticker</label><input type="text" id="al-ticker" placeholder="BTC" style="font-size:13px;padding:8px 10px;text-transform:uppercase" oninput="this.value=this.value.toUpperCase()"></div>
-        <div class="field" style="margin:0"><label>Precio $</label><input type="number" id="al-price" placeholder="ej: 50000" step="any" style="font-size:13px;padding:8px 10px"></div>
-      </div>
-      <div class="field" style="margin-top:8px"><label>Condición</label><select id="al-cond" style="font-size:13px;padding:8px 10px"><option value="above">Sube por encima de</option><option value="below">Baja por debajo de</option></select></div>
-      <button class="btn btn-orange btn-sm" onclick="addPriceAlert()" style="width:100%;margin-top:8px;margin-bottom:0">🔔 Crear alerta</button>
-    </div>
-    <div id="alerts-list"></div>
-  </div>
 </div>
 
 <!-- ══ STATS ══ -->
@@ -1008,6 +997,8 @@ function loadTradeForEdit(id){
     const chInput=document.getElementById('f-closedhora');
     if(chRow){chRow.style.display='block';}
     if(chInput){chInput.value=t.closedHora||'';}
+    // Show partial closes editor if any
+    renderPartialClosesEditor(t);
     document.getElementById('f-fecha').value=t.fecha;
     document.getElementById('f-ticker').value=t.ticker;
     document.getElementById('f-pos').value=t.pos;
@@ -1047,6 +1038,7 @@ function resetForm(){
   document.getElementById('f-hora-label').style.display='none';
   const _chRow=document.getElementById('f-closedhora-row');if(_chRow)_chRow.style.display='none';
   const _chInp=document.getElementById('f-closedhora');if(_chInp)_chInp.value='';
+  const _pcRow=document.getElementById('f-partial-closes-row');if(_pcRow)_pcRow.style.display='none';
   setNowDatetime();
   applyLive(null);
   document.getElementById('result-note').textContent='Ingresá precios, R% o P&L$ — se calculan entre sí.';
@@ -1859,7 +1851,56 @@ function calcStreak(sorted){let cur=0,bW=0,bL=0,bL2=0;sorted.forEach(t=>{if(t.re
 function donut(wins,losses,neutral,total){if(!total)return`<circle cx="50" cy="50" r="38" fill="none" stroke="#2a2a45" stroke-width="20"/>`;const data=[{v:wins,c:'#00c853'},{v:losses,c:'#ff3d57'},{v:neutral,c:'#9999b8'}].filter(d=>d.v>0);const r=38,cx=50,cy=50;let off=-90;return data.map(d=>{const deg=(d.v/total)*360,r1=(off*Math.PI)/180,r2=((off+deg)*Math.PI)/180,x1=cx+r*Math.cos(r1),y1=cy+r*Math.sin(r1),x2=cx+r*Math.cos(r2),y2=cy+r*Math.sin(r2),path=`M${cx},${cy} L${x1},${y1} A${r},${r} 0 ${deg>180?1:0} 1 ${x2},${y2} Z`;off+=deg;return`<path d="${path}" fill="${d.c}" opacity=".85"/>`;}).join('')+`<circle cx="${cx}" cy="${cy}" r="22" fill="var(--card)"/>`;}
 function equitySVG(pts){if(pts.length<2)return'';const W=340,H=100,pd=10,mn=Math.min(...pts),mx=Math.max(...pts),rng=mx-mn||1,xs=pts.map((_,i)=>pd+(i/(pts.length-1))*(W-pd*2)),ys=pts.map(v=>H-pd-((v-mn)/rng)*(H-pd*2)),line=xs.map((x,i)=>`${i===0?'M':'L'}${x},${ys[i]}`).join(' '),fill=line+` L${xs[xs.length-1]},${H} L${xs[0]},${H} Z`,col=pts[pts.length-1]>=pts[0]?'#00c853':'#ff3d57';return`<defs><linearGradient id="eg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${col}" stop-opacity=".35"/><stop offset="100%" stop-color="${col}" stop-opacity="0"/></linearGradient></defs><path d="${fill}" fill="url(#eg)"/><path d="${line}" fill="none" stroke="${col}" stroke-width="2.5" stroke-linejoin="round"/>${xs.slice(1).map((x,i)=>`<circle cx="${x}" cy="${ys[i+1]}" r="3" fill="${col}"/>`).join('')}`;}
 
-// ══ PIKACHU PATRON ══
+// ══ PARTIAL CLOSES EDITOR ══
+function renderPartialClosesEditor(t){
+  const row=document.getElementById('f-partial-closes-row');
+  const list=document.getElementById('f-partial-closes-list');
+  if(!row||!list)return;
+  if(!t.partialCloses||!t.partialCloses.length){row.style.display='none';return;}
+  row.style.display='block';
+  list.innerHTML=t.partialCloses.map((c,i)=>
+    '<div style="background:var(--surface2);border-radius:9px;padding:10px 12px;margin-bottom:8px" id="pc-row-'+i+'">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">' +
+        '<div style="font-size:12px;font-weight:800;color:#ff6b00">Cierre '+(i+1)+' · '+c.pctClose+'%</div>' +
+        '<button onclick="deletePartialClose(\''+t.id+'\','+i+')" style="background:none;border:none;color:#ff3d57;cursor:pointer;font-size:13px;font-weight:700">✕ Eliminar</button>' +
+      '</div>' +
+      '<div class="row2">' +
+        '<div class="field" style="margin:0"><label>Resultado %</label>' +
+          '<input type="number" step="any" value="'+(c.pct||0).toFixed(2)+'" onchange="updatePartialClose(\''+t.id+'\','+i+',\'pct\',this.value)" style="font-size:13px;padding:8px 10px"></div>' +
+        '<div class="field" style="margin:0"><label>Precio cierre</label>' +
+          '<input type="number" step="any" value="'+(c.precio||'')+'" onchange="updatePartialClose(\''+t.id+'\','+i+',\'precio\',this.value)" style="font-size:13px;padding:8px 10px"></div>' +
+      '</div>' +
+      '<div class="field" style="margin-top:8px"><label>Fecha y hora</label>' +
+        '<input type="datetime-local" value="'+(c.closedHora||'')+'" onchange="updatePartialClose(\''+t.id+'\','+i+',\'closedHora\',this.value)" style="font-size:13px;padding:8px 10px"></div>' +
+    '</div>'
+  ).join('');
+}
+
+function updatePartialClose(tradeId, idx, field, value){
+  const t=D.trades.find(x=>x.id===tradeId);
+  if(!t||!t.partialCloses||!t.partialCloses[idx])return;
+  if(field==='pct')t.partialCloses[idx].pct=parseFloat(value)||0;
+  else if(field==='precio')t.partialCloses[idx].precio=parseFloat(value)||0;
+  else if(field==='closedHora')t.partialCloses[idx].closedHora=value;
+  // Recalculate pnl for this close
+  const c=t.partialCloses[idx];
+  const margenBase=t.margenOriginal||t.margen;
+  c.pnl=margenBase*(c.pctClose/100)*(c.pct/100);
+  persist(D);
+}
+
+function deletePartialClose(tradeId, idx){
+  const t=D.trades.find(x=>x.id===tradeId);
+  if(!t||!t.partialCloses)return;
+  if(!confirm('¿Eliminar este cierre parcial?'))return;
+  t.partialCloses.splice(idx,1);
+  // Restore margin for removed close
+  const removedPct=t.partialCloses[idx]?0:0; // already spliced
+  persist(D);
+  renderPartialClosesEditor(t);
+}
+
+
 function onEstrategiaChange(){
   const val=document.getElementById('f-estrategia').value;
   const row=document.getElementById('f-patron-row');
@@ -2599,72 +2640,6 @@ function renderCapitalTracker(){
       '<button onclick="deleteCapitalMovement(\''+m.id+'\')" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:14px;padding:4px">✕</button>'+
     '</div>').join('');
   }
-}
-
-// ══ PRICE ALERTS ══
-const ALERTS_KEY='tpro_price_alerts';
-function getAlerts(){try{return JSON.parse(localStorage.getItem(ALERTS_KEY)||'[]');}catch{return[];}}
-function saveAlerts(a){localStorage.setItem(ALERTS_KEY,JSON.stringify(a));}
-
-function toggleAlertsPanel(){
-  const el=document.getElementById('alerts-new-panel');if(!el)return;
-  el.style.display=el.style.display==='none'?'block':'none';
-  renderAlertsList();
-}
-
-function addPriceAlert(){
-  const ticker=document.getElementById('al-ticker').value.toUpperCase().trim();
-  const price=parseFloat(document.getElementById('al-price').value);
-  const cond=document.getElementById('al-cond').value;
-  if(!ticker||!price){alert('Ingresá ticker y precio');return;}
-  const alerts=getAlerts();
-  alerts.push({id:uid(),ticker,price,cond,active:true,created:new Date().toLocaleDateString('es-AR')});
-  saveAlerts(alerts);
-  document.getElementById('al-ticker').value='';
-  document.getElementById('al-price').value='';
-  document.getElementById('alerts-new-panel').style.display='none';
-  renderAlertsList();
-}
-
-function deleteAlert(id){saveAlerts(getAlerts().filter(a=>a.id!==id));renderAlertsList();}
-
-function renderAlertsList(){
-  const el=document.getElementById('alerts-list');if(!el)return;
-  const alerts=getAlerts();
-  if(!alerts.length){el.innerHTML='<div style="font-size:11px;color:var(--text2);text-align:center;padding:8px">Sin alertas activas</div>';return;}
-  el.innerHTML=alerts.map(a=>{
-    const currentPrice=livePrices[a.ticker]||0;
-    const triggered=currentPrice&&((a.cond==='above'&&currentPrice>=a.price)||(a.cond==='below'&&currentPrice<=a.price));
-    const col=triggered?'#ffd100':a.cond==='above'?'#00c853':'#ff3d57';
-    return '<div style="display:flex;align-items:center;gap:8px;background:var(--surface2);border-radius:8px;padding:8px 10px;margin-bottom:5px;border-left:3px solid '+col+'">'+
-      '<div style="flex:1"><div style="font-size:12px;font-weight:800">'+a.ticker+' '+(a.cond==='above'?'↑':'↓')+' $'+a.price+'</div>'+
-      '<div style="font-size:10px;color:var(--text2)">'+(triggered?'⚡ ¡Condición cumplida!':a.cond==='above'?'Alerta si sube por encima':'Alerta si baja por debajo')+
-      (currentPrice?' · Precio actual: $'+fmtPriceShort(currentPrice):'')+'</div></div>'+
-      '<button onclick="deleteAlert(\''+a.id+'\')" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:14px">✕</button>'+
-    '</div>';
-  }).join('');
-}
-
-// Check alerts on price update
-const _origRefreshPrices2=refreshPrices;
-refreshPrices=async function(){
-  await _origRefreshPrices2();
-  checkPriceAlerts();
-  renderAlertsList();
-};
-
-function checkPriceAlerts(){
-  const alerts=getAlerts();
-  alerts.forEach(a=>{
-    const p=livePrices[a.ticker];
-    if(!p)return;
-    const triggered=(a.cond==='above'&&p>=a.price)||(a.cond==='below'&&p<=a.price);
-    if(triggered&&'Notification' in window&&Notification.permission==='granted'){
-      new Notification('🔔 Alerta Polytrades: '+a.ticker,{
-        body:(a.cond==='above'?'Subió':'Bajó')+' a $'+p.toFixed(4)+' (objetivo: $'+a.price+')'
-      });
-    }
-  });
 }
 
 // ══ CROSS STATS TIMING × ESTRATEGIA ══
