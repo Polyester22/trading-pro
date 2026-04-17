@@ -2993,8 +2993,8 @@ function renderBestTradeRec(T){
   var byTemp=groupBy(closed,function(t){return t.temp||'—';});
   var tempStats=Object.entries(byTemp).map(function(e){var s=stats(e[1]);return{name:e[0],s:s};}).filter(function(x){return x.s&&x.s.n>=3;}).sort(function(a,b){return b.s.ev-a.s.ev;});
 
-  // Best motivo de salida
-  var bySalida=groupBy(closed,function(t){return t.salida||'—';});
+  // Best motivo de salida — exclude SL (it's a loss by definition)
+  var bySalida=groupBy(closed.filter(function(t){return t.salida&&t.salida!=='SL';}),function(t){return t.salida;});
   var salidaStats=Object.entries(bySalida).map(function(e){var s=stats(e[1]);return{name:e[0],s:s};}).filter(function(x){return x.s&&x.s.n>=3;}).sort(function(a,b){return b.s.ev-a.s.ev;});
 
   // Best timing
@@ -3039,7 +3039,7 @@ function renderBestTradeRec(T){
   if(bestTicker)insights.push('<span style="color:#ff6b00;font-weight:800">'+bestTicker.name+'</span> es tu ticker más rentable (EV '+(bestTicker.s.ev>=0?'+':'')+bestTicker.s.ev.toFixed(1)+'%, WR '+Math.round(bestTicker.s.wr*100)+'%)');
   if(bestStrat)insights.push('<span style="color:#ff6b00;font-weight:800">'+bestStrat.name+'</span> es tu mejor estrategia (EV '+(bestStrat.s.ev>=0?'+':'')+bestStrat.s.ev.toFixed(1)+'%)');
   if(bestTemp)insights.push('Temporalidad <span style="color:#ff6b00;font-weight:800">'+bestTemp.name+'</span> te da mejor resultado');
-  if(bestSalida)insights.push('Salir por <span style="color:#ff6b00;font-weight:800">'+bestSalida.name+'</span> es tu motivo de salida más rentable');
+  if(bestSalida)insights.push('Cerrar por <span style="color:#ff6b00;font-weight:800">'+bestSalida.name+'</span> te da mejor resultado promedio ('+bestSalida.s.n+' trades, EV '+(bestSalida.s.ev>=0?'+':'')+bestSalida.s.ev.toFixed(1)+'%)');
   if(bestTiming)insights.push('Entrar <span style="color:#ff6b00;font-weight:800">'+(bestTiming.name||'').toLowerCase()+'</span> mejora tus resultados');
 
   el.innerHTML=
