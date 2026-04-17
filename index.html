@@ -2376,17 +2376,34 @@ async function checkMarketCycle(){
 
     // ── SEMÁFORO FINAL ───────────────────────────────────────
     const score=[c1,c2,c3,c4].filter(Boolean).length;
-    let semaphore, semColor, semBg, semBorder, action, actionColor;
+
+    // Also compute short score: opposite conditions
+    const shortC1=btc24<-2||btc1h<-1.5;          // BTC cayendo
+    const shortC2=!domFavorable&&!ethOutperforms24; // BTC.D subiendo
+    const shortC3=!ethBtcRising&&eth1h<btc1h-0.3;  // ETH más débil que BTC
+    const shortC4=altsPct<40;                       // Alts mayormente rojas
+    const shortScore=[shortC1,shortC2,shortC3,shortC4].filter(Boolean).length;
+
+    let semaphore, semColor, semBg, action, actionColor, mode;
     if(score>=3){
-      semaphore='🟢'; semColor='#00c853'; semBg='rgba(0,200,83,.08)'; semBorder='rgba(0,200,83,.4)';
-      action='MODO ALTCOINS — Buscar LONG en alts ('+score+'/4 ✓)'; actionColor='#00c853';
+      semaphore='🟢'; semColor='#00c853'; semBg='rgba(0,200,83,.08)';
+      action='LONG — Modo altcoins activado ('+score+'/4)'; actionColor='#00c853'; mode='long';
+    } else if(shortScore>=3){
+      semaphore='🔴'; semColor='#ff3d57'; semBg='rgba(255,61,87,.08)';
+      action='SHORT — Modo risk-off ('+shortScore+'/4)'; actionColor='#ff3d57'; mode='short';
     } else if(score===2){
-      semaphore='🟡'; semColor='#ffd100'; semBg='rgba(255,209,0,.08)'; semBorder='rgba(255,209,0,.4)';
-      action='ZONA MIXTA — Operá menos, esperá confirmación ('+score+'/4)'; actionColor='#ffd100';
+      semaphore='🟡'; semColor='#ffd100'; semBg='rgba(255,209,0,.08)';
+      action='NO TRADE — Mercado mixto, esperá confirmación'; actionColor='#ffd100'; mode='wait';
     } else {
-      semaphore='🔴'; semColor='#ff3d57'; semBg='rgba(255,61,87,.08)'; semBorder='rgba(255,61,87,.3)';
-      action='NO ALTCOINS — Evitá longs, considerá esperar ('+score+'/4)'; actionColor='#ff3d57';
+      semaphore='🟡'; semColor='#ffd100'; semBg='rgba(255,209,0,.08)';
+      action='NO TRADE — Sin dirección clara, paciencia'; actionColor='#ffd100'; mode='wait';
     }
+
+    // Special override rules
+    // ❌ No shortear: BTC lateral + alts verdes
+    const noShortOverride=Math.abs(btc1h)<1.5&&altsPct>=50;
+    // ❌ No longear: BTC cayendo fuerte
+    const noLongOverride=btc24<-5||btc1h<-3;
 
     // Update toggle button
     const semEl=document.getElementById('cycle-semaphore');
@@ -2396,44 +2413,106 @@ async function checkMarketCycle(){
     if(titleEl)titleEl.textContent='Semáforo Altcoins';
     if(subEl){subEl.textContent=action;subEl.style.color=semColor;}
 
-    // Build detailed panel
+    // ── BUILD DETAILED PANEL ──────────────────────────────────
     function condRow(ok, label, detail){
-      return '<div style="display:flex;gap:8px;align-items:flex-start;padding:8px 10px;background:var(--surface2);border-radius:8px;margin-bottom:6px">'+
-        '<span style="font-size:16px;flex-shrink:0">'+(ok?'✅':'❌')+'</span>'+
+      return '<div style="display:flex;gap:8px;align-items:flex-start;padding:8px 10px;background:var(--surface2);border-radius:8px;margin-bottom:5px">'+
+        '<span style="font-size:15px;flex-shrink:0">'+(ok?'✅':'❌')+'</span>'+
         '<div><div style="font-size:12px;font-weight:800;color:'+(ok?'#00c853':'#ff3d57')+'">'+label+'</div>'+
         '<div style="font-size:10px;color:var(--text2);margin-top:2px">'+detail+'</div></div>'+
       '</div>';
     }
 
+    function section(title, color, content){
+      return '<div style="background:rgba('+color+');border-radius:10px;padding:10px 12px;margin-bottom:10px">'+
+        '<div style="font-size:12px;font-weight:900;color:#'+color.split(',')[0].replace('0,','').trim()+';margin-bottom:8px">'+title+'</div>'+
+        content+'</div>';
+    }
+
+    // Conditions block
+    const conditionsHTML=
+      '<div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;margin-top:2px">4 condiciones</div>'+
+      condRow(c1,'BTC lateral',c1detail)+
+      condRow(c2,'Dominancia BTC bajando / ETH > BTC',c2detail)+
+      condRow(c3,'ETH/BTC subiendo',c3detail)+
+      condRow(c4,'Amplitud alts ≥60%',c4detail);
+
+    // Execution guide
+    let execHTML='';
+    if(mode==='long'){
+      execHTML=
+        '<div style="background:rgba(0,200,83,.08);border-radius:10px;padding:10px 12px;margin-bottom:10px">'+
+          '<div style="font-size:12px;font-weight:900;color:#00c853;margin-bottom:6px">🎯 Cómo ejecutar el LONG</div>'+
+          '<div style="font-size:11px;color:var(--text);line-height:1.7">'+
+            '• Buscá <strong>retest de soporte</strong> (no comprar arriba)<br>'+
+            '• Entrá en pullback, <strong>no en FOMO</strong><br>'+
+            '• TP típico: <strong style="color:#00c853">8–15%</strong> · SL: debajo del último soporte<br>'+
+            '• 💡 Señales extra: velas de impulso + consolidación, volumen acompañando, estructura HH/HL'+
+          '</div>'+
+          (noLongOverride?'<div style="margin-top:6px;padding:6px 8px;background:rgba(255,61,87,.15);border-radius:6px;font-size:11px;font-weight:800;color:#ff3d57">⚠️ Atención: BTC cayendo fuerte — revisá antes de entrar</div>':'')+
+        '</div>';
+    } else if(mode==='short'){
+      execHTML=
+        '<div style="background:rgba(255,61,87,.08);border-radius:10px;padding:10px 12px;margin-bottom:10px">'+
+          '<div style="font-size:12px;font-weight:900;color:#ff3d57;margin-bottom:6px">🎯 Cómo ejecutar el SHORT</div>'+
+          '<div style="font-size:11px;color:var(--text);line-height:1.7">'+
+            '• Esperá <strong>rebote a resistencia</strong> (no shortear en caída)<br>'+
+            '• Buscá <strong>rechazo claro</strong> con velas de reversión<br>'+
+            '• TP típico: <strong style="color:#ff3d57">5–12%</strong> · SL: arriba del último máximo<br>'+
+            '• 💡 Señales extra: estructura bajista LH/LL, velas de rechazo arriba, volumen vendedor'+
+          '</div>'+
+          (noShortOverride?'<div style="margin-top:6px;padding:6px 8px;background:rgba(255,209,0,.15);border-radius:6px;font-size:11px;font-weight:800;color:#ffd100">⚠️ BTC lateral + alts verdes — cuidado con shorts</div>':'')+
+        '</div>';
+    } else {
+      execHTML=
+        '<div style="background:rgba(255,209,0,.08);border-radius:10px;padding:10px 12px;margin-bottom:10px">'+
+          '<div style="font-size:12px;font-weight:900;color:#ffd100;margin-bottom:6px">⏳ Qué hacer ahora</div>'+
+          '<div style="font-size:11px;color:var(--text);line-height:1.7">'+
+            '❌ <strong>No forzar trade</strong><br>'+
+            '❌ <strong>No adivinar techo/piso</strong><br>'+
+            '✔️ Esperar, mirar, paciencia<br>'+
+            '✔️ Esperá que se cumplan 3/4 condiciones en un sentido claro'+
+          '</div>'+
+        '</div>';
+    }
+
+    // Top movers
     const topMoversHTML=topMovers.length?
-      '<div style="margin-top:10px"><div style="font-size:11px;font-weight:700;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">🚀 Líderes del mercado (1h)</div>'+
+      '<div style="margin-bottom:10px"><div style="font-size:11px;font-weight:700;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">🚀 Líderes 1h</div>'+
       '<div style="display:flex;flex-wrap:wrap;gap:5px">'+
       topMovers.map(c=>'<span style="background:rgba(0,200,83,.12);color:#00c853;border-radius:6px;padding:3px 8px;font-size:11px;font-weight:800">'+
         c.symbol.toUpperCase()+' +'+(c.price_change_percentage_1h_in_currency||0).toFixed(1)+'%</span>'
       ).join('')+'</div></div>':'';
 
-    box.style.background=semBg;
-    box.innerHTML=
-      '<div style="background:'+(score>=3?'rgba(0,200,83,.15)':score===2?'rgba(255,209,0,.15)':'rgba(255,61,87,.12)')+';border-radius:8px;padding:10px 12px;margin-bottom:10px;text-align:center">'+
-        '<div style="font-size:22px;margin-bottom:4px">'+semaphore+'</div>'+
-        '<div style="font-size:13px;font-weight:900;color:'+actionColor+'">'+action+'</div>'+
-      '</div>'+
-      condRow(c1,'BTC lateral',c1detail)+
-      condRow(c2,'Dominancia BTC bajando / ETH superando BTC',c2detail)+
-      condRow(c3,'ETH/BTC subiendo (ETH más fuerte que BTC)',c3detail)+
-      condRow(c4,'Amplitud de altcoins ≥60%',c4detail)+
-      topMoversHTML+
-      '<div style="font-size:10px;color:var(--text2);text-align:right;margin-top:8px;opacity:.7">'+
-        'Actualizado: '+new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})+
+    // Warning rules
+    const warningsHTML=
+      '<div style="font-size:11px;color:var(--text2);border-top:1px solid var(--border);padding-top:8px;margin-top:4px">'+
+        (noLongOverride&&mode!=='long'?'<div style="color:#ff3d57;font-weight:700;margin-bottom:3px">❌ No longear: BTC cayendo fuerte — aunque veas una alt "barata"</div>':'')+
+        (noShortOverride&&mode!=='short'?'<div style="color:#ffd100;font-weight:700;margin-bottom:3px">❌ No shortear: BTC lateral + alts verdes</div>':'')+
+        '<div style="opacity:.6;margin-top:4px">Actualizado: '+new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})+'</div>'+
       '</div>';
 
-    // Notification on green signal
-    if(score>=3&&'Notification' in window&&Notification.permission==='granted'){
-      new Notification('🟢 Polytrades — Modo Altcoins',{body:score+'/4 condiciones ✓ Buscar LONG en alts.'});
-    } else if(score>=3&&'Notification' in window&&Notification.permission!=='denied'){
-      Notification.requestPermission().then(p=>{
-        if(p==='granted')new Notification('🟢 Polytrades — Modo Altcoins',{body:score+'/4 condiciones ✓'});
-      });
+    box.style.background=semBg;
+    box.innerHTML=
+      // Big verdict
+      '<div style="background:'+(mode==='long'?'rgba(0,200,83,.15)':mode==='short'?'rgba(255,61,87,.12)':'rgba(255,209,0,.12)')+';border-radius:10px;padding:12px;margin-bottom:12px;text-align:center">'+
+        '<div style="font-size:28px;margin-bottom:4px">'+semaphore+'</div>'+
+        '<div style="font-size:15px;font-weight:900;color:'+actionColor+'">'+action+'</div>'+
+        (mode==='long'?'<div style="font-size:11px;color:#00c853;margin-top:3px;opacity:.8">Buscar LONG en retest de soporte</div>':
+         mode==='short'?'<div style="font-size:11px;color:#ff3d57;margin-top:3px;opacity:.8">Buscar SHORT en rebote a resistencia</div>':
+         '<div style="font-size:11px;color:#ffd100;margin-top:3px;opacity:.8">Esperá confirmación clara</div>')+
+      '</div>'+
+      conditionsHTML+
+      execHTML+
+      topMoversHTML+
+      warningsHTML;
+
+    // Notification
+    if(mode==='long'&&'Notification' in window&&Notification.permission==='granted'){
+      new Notification('🟢 Polytrades — Modo LONG',{body:score+'/4 condiciones ✓ Buscar long en retest.'});
+    } else if(mode==='short'&&'Notification' in window&&Notification.permission==='granted'){
+      new Notification('🔴 Polytrades — Modo SHORT',{body:shortScore+'/4 condiciones ✓ Buscar short en rebote.'});
+    } else if((mode==='long'||mode==='short')&&'Notification' in window&&Notification.permission!=='denied'){
+      Notification.requestPermission();
     }
   } catch(e){
     const box=document.getElementById('cycle-status');
