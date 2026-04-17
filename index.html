@@ -547,23 +547,7 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
   <div id="price-banner" style="display:none;background:rgba(255,107,0,.1);border:1px solid rgba(255,107,0,.3);border-radius:10px;padding:10px 14px;margin-bottom:10px;font-size:11px;font-weight:700;color:#ff6b00">
     ⚡ Cotizaciones en vivo disponibles solo en HTTPS (GitHub Pages). Ahora mostrando precios guardados.
   </div>
-  <!-- semaforo moved to Cargar tab -->
-    <button onclick="toggleCyclePanel()" id="cycle-toggle-btn" style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:10px 14px;font-family:'Nunito',sans-serif;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:10px">
-      <div style="display:flex;align-items:center;gap:8px">
-        <span id="cycle-semaphore" style="font-size:20px">⚪</span>
-        <div style="text-align:left">
-          <div style="font-size:12px;font-weight:800;color:var(--text)" id="cycle-title">Semáforo Altcoins</div>
-          <div style="font-size:10px;color:var(--text2)" id="cycle-subtitle">Tocá para analizar el ciclo</div>
-        </div>
-      </div>
-      <span id="cycle-arrow" style="color:var(--text2);font-size:12px">▼</span>
-    </button>
-    <div id="cycle-body" style="display:none;background:var(--surface);border:1px solid var(--border);border-top:none;border-radius:0 0 10px 10px;padding:12px 14px">
-      <div id="cycle-status">
-        <div style="font-size:11px;color:var(--text2);text-align:center;padding:8px">Cargando...</div>
-      </div>
-      <button onclick="checkMarketCycle()" id="cycle-refresh-btn" class="btn btn-dark btn-sm" style="width:100%;margin-top:8px;margin-bottom:0;font-size:11px">⟳ Actualizar análisis</button>
-    </div>
+
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
     <div style="font-size:12px;color:var(--text2);font-weight:700">Tocá un trade para editarlo</div>
     <button onclick="refreshPrices()" id="refresh-btn" class="btn btn-dark btn-sm" style="gap:6px">⟳ Actualizar precios</button>
@@ -752,7 +736,7 @@ function switchTab(tab){
     // Stop auto-refresh when leaving the tab
     if(priceInterval){clearInterval(priceInterval);priceInterval=null;}
   }
-  if(tab==='cargar'){updatePreviews();updateKPIs();if(cycleInterval)clearInterval(cycleInterval);cycleInterval=setInterval(checkMarketCycle,300000);}
+  if(tab==='cargar'){updatePreviews();updateKPIs();updateDotSilent();if(cycleInterval)clearInterval(cycleInterval);cycleInterval=setInterval(updateDotSilent,300000);}
 }
 
 // ══ INIT ══
@@ -1964,12 +1948,59 @@ function migratePatronFromObs(){
   if(changed){persist(D);}
 }
 
-function startCycleMonitor(){
-  if(typeof checkMarketCycle==='function'){
-    checkMarketCycle();
-    if(cycleInterval)clearInterval(cycleInterval);
-    cycleInterval=setInterval(checkMarketCycle,300000);
+
+// ── Silent dot updater (no panel render needed) ──
+async function updateDotSilent(){
+  if(!location.protocol.startsWith('https:')){
+    const dot=document.getElementById('semaforo-dot');
+    if(dot){dot.style.background='#555';dot.style.boxShadow='none';}
+    return;
   }
+  try{
+    const [pr,gr,mr]=await Promise.all([
+      fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&vs_currencies=usd&include_24hr_change=true&include_1hr_change=true'),
+      fetch('https://api.coingecko.com/api/v3/global'),
+      fetch('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=50&page=1&sparkline=false&price_change_percentage=1h,24h')
+    ]);
+    const pd=await pr.json(),gd=await gr.json(),md=await mr.json();
+    const btc=pd.bitcoin,eth=pd.ethereum;
+    if(!btc||!eth)return;
+    const btc1h=btc.usd_1h_change||0,btc24=btc.usd_24h_change||0;
+    const eth1h=eth.usd_1h_change||0,eth24=eth.usd_24h_change||0;
+    const btcDom=gd?.data?.market_cap_percentage?.btc||0;
+    const c1=Math.abs(btc1h)<1.5&&btc24>-5;
+    const ethOut=eth24>btc24+1,domFav=btcDom<55;
+    const c2=domFav||ethOut;
+    const c3=eth1h>btc1h+0.3;
+    const alts=md.filter(c=>c.id!=='bitcoin'&&c.id!=='ethereum'&&c.price_change_percentage_1h_in_currency!=null);
+    const altsPct=alts.length?Math.round(alts.filter(c=>c.price_change_percentage_1h_in_currency>0).length/alts.length*100):0;
+    const c4=altsPct>=60;
+    const score=[c1,c2,c3,c4].filter(Boolean).length;
+    const sC1=btc24<-2||btc1h<-1.5,sC2=!domFav&&!ethOut,sC3=eth1h<btc1h-0.3,sC4=altsPct<40;
+    const shortScore=[sC1,sC2,sC3,sC4].filter(Boolean).length;
+    const mode=score>=3?'long':shortScore>=3?'short':'wait';
+    const col=mode==='long'?'#00c853':mode==='short'?'#ff3d57':'#ffd100';
+    const dot=document.getElementById('semaforo-dot');
+    if(dot){dot.style.background=col;dot.style.boxShadow='0 0 5px '+col;}
+    // Also update the collapsed button subtitle
+    const sub=document.getElementById('cycle-subtitle');
+    const sem=document.getElementById('cycle-semaphore');
+    if(sem)sem.textContent=mode==='long'?'🟢':mode==='short'?'🔴':'🟡';
+    if(sub){
+      sub.style.color=col;
+      sub.textContent=mode==='long'?'LONG — Modo altcoins ('+score+'/4)':mode==='short'?'SHORT — Modo risk-off ('+shortScore+'/4)':'NO TRADE — Sin señal clara';
+    }
+    // If panel is open, do full render too
+    if(cycleOpen)checkMarketCycle();
+  }catch(e){}
+}
+let cycleInterval=null;
+let cycleOpen=false;
+
+function startCycleMonitor(){
+  updateDotSilent();
+  if(cycleInterval)clearInterval(cycleInterval);
+  cycleInterval=setInterval(updateDotSilent,300000);
 }
 
 init();
@@ -2351,8 +2382,6 @@ function updateStaticRiskGuide(){
 }
 
 // ══ SEMÁFORO ALTCOINS ══
-let cycleInterval=null;
-let cycleOpen=false;
 
 function toggleCyclePanel(){
   cycleOpen=!cycleOpen;
