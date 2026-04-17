@@ -1951,16 +1951,59 @@ function migratePatronFromObs(){
 
 
 
-// ══ FETCH WITH RETRY (CoinGecko rate limit protection) ══
+// ══ COINGECKO FETCH — cached + serial to avoid rate limits ══
+let _cgCache = null;
+let _cgCacheTime = 0;
+let _cgFetching = false;
+
+async function fetchCoinGeckoData(){
+  // Return cache if less than 90 seconds old
+  if(_cgCache && (Date.now()-_cgCacheTime) < 90000) return _cgCache;
+  // If already fetching, wait for it
+  if(_cgFetching){
+    await new Promise(r=>setTimeout(r,500));
+    if(_cgCache)return _cgCache;
+  }
+  _cgFetching=true;
+  const BASE='https://api.coingecko.com/api/v3';
+  async function cgFetch(url, attempt=0){
+    try{
+      const res=await fetch(url);
+      if(res.status===429){
+        if(attempt>=3)throw new Error('Rate limited');
+        await new Promise(r=>setTimeout(r,3000*(attempt+1)));
+        return cgFetch(url, attempt+1);
+      }
+      if(!res.ok)throw new Error('HTTP '+res.status);
+      return await res.json();
+    }catch(e){
+      if(attempt>=2)throw e;
+      await new Promise(r=>setTimeout(r,2000*(attempt+1)));
+      return cgFetch(url, attempt+1);
+    }
+  }
+  try{
+    // Serial requests — avoid parallel rate limiting
+    const pd=await cgFetch(BASE+'/simple/price?ids=bitcoin,ethereum&vs_currencies=usd&include_24hr_change=true&include_1hr_change=true');
+    await new Promise(r=>setTimeout(r,400));
+    const gd=await cgFetch(BASE+'/global');
+    await new Promise(r=>setTimeout(r,400));
+    const md=await cgFetch(BASE+'/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=50&page=1&sparkline=false&price_change_percentage=1h,24h');
+    _cgCache={pd,gd,md};
+    _cgCacheTime=Date.now();
+    _cgFetching=false;
+    return _cgCache;
+  }catch(e){
+    _cgFetching=false;
+    throw e;
+  }
+}
+
 async function fetchWithRetry(url, retries=3, delayMs=1500){
   for(let i=0;i<retries;i++){
     try{
       const res=await fetch(url);
-      if(res.status===429){
-        // Rate limited — wait longer
-        await new Promise(r=>setTimeout(r,delayMs*(i+2)));
-        continue;
-      }
+      if(res.status===429){await new Promise(r=>setTimeout(r,delayMs*(i+2)));continue;}
       if(!res.ok)throw new Error('HTTP '+res.status);
       return await res.json();
     }catch(e){
@@ -1977,11 +2020,7 @@ async function updateDotSilent(){
     return;
   }
   try{
-    const [pd,gd,md]=await Promise.all([
-      fetchWithRetry('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&vs_currencies=usd&include_24hr_change=true&include_1hr_change=true'),
-      fetchWithRetry('https://api.coingecko.com/api/v3/global'),
-      fetchWithRetry('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=50&page=1&sparkline=false&price_change_percentage=1h,24h')
-    ]);
+    const {pd,gd,md}=await fetchCoinGeckoData();
     const btc=pd.bitcoin,eth=pd.ethereum;
     if(!btc||!eth)return;
     const btc1h=btc.usd_1h_change||0,btc24=btc.usd_24h_change||0;
@@ -2418,14 +2457,10 @@ async function checkMarketCycle(){
     box.innerHTML='<div style="font-size:11px;color:#ff6b00;padding:8px;text-align:center">⚠️ Requiere GitHub Pages (HTTPS) para datos en vivo.</div>';
     return;
   }
-  if(btn){btn.textContent='⟳ Analizando...';btn.disabled=true;}
+  if(btn){btn.textContent='⟳ Analizando...';btn.disabled=true;}_cgCacheTime=0;// force fresh fetch
   try{
     // Fetch in parallel: prices + global (dominance) + top coins (breadth)
-    const [priceData, globalData, marketsData] = await Promise.all([
-      fetchWithRetry('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&vs_currencies=usd&include_24hr_change=true&include_1hr_change=true'),
-      fetchWithRetry('https://api.coingecko.com/api/v3/global'),
-      fetchWithRetry('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=50&page=1&sparkline=false&price_change_percentage=1h,24h')
-    ]);
+    const {pd:priceData, gd:globalData, md:marketsData}=await fetchCoinGeckoData();
 
     const btc=priceData.bitcoin, eth=priceData.ethereum;
     if(!btc||!eth)throw new Error('Sin datos de precio');
