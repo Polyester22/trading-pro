@@ -1247,7 +1247,7 @@ function renderHistorial(){
     t.durMins=_tdur; // for sort
     return`<tr class="clickable-row" onclick="loadTradeForEdit('${t.id}')">
       <td style="color:var(--text2);font-size:11px">${f}</td>
-      <td style="font-weight:800">${t.open?'<span class="badge-open" style="margin-right:4px">●</span>':''}${t.ticker}</td>
+      <td style="font-weight:800"><span style="display:inline-block;width:14px;color:#00c853;font-size:11px">${t.open?'●':''}</span>${t.ticker}</td>
       <td><span class="badge badge-${t.pos.toLowerCase()}">${t.pos}</span></td>
       <td class="${rc}">${t.resultado>=0?'+':''}${t.resultado.toFixed(2)}%</td>
       <td class="${rc}">${parseFloat(pnl)>=0?'+':''}$${pnl}</td>
