@@ -1158,7 +1158,7 @@ function fmtPriceShort(v){
   return v.toFixed(4);
 }
 
-// ══ LIVE PRICES (CoinGecko — works only on HTTPS) ══
+// ══ LIVE PRICES — Binance primary (no key needed), CoinGecko fallback ══
 const TICKER_MAP={
   BTC:'bitcoin',ETH:'ethereum',BNB:'binancecoin',SOL:'solana',
   ADA:'cardano',AVAX:'avalanche-2',DOT:'polkadot',LINK:'chainlink',
@@ -1185,42 +1185,51 @@ async function refreshPrices(){
   if(!openTrades.length)return;
   if(btn){btn.innerHTML='<span class="live-dot"></span> Actualizando...';btn.disabled=true;}
   const tickers=[...new Set(openTrades.map(t=>t.ticker))];
-  const ids=tickers.map(t=>TICKER_MAP[t]).filter(Boolean).join(',');
-  if(!ids){if(btn){btn.textContent='⚠️ Tickers no mapeados';btn.disabled=false;}return;}
+
   try{
-    const res=await fetchWithRetry(`https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd`);
-    const data=await res.json();
-    const revMap={};Object.entries(TICKER_MAP).forEach(([tk,id])=>{revMap[id]=tk;});
-    Object.entries(data).forEach(([id,prices])=>{
-      const tk=revMap[id];
-      if(tk)livePrices[tk]=prices.usd;
-    });
-
-    // ── AUTO-MARK 10% ──
-    let changed=false;
-    D.trades.forEach(t=>{
-      if(!t.open||t.p10)return; // skip closed or already marked
-      if(!t.entrada)return;
-      const lp=livePrices[t.ticker];
-      if(!lp)return;
-      const pct=calcPct(t.entrada,lp,t.pos,t.lev);
-      if(pct!==null&&pct>=10){
-        t.p10=true;
-        changed=true;
-      }
-    });
-    if(changed){persist(D);updateKPIs();}
-
-    renderOpenTrades();
-    if(btn){
-      btn.innerHTML='✅ Actualizado';
-      setTimeout(()=>{if(btn){btn.innerHTML='⟳ Actualizar precios';btn.disabled=false;}},2000);
+    // ── Try Binance first (more reliable, no rate limit issues) ──
+    const symbols=tickers.map(tk=>tk+'USDT');
+    const symParam=JSON.stringify(symbols);
+    const binRes=await fetch(`https://api.binance.com/api/v3/ticker/price?symbols=${encodeURIComponent(symParam)}`);
+    if(binRes.ok){
+      const binData=await binRes.json();
+      binData.forEach(item=>{
+        const tk=item.symbol.replace('USDT','');
+        if(tickers.includes(tk))livePrices[tk]=parseFloat(item.price);
+      });
+    } else {
+      throw new Error('Binance failed');
     }
   }catch(e){
-    if(btn){
-      btn.innerHTML='❌ Error — reintentá';
-      setTimeout(()=>{if(btn){btn.innerHTML='⟳ Actualizar precios';btn.disabled=false;}},2500);
+    // ── Fallback to CoinGecko ──
+    try{
+      const ids=tickers.map(t=>TICKER_MAP[t]).filter(Boolean).join(',');
+      if(ids){
+        const cgData=await fetchWithRetry(`https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd`);
+        const revMap={};Object.entries(TICKER_MAP).forEach(([tk,id])=>{revMap[id]=tk;});
+        Object.entries(cgData).forEach(([id,prices])=>{
+          const tk=revMap[id];if(tk)livePrices[tk]=prices.usd;
+        });
+      }
+    }catch(e2){
+      if(btn){btn.innerHTML='❌ Error — reintentá';setTimeout(()=>{if(btn){btn.innerHTML='⟳ Actualizar precios';btn.disabled=false;}},2500);}
+      return;
     }
+  }
+
+  // ── AUTO-MARK 10% ──
+  let changed=false;
+  D.trades.forEach(t=>{
+    if(!t.open||t.p10||!t.entrada)return;
+    const lp=livePrices[t.ticker];if(!lp)return;
+    const pct=calcPct(t.entrada,lp,t.pos,t.lev);
+    if(pct!==null&&pct>=10){t.p10=true;changed=true;}
+  });
+  if(changed){persist(D);updateKPIs();}
+  renderOpenTrades();
+  if(btn){
+    btn.innerHTML='✅ Actualizado';
+    setTimeout(()=>{if(btn){btn.innerHTML='⟳ Actualizar precios';btn.disabled=false;}},2000);
   }
 }
 
