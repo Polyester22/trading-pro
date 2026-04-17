@@ -546,7 +546,6 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
       <button onclick="checkMarketCycle()" id="cycle-refresh-btn" class="btn btn-dark btn-sm" style="width:100%;margin-top:8px;margin-bottom:0;font-size:11px">⟳ Actualizar análisis</button>
     </div>
   </div>
-  <div id="risk-exposure-bar" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:10px 14px;margin-bottom:10px"></div>
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
     <div style="font-size:12px;color:var(--text2);font-weight:700">Tocá un trade para editarlo</div>
     <button onclick="refreshPrices()" id="refresh-btn" class="btn btn-dark btn-sm" style="gap:6px">⟳ Actualizar precios</button>
@@ -1146,6 +1145,8 @@ function renderOpenTrades(){
   }).join('');
   // render KPI projection
   renderKpiProjection(open);
+  // render capital en riesgo BELOW trades
+  renderRiskExposure(open);
 }
 
 function fmtPriceShort(v){
@@ -1330,8 +1331,22 @@ function renderHistorial(){
   const tbody=document.getElementById('trades-tbody');
   if(!list.length){tbody.innerHTML=`<tr><td colspan="14" style="text-align:center;padding:30px;color:var(--text2)">Sin trades con esos filtros</td></tr>`;return;}
   tbody.innerHTML=list.map(t=>{
-    const pnl=(t.margen*t.resultado/100).toFixed(2);
-    const rc=t.resultado>0?'pos':t.resultado<0?'neg':'neutral';
+    // For open trades: use live price if available, else stored actual
+    let resultado=t.resultado;
+    let margenDisplay=t.margenOriginal||t.margen; // always show original margin
+    if(t.open&&t.entrada){
+      const livePrice=livePrices[t.ticker]||t.actual||0;
+      if(livePrice){
+        const livePct=calcPct(t.entrada,livePrice,t.pos,t.lev);
+        if(livePct!==null)resultado=livePct;
+      }
+    }
+    // For partial closes: show original margin and weighted avg result
+    if(!t.open&&t.partialCloses&&t.partialCloses.length&&t.margenOriginal){
+      margenDisplay=t.margenOriginal;
+    }
+    const pnl=(margenDisplay*resultado/100).toFixed(2);
+    const rc=resultado>0?'pos':resultado<0?'neg':'neutral';
     const f=t.fecha?t.fecha.slice(5).replace('-','/'):''
     const p10flag=t.p10?'<span class="badge-10">★</span>':'';
     const timingClass=t.timing?'timing-'+t.timing.toLowerCase().replace(' ',''):'';
@@ -1339,14 +1354,16 @@ function renderHistorial(){
     const _tdur=(t.fechahora&&t.closedHora)?Math.max(0,(new Date(t.closedHora)-new Date(t.fechahora))/60000):null;
     const _tdurStr=_tdur!==null?(_tdur<60?Math.round(_tdur)+'m':_tdur<1440?(Math.floor(_tdur/60)+'h '+Math.round(_tdur%60)+'m'):(Math.floor(_tdur/1440)+'d '+Math.floor((_tdur%1440)/60)+'h')):(t.open?'<span style="color:#00c853;font-size:10px">abierto</span>':'—');
     t.durMins=_tdur; // for sort
+    // Live indicator for open trades
+    const isLive=t.open&&livePrices[t.ticker];
     const obsId='obs-'+t.id;
     return`<tr class="clickable-row" onclick="loadTradeForEdit('${t.id}')">
       <td style="color:var(--text2);font-size:11px">${f}</td>
       <td style="font-weight:800"><span style="display:inline-block;width:14px;color:#00c853;font-size:11px">${t.open?'●':''}</span>${t.ticker}</td>
       <td><span class="badge badge-${t.pos.toLowerCase()}">${t.pos}</span></td>
-      <td class="${rc}">${t.resultado>=0?'+':''}${t.resultado.toFixed(2)}%</td>
+      <td class="${rc}">${isLive?'<span class="live-dot"></span>':''}${resultado>=0?'+':''}${resultado.toFixed(2)}%</td>
       <td class="${rc}">${parseFloat(pnl)>=0?'+':''}$${pnl}</td>
-      <td style="font-size:11px;font-weight:700;color:#ff6b00">$${t.margen||'—'}</td>
+      <td style="font-size:11px;font-weight:700;color:#ff6b00">$${margenDisplay||'—'}${t.margenOriginal&&t.open?'':''}</td>
       <td style="font-size:11px;color:var(--text2)">${t.lev||1}x</td>
       <td style="font-size:11px;color:var(--text2)">${t.temp||'—'}</td>
       <td style="font-size:11px;color:var(--text2)">${t.estrategia||'—'}</td>
@@ -2695,13 +2712,7 @@ function renderRiskExposure(openTrades){
     '</div>';
 }
 
-// Hook into renderOpenTrades
-const _rOT_orig=renderOpenTrades;
-renderOpenTrades=function(){
-  _rOT_orig();
-  const open=D.trades.filter(t=>t.open);
-  renderRiskExposure(open);
-};
+// renderRiskExposure is called directly inside renderOpenTrades above
 
 // ══ CAPITAL TRACKER ══
 function getCapitalMovements(){
