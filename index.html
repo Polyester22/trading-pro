@@ -722,6 +722,7 @@ function switchTab(tab){
   if(tab==='graficos')renderGraficos();
   if(tab==='abiertos'){
     renderOpenTrades();
+    if(location.protocol==='https:')refreshPrices();
     // Auto-refresh: immediately + every 60 seconds
     if(location.protocol.startsWith('https')){
       refreshPrices();
@@ -1163,8 +1164,15 @@ const TICKER_MAP={
   ADA:'cardano',AVAX:'avalanche-2',DOT:'polkadot',LINK:'chainlink',
   UNI:'uniswap',AAVE:'aave',DYDX:'dydx',ARB:'arbitrum',
   NEAR:'near',DOGE:'dogecoin',LTC:'litecoin',APT:'aptos',
-  NEO:'neo',HBAR:'hedera-hashgraph',DOT:'polkadot',
-  LTC:'litecoin',INJ:'injective-protocol',STX:'blockstack'
+  NEO:'neo',HBAR:'hedera-hashgraph',INJ:'injective-protocol',
+  STX:'blockstack',OP:'optimism',MATIC:'matic-network',
+  FTM:'fantom',ATOM:'cosmos',XRP:'ripple',TRX:'tron',
+  SUI:'sui',SEI:'sei-network',WLD:'worldcoin-wld',
+  JUP:'jupiter-exchange-solana',PENDLE:'pendle',
+  RENDER:'render-token',FET:'fetch-ai',RUNE:'thorchain',
+  SAND:'the-sandbox',MANA:'decentraland',CRV:'curve-dao-token',
+  GMX:'gmx',GRT:'the-graph',LDO:'lido-dao',
+  BLUR:'blur',CAKE:'pancakeswap-token',SUSHI:'sushi'
 };
 
 async function refreshPrices(){
@@ -1951,52 +1959,52 @@ function migratePatronFromObs(){
 
 
 
-// ══ COINGECKO FETCH — cached + serial to avoid rate limits ══
+// ══ COINGECKO FETCH — cached + resilient (partial results ok) ══
 let _cgCache = null;
 let _cgCacheTime = 0;
 let _cgFetching = false;
 
 async function fetchCoinGeckoData(){
-  // Return cache if less than 90 seconds old
   if(_cgCache && (Date.now()-_cgCacheTime) < 90000) return _cgCache;
-  // If already fetching, wait for it
   if(_cgFetching){
-    await new Promise(r=>setTimeout(r,500));
+    await new Promise(r=>setTimeout(r,600));
     if(_cgCache)return _cgCache;
   }
   _cgFetching=true;
   const BASE='https://api.coingecko.com/api/v3';
-  async function cgFetch(url, attempt=0){
-    try{
-      const res=await fetch(url);
-      if(res.status===429){
-        if(attempt>=3)throw new Error('Rate limited');
-        await new Promise(r=>setTimeout(r,3000*(attempt+1)));
-        return cgFetch(url, attempt+1);
+
+  // Fetch with timeout + retry, returns null on failure (never throws)
+  async function cgFetchSafe(url){
+    for(let attempt=0;attempt<3;attempt++){
+      try{
+        const controller=new AbortController();
+        const timer=setTimeout(()=>controller.abort(),8000);
+        const res=await fetch(url,{signal:controller.signal});
+        clearTimeout(timer);
+        if(res.status===429){await new Promise(r=>setTimeout(r,3000*(attempt+1)));continue;}
+        if(!res.ok)return null;
+        return await res.json();
+      }catch(e){
+        if(attempt<2)await new Promise(r=>setTimeout(r,1500*(attempt+1)));
       }
-      if(!res.ok)throw new Error('HTTP '+res.status);
-      return await res.json();
-    }catch(e){
-      if(attempt>=2)throw e;
-      await new Promise(r=>setTimeout(r,2000*(attempt+1)));
-      return cgFetch(url, attempt+1);
     }
+    return null;
   }
-  try{
-    // Serial requests — avoid parallel rate limiting
-    const pd=await cgFetch(BASE+'/simple/price?ids=bitcoin,ethereum&vs_currencies=usd&include_24hr_change=true&include_1hr_change=true');
-    await new Promise(r=>setTimeout(r,400));
-    const gd=await cgFetch(BASE+'/global');
-    await new Promise(r=>setTimeout(r,400));
-    const md=await cgFetch(BASE+'/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=50&page=1&sparkline=false&price_change_percentage=1h,24h');
-    _cgCache={pd,gd,md};
-    _cgCacheTime=Date.now();
-    _cgFetching=false;
-    return _cgCache;
-  }catch(e){
-    _cgFetching=false;
-    throw e;
-  }
+
+  // Fetch BTC/ETH prices first (most important)
+  const pd=await cgFetchSafe(BASE+'/simple/price?ids=bitcoin,ethereum&vs_currencies=usd&include_24hr_change=true&include_1hr_change=true');
+  if(!pd){_cgFetching=false;throw new Error('Sin conexión a CoinGecko');}
+
+  // Fetch global and markets independently — partial failure OK
+  await new Promise(r=>setTimeout(r,500));
+  const gd=await cgFetchSafe(BASE+'/global');
+  await new Promise(r=>setTimeout(r,500));
+  const md=await cgFetchSafe(BASE+'/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=50&page=1&sparkline=false&price_change_percentage=1h,24h');
+
+  _cgCache={pd, gd:gd||{data:{market_cap_percentage:{btc:50}}}, md:md||[]};
+  _cgCacheTime=Date.now();
+  _cgFetching=false;
+  return _cgCache;
 }
 
 async function fetchWithRetry(url, retries=3, delayMs=1500){
