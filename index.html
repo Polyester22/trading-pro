@@ -1801,9 +1801,11 @@ function renderGraficos(){
     </div>
   </div></div>
 
-  <div class="desktop-col-full" style="display:flex;justify-content:center;padding:4px 0">
-    <button onclick="openWeeklySummary()" class="btn btn-dark" style="font-size:12px;width:100%;max-width:100%">📅 Resumen semanal</button>
-  </div>
+  <div class="desktop-col-full">
+  <div class="chart-box" style="cursor:pointer;padding:14px 16px;text-align:center" onclick="openWeeklySummary()">
+    <div style="font-size:13px;font-weight:800;color:var(--text)">📅 Resumen semanal</div>
+    <div style="font-size:10px;color:var(--text2);margin-top:3px">Ver rendimiento por semana</div>
+  </div></div>
 
   <!-- ② EQUITY + MONTHLY (lado a lado en desktop) -->
   <div>
