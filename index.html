@@ -522,14 +522,23 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
   <div id="price-banner" style="display:none;background:rgba(255,107,0,.1);border:1px solid rgba(255,107,0,.3);border-radius:10px;padding:10px 14px;margin-bottom:10px;font-size:11px;font-weight:700;color:#ff6b00">
     ⚡ Cotizaciones en vivo disponibles solo en HTTPS (GitHub Pages). Ahora mostrando precios guardados.
   </div>
-  <!-- MARKET CYCLE ALERT -->
+  <!-- SEMÁFORO ALTCOINS -->
   <div id="market-cycle-panel" style="margin-bottom:10px">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-      <div style="font-size:11px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.5px">🔄 Ciclo de mercado</div>
-      <button onclick="checkMarketCycle()" id="cycle-refresh-btn" class="btn btn-dark btn-sm" style="font-size:10px">Analizar</button>
-    </div>
-    <div id="cycle-status" style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:10px 14px;font-size:12px;color:var(--text2);font-weight:600">
-      Tocá "Analizar" para ver el estado del ciclo (requiere HTTPS)
+    <button onclick="toggleCyclePanel()" id="cycle-toggle-btn" style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:10px 14px;font-family:'Nunito',sans-serif;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:10px">
+      <div style="display:flex;align-items:center;gap:8px">
+        <span id="cycle-semaphore" style="font-size:20px">⚪</span>
+        <div style="text-align:left">
+          <div style="font-size:12px;font-weight:800;color:var(--text)" id="cycle-title">Semáforo Altcoins</div>
+          <div style="font-size:10px;color:var(--text2)" id="cycle-subtitle">Tocá para analizar el ciclo</div>
+        </div>
+      </div>
+      <span id="cycle-arrow" style="color:var(--text2);font-size:12px">▼</span>
+    </button>
+    <div id="cycle-body" style="display:none;background:var(--surface);border:1px solid var(--border);border-top:none;border-radius:0 0 10px 10px;padding:12px 14px">
+      <div id="cycle-status">
+        <div style="font-size:11px;color:var(--text2);text-align:center;padding:8px">Cargando...</div>
+      </div>
+      <button onclick="checkMarketCycle()" id="cycle-refresh-btn" class="btn btn-dark btn-sm" style="width:100%;margin-top:8px;margin-bottom:0;font-size:11px">⟳ Actualizar análisis</button>
     </div>
   </div>
   <div id="risk-exposure-bar" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:10px 14px;margin-bottom:10px"></div>
@@ -2248,103 +2257,161 @@ function updateStaticRiskGuide(){
   } else if(levEl){levEl.textContent='Necesitás al menos 5 trades cerrados';}
 }
 
-// ══ MARKET CYCLE DETECTOR ══
+// ══ SEMÁFORO ALTCOINS ══
 let cycleInterval=null;
+let cycleOpen=false;
 
-// Auto-run when entering abiertos tab
-const _origSwitchTab=switchTab;
-// patch already done, just hook into tab switch
-// We'll call checkMarketCycle inside renderOpenTrades when on HTTPS
+function toggleCyclePanel(){
+  cycleOpen=!cycleOpen;
+  document.getElementById('cycle-body').style.display=cycleOpen?'block':'none';
+  document.getElementById('cycle-arrow').textContent=cycleOpen?'▲':'▼';
+  if(cycleOpen&&document.getElementById('cycle-status').children.length===1)
+    checkMarketCycle();
+}
 
 async function checkMarketCycle(){
   const btn=document.getElementById('cycle-refresh-btn');
   const box=document.getElementById('cycle-status');
   if(!box)return;
   if(!location.protocol.startsWith('https')){
-    box.style.borderColor='rgba(255,107,0,.3)';
-    box.style.background='rgba(255,107,0,.06)';
-    box.innerHTML='⚠️ Requiere HTTPS (GitHub Pages) para obtener precios en vivo.';
+    box.innerHTML='<div style="font-size:11px;color:#ff6b00;padding:8px;text-align:center">⚠️ Requiere GitHub Pages (HTTPS) para datos en vivo.</div>';
     return;
   }
-  if(btn){btn.textContent='Analizando...';btn.disabled=true;}
+  if(btn){btn.textContent='⟳ Analizando...';btn.disabled=true;}
   try{
-    const res=await fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&vs_currencies=usd&include_24hr_change=true&include_1hr_change=true');
-    const data=await res.json();
-    const btc=data.bitcoin, eth=data.ethereum;
-    if(!btc||!eth)throw new Error('Sin datos');
+    // Fetch in parallel: prices + global (dominance) + top coins (breadth)
+    const [priceRes, globalRes, marketsRes] = await Promise.all([
+      fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&vs_currencies=usd&include_24hr_change=true&include_1hr_change=true'),
+      fetch('https://api.coingecko.com/api/v3/global'),
+      fetch('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=40&page=1&sparkline=false&price_change_percentage=1h,24h')
+    ]);
+    const priceData=await priceRes.json();
+    const globalData=await globalRes.json();
+    const marketsData=await marketsRes.json();
 
-    const btc24=btc.usd_24h_change||0;
-    const eth24=eth.usd_24h_change||0;
+    const btc=priceData.bitcoin, eth=priceData.ethereum;
+    if(!btc||!eth)throw new Error('Sin datos de precio');
+
     const btc1h=btc.usd_1h_change||0;
+    const btc24=btc.usd_24h_change||0;
     const eth1h=eth.usd_1h_change||0;
+    const eth24=eth.usd_24h_change||0;
+    const btcDom=globalData?.data?.market_cap_percentage?.btc||0;
 
-    // Classify phase
-    const btcRising=btc24>3;
-    const ethRising=eth24>2;
-    const btcLateral=Math.abs(btc1h)<1.2;
-    const ethLateral=Math.abs(eth1h)<1.2;
-    const btcPumping=btc1h>2;
-    const ethPumping=eth1h>2;
-    const bothDown=btc24<-3&&eth24<-3;
+    // ── CONDICIÓN 1: BTC lateral ──────────────────────────────
+    // BTC sin movimiento fuerte en 1h, no cayendo fuerte en 24h
+    const c1=Math.abs(btc1h)<1.5&&btc24>-5;
+    const c1detail='BTC 1h: '+(btc1h>=0?'+':'')+btc1h.toFixed(2)+'% · 24h: '+(btc24>=0?'+':'')+btc24.toFixed(1)+'%';
 
-    let phase, icon, color, border, detail, alert=false;
+    // ── CONDICIÓN 2: Dominancia BTC bajando ──────────────────
+    // CoinGecko no da tendencia directa, pero btcDom < 55% es señal favorable
+    // y si BTC sube menos que ETH en 24h, la dominancia probablemente está bajando
+    const ethOutperforms24=eth24>btc24+1; // ETH gana +1% vs BTC en 24h
+    const domFavorable=btcDom<55;
+    const c2=domFavorable||ethOutperforms24;
+    const c2detail='Dominancia BTC: '+btcDom.toFixed(1)+'%'+(domFavorable?' (baja, favorece alts)':' (alta)')+
+      ' · ETH vs BTC 24h: '+(ethOutperforms24?'ETH lider ✓':'BTC lidera');
 
-    if(btcRising&&ethRising&&btcLateral&&ethLateral){
-      // KEY SIGNAL: both rose 24h but now flat — altseason incoming
-      phase='⚠️ BTC y ETH en lateral — posible rotación a altcoins';
-      icon='🚨';color='rgba(255,209,0,.12)';border='#ffd100';
-      detail=`BTC 24h: ${btc24>=0?'+':''}${btc24.toFixed(1)}% · 1h: ${btc1h>=0?'+':''}${btc1h.toFixed(1)}% → lateral<br>ETH 24h: ${eth24>=0?'+':''}${eth24.toFixed(1)}% · 1h: ${eth1h>=0?'+':''}${eth1h.toFixed(1)}% → lateral<br><strong style="color:#ffd100">Históricamente las altcoins explotan después de este patrón. 🚀</strong>`;
-      alert=true;
-    } else if(btcPumping||ethPumping){
-      phase='🟢 BTC/ETH en subida activa';
-      icon='🟢';color='rgba(0,200,83,.08)';border='rgba(0,200,83,.4)';
-      detail=`BTC 1h: ${btc1h>=0?'+':''}${btc1h.toFixed(1)}% · ETH 1h: ${eth1h>=0?'+':''}${eth1h.toFixed(1)}%<br>Las altcoins suelen seguir con retraso de minutos a horas.`;
-    } else if(btcRising&&ethRising){
-      phase='🟢 BTC y ETH subiendo — altcoins pueden seguir';
-      icon='🟢';color='rgba(0,200,83,.06)';border='rgba(0,200,83,.3)';
-      detail=`BTC 24h: ${btc24>=0?'+':''}${btc24.toFixed(1)}% · ETH 24h: ${eth24>=0?'+':''}${eth24.toFixed(1)}%<br>Mercado alcista pero sin señal de rotación todavía.`;
-    } else if(bothDown){
-      phase='🔴 Mercado en caída — cautela';
-      icon='🔴';color='rgba(255,61,87,.08)';border='rgba(255,61,87,.4)';
-      detail=`BTC 24h: ${btc24.toFixed(1)}% · ETH 24h: ${eth24.toFixed(1)}%<br>No es el momento para entrar en altcoins.`;
+    // ── CONDICIÓN 3: ETH/BTC subiendo ────────────────────────
+    // ETH rinde mejor que BTC en última hora
+    const ethBtcRising=eth1h>btc1h+0.3;
+    const c3=ethBtcRising;
+    const c3detail='ETH 1h: '+(eth1h>=0?'+':'')+eth1h.toFixed(2)+'% vs BTC 1h: '+(btc1h>=0?'+':'')+btc1h.toFixed(2)+'%'+
+      (ethBtcRising?' → ETH liderando ✓':' → BTC liderando');
+
+    // ── CONDICIÓN 4: Amplitud de altcoins ────────────────────
+    // Excluir BTC y ETH, contar las que suben en 1h
+    const alts=marketsData.filter(c=>c.id!=='bitcoin'&&c.id!=='ethereum'&&c.price_change_percentage_1h_in_currency!==null);
+    const altsUp=alts.filter(c=>c.price_change_percentage_1h_in_currency>0).length;
+    const altsPct=alts.length?Math.round(altsUp/alts.length*100):0;
+    const c4=altsPct>=60;
+    const c4detail=altsUp+' de '+alts.length+' alts subiendo en 1h ('+altsPct+'%)'+(c4?' 🟢':altsPct>=40?' 🟡':' 🔴');
+
+    // ── TOP MOVERS ───────────────────────────────────────────
+    const topMovers=alts
+      .filter(c=>c.price_change_percentage_1h_in_currency>0)
+      .sort((a,b)=>b.price_change_percentage_1h_in_currency-a.price_change_percentage_1h_in_currency)
+      .slice(0,6);
+
+    // ── SEMÁFORO FINAL ───────────────────────────────────────
+    const score=[c1,c2,c3,c4].filter(Boolean).length;
+    let semaphore, semColor, semBg, semBorder, action, actionColor;
+    if(score>=3){
+      semaphore='🟢'; semColor='#00c853'; semBg='rgba(0,200,83,.08)'; semBorder='rgba(0,200,83,.4)';
+      action='MODO ALTCOINS — Buscar LONG en alts ('+score+'/4 ✓)'; actionColor='#00c853';
+    } else if(score===2){
+      semaphore='🟡'; semColor='#ffd100'; semBg='rgba(255,209,0,.08)'; semBorder='rgba(255,209,0,.4)';
+      action='ZONA MIXTA — Operá menos, esperá confirmación ('+score+'/4)'; actionColor='#ffd100';
     } else {
-      phase='⚪ Mercado lateral / sin señal clara';
-      icon='⚪';color='var(--surface)';border='var(--border)';
-      detail=`BTC 24h: ${btc24>=0?'+':''}${btc24.toFixed(1)}% · 1h: ${btc1h>=0?'+':''}${btc1h.toFixed(1)}%<br>ETH 24h: ${eth24>=0?'+':''}${eth24.toFixed(1)}% · 1h: ${eth1h>=0?'+':''}${eth1h.toFixed(1)}%`;
+      semaphore='🔴'; semColor='#ff3d57'; semBg='rgba(255,61,87,.08)'; semBorder='rgba(255,61,87,.3)';
+      action='NO ALTCOINS — Evitá longs, considerá esperar ('+score+'/4)'; actionColor='#ff3d57';
     }
 
-    box.style.background=color;
-    box.style.borderColor=border;
-    box.style.border='1px solid '+border;
-    box.innerHTML=`<div style="font-size:13px;font-weight:900;margin-bottom:6px">${icon} ${phase}</div>
-      <div style="font-size:11px;color:var(--text2);line-height:1.7">${detail}</div>
-      <div style="font-size:10px;color:var(--text2);margin-top:6px;opacity:.7">Actualizado: ${new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})}</div>`;
+    // Update toggle button
+    const semEl=document.getElementById('cycle-semaphore');
+    const titleEl=document.getElementById('cycle-title');
+    const subEl=document.getElementById('cycle-subtitle');
+    if(semEl)semEl.textContent=semaphore;
+    if(titleEl)titleEl.textContent='Semáforo Altcoins';
+    if(subEl){subEl.textContent=action;subEl.style.color=semColor;}
 
-    // Browser notification on KEY SIGNAL
-    if(alert&&'Notification' in window){
-      if(Notification.permission==='granted'){
-        new Notification('🚨 Polytrades — Señal de altseason',{body:'BTC y ETH en lateral. Posible rotación a altcoins.',icon:'https://polyester22.github.io/trading-pro/favicon.ico'});
-      } else if(Notification.permission!=='denied'){
-        Notification.requestPermission().then(p=>{
-          if(p==='granted')new Notification('🚨 Polytrades — Señal de altseason',{body:'BTC y ETH en lateral. Posible rotación a altcoins.'});
-        });
-      }
+    // Build detailed panel
+    function condRow(ok, label, detail){
+      return '<div style="display:flex;gap:8px;align-items:flex-start;padding:8px 10px;background:var(--surface2);border-radius:8px;margin-bottom:6px">'+
+        '<span style="font-size:16px;flex-shrink:0">'+(ok?'✅':'❌')+'</span>'+
+        '<div><div style="font-size:12px;font-weight:800;color:'+(ok?'#00c853':'#ff3d57')+'">'+label+'</div>'+
+        '<div style="font-size:10px;color:var(--text2);margin-top:2px">'+detail+'</div></div>'+
+      '</div>';
+    }
+
+    const topMoversHTML=topMovers.length?
+      '<div style="margin-top:10px"><div style="font-size:11px;font-weight:700;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">🚀 Líderes del mercado (1h)</div>'+
+      '<div style="display:flex;flex-wrap:wrap;gap:5px">'+
+      topMovers.map(c=>'<span style="background:rgba(0,200,83,.12);color:#00c853;border-radius:6px;padding:3px 8px;font-size:11px;font-weight:800">'+
+        c.symbol.toUpperCase()+' +'+(c.price_change_percentage_1h_in_currency||0).toFixed(1)+'%</span>'
+      ).join('')+'</div></div>':'';
+
+    box.style.background=semBg;
+    box.innerHTML=
+      '<div style="background:'+(score>=3?'rgba(0,200,83,.15)':score===2?'rgba(255,209,0,.15)':'rgba(255,61,87,.12)')+';border-radius:8px;padding:10px 12px;margin-bottom:10px;text-align:center">'+
+        '<div style="font-size:22px;margin-bottom:4px">'+semaphore+'</div>'+
+        '<div style="font-size:13px;font-weight:900;color:'+actionColor+'">'+action+'</div>'+
+      '</div>'+
+      condRow(c1,'BTC lateral',c1detail)+
+      condRow(c2,'Dominancia BTC bajando / ETH superando BTC',c2detail)+
+      condRow(c3,'ETH/BTC subiendo (ETH más fuerte que BTC)',c3detail)+
+      condRow(c4,'Amplitud de altcoins ≥60%',c4detail)+
+      topMoversHTML+
+      '<div style="font-size:10px;color:var(--text2);text-align:right;margin-top:8px;opacity:.7">'+
+        'Actualizado: '+new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})+
+      '</div>';
+
+    // Notification on green signal
+    if(score>=3&&'Notification' in window&&Notification.permission==='granted'){
+      new Notification('🟢 Polytrades — Modo Altcoins',{body:score+'/4 condiciones ✓ Buscar LONG en alts.'});
+    } else if(score>=3&&'Notification' in window&&Notification.permission!=='denied'){
+      Notification.requestPermission().then(p=>{
+        if(p==='granted')new Notification('🟢 Polytrades — Modo Altcoins',{body:score+'/4 condiciones ✓'});
+      });
     }
   } catch(e){
-    box.innerHTML='❌ Error al obtener datos. Verificá conexión.';
+    const box=document.getElementById('cycle-status');
+    if(box)box.innerHTML='<div style="color:#ff3d57;font-size:11px;text-align:center;padding:8px">❌ Error: '+e.message+'</div>';
   }
-  if(btn){btn.textContent='Analizar';btn.disabled=false;}
+  if(btn){btn.textContent='⟳ Actualizar análisis';btn.disabled=false;}
 }
 
 // Auto-check every 5 minutes when on En Curso tab
 function startCycleMonitor(){
-  checkMarketCycle();
+  if(cycleOpen)checkMarketCycle();
   if(cycleInterval)clearInterval(cycleInterval);
   cycleInterval=setInterval(()=>{
-    if(document.getElementById('page-abiertos').classList.contains('active'))
+    if(document.getElementById('page-abiertos').classList.contains('active')&&cycleOpen)
       checkMarketCycle();
-    else{clearInterval(cycleInterval);cycleInterval=null;}
-  },300000); // every 5 min
+    else if(!document.getElementById('page-abiertos').classList.contains('active')){
+      clearInterval(cycleInterval);cycleInterval=null;
+    }
+  },300000);
 }
 
 
