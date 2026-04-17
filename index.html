@@ -2324,7 +2324,7 @@ async function checkMarketCycle(){
     const [priceRes, globalRes, marketsRes] = await Promise.all([
       fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&vs_currencies=usd&include_24hr_change=true&include_1hr_change=true'),
       fetch('https://api.coingecko.com/api/v3/global'),
-      fetch('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=40&page=1&sparkline=false&price_change_percentage=1h,24h')
+      fetch('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=50&page=1&sparkline=false&price_change_percentage=1h,24h')
     ]);
     const priceData=await priceRes.json();
     const globalData=await globalRes.json();
@@ -2362,11 +2362,35 @@ async function checkMarketCycle(){
 
     // ── CONDICIÓN 4: Amplitud de altcoins ────────────────────
     // Excluir BTC y ETH, contar las que suben en 1h
+    // Top 50 alts (excluding BTC+ETH)
     const alts=marketsData.filter(c=>c.id!=='bitcoin'&&c.id!=='ethereum'&&c.price_change_percentage_1h_in_currency!==null);
+
+    // Add user's most-traded tickers if not already in top 50
+    const userTickers=[...new Set(D.trades.map(t=>t.ticker).filter(Boolean))];
+    const top50ids=new Set(marketsData.map(c=>c.symbol.toUpperCase()));
+    const missingTickers=userTickers.filter(tk=>!top50ids.has(tk)&&TICKER_MAP[tk]);
+    if(missingTickers.length){
+      try{
+        const extraIds=missingTickers.map(tk=>TICKER_MAP[tk]).join(',');
+        const extraRes=await fetch('https://api.coingecko.com/api/v3/simple/price?ids='+extraIds+'&vs_currencies=usd&include_1h_change=true&include_24hr_change=true');
+        const extraData=await extraRes.json();
+        missingTickers.forEach(tk=>{
+          const id=TICKER_MAP[tk];
+          const d=extraData[id];
+          if(d&&d.usd_1h_change!=null){
+            alts.push({id,symbol:tk.toLowerCase(),price_change_percentage_1h_in_currency:d.usd_1h_change,price_change_percentage_24h:d.usd_24h_change,_userTicker:true});
+          }
+        });
+      }catch(e){/* ignore extra fetch errors */}
+    }
+
     const altsUp=alts.filter(c=>c.price_change_percentage_1h_in_currency>0).length;
     const altsPct=alts.length?Math.round(altsUp/alts.length*100):0;
     const c4=altsPct>=60;
-    const c4detail=altsUp+' de '+alts.length+' alts subiendo en 1h ('+altsPct+'%)'+(c4?' 🟢':altsPct>=40?' 🟡':' 🔴');
+    const userAltsInPool=alts.filter(c=>userTickers.includes(c.symbol.toUpperCase()));
+    const userAltsUp=userAltsInPool.filter(c=>c.price_change_percentage_1h_in_currency>0).length;
+    const userAltsNote=userAltsInPool.length?' · Tus alts: '+userAltsUp+'/'+userAltsInPool.length+' verdes':'';
+    const c4detail=altsUp+' de '+alts.length+' alts subiendo en 1h ('+altsPct+'%)'+userAltsNote+(c4?' 🟢':altsPct>=40?' 🟡':' 🔴');
 
     // ── TOP MOVERS ───────────────────────────────────────────
     const topMovers=alts
@@ -2479,9 +2503,13 @@ async function checkMarketCycle(){
     const topMoversHTML=topMovers.length?
       '<div style="margin-bottom:10px"><div style="font-size:11px;font-weight:700;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">🚀 Líderes 1h</div>'+
       '<div style="display:flex;flex-wrap:wrap;gap:5px">'+
-      topMovers.map(c=>'<span style="background:rgba(0,200,83,.12);color:#00c853;border-radius:6px;padding:3px 8px;font-size:11px;font-weight:800">'+
-        c.symbol.toUpperCase()+' +'+(c.price_change_percentage_1h_in_currency||0).toFixed(1)+'%</span>'
-      ).join('')+'</div></div>':'';
+      topMovers.map(c=>{
+        const isMine=userTickers.includes(c.symbol.toUpperCase());
+        return '<span style="background:'+(isMine?'rgba(255,107,0,.2)':'rgba(0,200,83,.12)')+';color:'+(isMine?'#ff6b00':'#00c853')+';border-radius:6px;padding:3px 8px;font-size:11px;font-weight:800">'+(isMine?'★ ':'')+
+          c.symbol.toUpperCase()+' +'+(c.price_change_percentage_1h_in_currency||0).toFixed(1)+'%</span>';
+      }).join('')+
+      '<div style="font-size:9px;color:var(--text2);margin-top:4px;width:100%">★ = tickers que operás</div>'+
+      '</div></div>':'';
 
     // Warning rules
     const warningsHTML=
