@@ -35,7 +35,7 @@ body:not(.desktop-mode){max-width:480px;margin:0 auto}
 .header-btns{display:flex;gap:8px;align-items:center}
 .theme-btn,.desktop-btn{background:var(--surface2);border:1px solid var(--border);border-radius:20px;padding:6px 14px;font-family:'Nunito',sans-serif;font-size:13px;font-weight:700;color:var(--text);cursor:pointer;display:flex;align-items:center;gap:6px;white-space:nowrap}
 /* KPI BAR */
-.kpi-bar{background:var(--surface);padding:12px 16px;display:grid;grid-template-columns:1fr 1px 1fr 1px 1fr;border-bottom:3px solid #ff6b00;margin-bottom:4px}
+.kpi-bar{background:var(--surface);padding:12px 16px;display:grid;grid-template-columns:1fr 1px 1fr 1px 1fr;border-bottom:3px solid #ff6b00;margin-bottom:0}
 .kpi-div{background:var(--border)}
 .kpi-item{text-align:center;cursor:pointer;transition:background .15s;border-radius:6px;padding:2px}
 .kpi-item:hover{background:rgba(255,107,0,.08)}
@@ -243,8 +243,10 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
   <div class="kpi-item" onclick="openDetail('wr')"><div class="kpi-label">Win Rate</div><div class="kpi-val" id="kpi-wr">—</div></div>
   <div class="kpi-div"></div>
   <div class="kpi-item" onclick="openDetail('ev')"><div class="kpi-label">EV / Trade</div><div class="kpi-val" id="kpi-ev">—</div></div>
+
 </div>
 
+<div id="streak-banner" style="display:none;padding:5px 16px;font-size:12px;font-weight:800;text-align:center;letter-spacing:.3px"></div>
 <div class="tabs">
   <div class="tab active" onclick="switchTab('cargar')">Cargar</div>
   <div class="tab" onclick="switchTab('abiertos')">🟢 <span id="open-count-tab"></span></div>
@@ -325,7 +327,7 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
       <label>Fecha y hora de cierre <span style="color:var(--text2);font-size:9px;font-weight:600">(edición)</span></label>
       <input type="datetime-local" id="f-closedhora">
     </div>
-    <div class="field"><label>Observaciones</label><input type="text" id="f-obs" placeholder="Notas del trade..."></div>
+    <div class="field"><label>Observaciones</label><textarea id="f-obs" placeholder="Notas del trade..." rows="2" style="resize:vertical;font-family:'Nunito',sans-serif;font-size:14px;padding:10px 12px;background:var(--input-bg);border:1.5px solid var(--border);border-radius:8px;color:var(--text);width:100%;outline:none;transition:border-color .2s" onfocus="this.style.borderColor='#ff6b00'" onblur="this.style.borderColor='var(--border)'"></textarea></div>
   </div>
   <button class="btn btn-orange" onclick="saveTrade()" id="btn-save">➕ Agregar Trade</button>
   <button class="btn btn-dark" onclick="cancelEdit()" id="btn-cancel" style="display:none">✕ Cancelar edición</button>
@@ -405,6 +407,27 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
     </div>
   </div>
 
+
+  <!-- CAPITAL TRACKER -->
+  <div class="card">
+    <div class="section-header">
+      <div class="section-title">💰 Capital tracker</div>
+      <button class="btn btn-dark btn-sm" onclick="toggleCapitalTracker()" id="ct-toggle-btn">Ver</button>
+    </div>
+    <div id="capital-tracker-content" style="display:none">
+      <div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:10px">
+        <div style="font-size:11px;font-weight:700;color:var(--text2);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">Movimientos de capital</div>
+        <div class="row2" style="margin-bottom:8px">
+          <div class="field" style="margin:0"><label>Monto $</label><input type="number" id="ct-amount" placeholder="ej: 500" style="font-size:13px;padding:8px 10px"></div>
+          <div class="field" style="margin:0"><label>Tipo</label><select id="ct-type" style="font-size:13px;padding:8px 10px"><option value="deposit">Depósito</option><option value="withdrawal">Retiro</option></select></div>
+        </div>
+        <div class="field" style="margin-bottom:8px"><label>Fecha</label><input type="date" id="ct-date" style="font-size:13px;padding:8px 10px"></div>
+        <button class="btn btn-orange btn-sm" onclick="addCapitalMovement()" style="width:100%;margin:0">+ Registrar movimiento</button>
+      </div>
+      <div id="ct-summary" style="margin-bottom:10px"></div>
+      <div id="ct-movements" style="max-height:200px;overflow-y:auto"></div>
+    </div>
+  </div>
   <div class="backup-section">
     <div class="backup-title">💾 Backup y exportación</div>
     <div id="sync-status" style="display:none;border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:12px;font-weight:700;text-align:center"></div>
@@ -508,6 +531,7 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
       Tocá "Analizar" para ver el estado del ciclo (requiere HTTPS)
     </div>
   </div>
+  <div id="risk-exposure-bar" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:10px 14px;margin-bottom:10px"></div>
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
     <div style="font-size:12px;color:var(--text2);font-weight:700">Tocá un trade para editarlo</div>
     <button onclick="refreshPrices()" id="refresh-btn" class="btn btn-dark btn-sm" style="gap:6px">⟳ Actualizar precios</button>
@@ -522,6 +546,23 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
   <div id="open-empty" style="display:none" class="empty-state">
     <div class="empty-icon">🟢</div>
     <div class="empty-text">No hay trades abiertos</div>
+  </div>
+
+  <!-- PRICE ALERTS -->
+  <div style="margin-top:16px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+      <div style="font-size:11px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.5px">🔔 Alertas de precio</div>
+      <button onclick="toggleAlertsPanel()" id="alerts-toggle-btn" class="btn btn-dark btn-sm" style="font-size:10px">+ Nueva</button>
+    </div>
+    <div id="alerts-new-panel" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:8px">
+      <div class="row2">
+        <div class="field" style="margin:0"><label>Ticker</label><input type="text" id="al-ticker" placeholder="BTC" style="font-size:13px;padding:8px 10px;text-transform:uppercase" oninput="this.value=this.value.toUpperCase()"></div>
+        <div class="field" style="margin:0"><label>Precio $</label><input type="number" id="al-price" placeholder="ej: 50000" step="any" style="font-size:13px;padding:8px 10px"></div>
+      </div>
+      <div class="field" style="margin-top:8px"><label>Condición</label><select id="al-cond" style="font-size:13px;padding:8px 10px"><option value="above">Sube por encima de</option><option value="below">Baja por debajo de</option></select></div>
+      <button class="btn btn-orange btn-sm" onclick="addPriceAlert()" style="width:100%;margin-top:8px;margin-bottom:0">🔔 Crear alerta</button>
+    </div>
+    <div id="alerts-list"></div>
   </div>
 </div>
 
@@ -983,7 +1024,7 @@ function loadTradeForEdit(id){
 }
 function resetForm(){
   editingId=null;resultManualMode=false;
-  ['f-ticker','f-margen','f-entrada','f-actual','f-obs','f-resultado','f-pnl'].forEach(id=>document.getElementById(id).value='');
+  ['f-ticker','f-margen','f-entrada','f-actual','f-resultado','f-pnl'].forEach(id=>document.getElementById(id).value='');document.getElementById('f-obs').value='';
   document.getElementById('f-lev').value=5;
   document.getElementById('f-open').checked=false;
   document.getElementById('f-10p').checked=false;
@@ -1200,6 +1241,29 @@ function updateKPIs(){
   const pfEl=document.getElementById('kpi-pf');pfEl.textContent=s.pf>=999?'∞':s.pf.toFixed(2);pfEl.className='kpi-val '+(s.pf>=1?'pos':'neg');
   const wrEl=document.getElementById('kpi-wr');wrEl.textContent=(s.winRate*100).toFixed(0)+'%';wrEl.className='kpi-val '+(s.winRate>=.5?'pos':'neg');
   const evEl=document.getElementById('kpi-ev');evEl.textContent=(s.ev>=0?'+':'')+s.ev.toFixed(1)+'%';evEl.className='kpi-val '+(s.ev>=0?'pos':'neg');
+  // Streak banner — solo cuando importa
+  const streakBanner=document.getElementById('streak-banner');
+  if(streakBanner){
+    const cur=s.streak.current;
+    const bestWin=s.streak.bestWin;
+    if(cur<=-2){
+      // Racha perdedora: advertencia
+      streakBanner.style.display='block';
+      streakBanner.style.background='rgba(255,61,87,.1)';
+      streakBanner.style.color='#ff3d57';
+      streakBanner.style.borderBottom='1px solid rgba(255,61,87,.2)';
+      streakBanner.textContent='⚠️ '+Math.abs(cur)+' pérdidas seguidas — considerá pausar';
+    } else if(cur>0&&cur>=bestWin&&cur>=3){
+      // Récord personal de racha ganadora (mínimo 3)
+      streakBanner.style.display='block';
+      streakBanner.style.background='rgba(0,200,83,.1)';
+      streakBanner.style.color='#00c853';
+      streakBanner.style.borderBottom='1px solid rgba(0,200,83,.2)';
+      streakBanner.textContent='🏆 Récord: '+cur+' trades ganadores seguidos';
+    } else {
+      streakBanner.style.display='none';
+    }
+  }
   // desktop extra items
   if(desktopMode){
     const kb=document.getElementById('kpi-bar');
@@ -1263,7 +1327,8 @@ function renderHistorial(){
     const _tdur=(t.fechahora&&t.closedHora)?Math.max(0,(new Date(t.closedHora)-new Date(t.fechahora))/60000):null;
     const _tdurStr=_tdur!==null?(_tdur<60?Math.round(_tdur)+'m':_tdur<1440?(Math.floor(_tdur/60)+'h '+Math.round(_tdur%60)+'m'):(Math.floor(_tdur/1440)+'d '+Math.floor((_tdur%1440)/60)+'h')):(t.open?'<span style="color:#00c853;font-size:10px">abierto</span>':'—');
     t.durMins=_tdur; // for sort
-    return`<tr class="clickable-row" onclick="loadTradeForEdit('${t.id}')">
+    const obsId='obs-'+t.id;
+    return`<tr class="clickable-row" onclick="toggleObs('${t.id}')" ondblclick="loadTradeForEdit('${t.id}')" title="Toque: ver obs · Doble toque: editar">
       <td style="color:var(--text2);font-size:11px">${f}</td>
       <td style="font-weight:800"><span style="display:inline-block;width:14px;color:#00c853;font-size:11px">${t.open?'●':''}</span>${t.ticker}</td>
       <td><span class="badge badge-${t.pos.toLowerCase()}">${t.pos}</span></td>
@@ -1278,7 +1343,8 @@ function renderHistorial(){
       <td>${p10flag}</td>
       <td style="font-size:11px;color:var(--text2);white-space:nowrap">${_tdurStr}</td>
       <td onclick="event.stopPropagation()"><button class="btn-icon del" onclick="delTrade('${t.id}')">✕</button></td>
-    </tr>`;
+    </tr>
+    ${t.obs?`<tr id="obs-${t.id}" style="display:none"><td colspan="13" style="padding:6px 12px;background:var(--surface2);font-size:11px;color:var(--text2);font-style:italic;border-top:1px solid var(--border)">${t.obs}</td></tr>`:''}` ;
   }).join('');
 }
 function delTrade(id){if(!confirm('¿Eliminar este trade?'))return;D.trades=D.trades.filter(x=>x.id!==id);persist(D);renderHistorial();updateKPIs();updateOpenCount();}
@@ -1625,6 +1691,9 @@ function renderGraficos(){
     ${stratData.map(d=>{const wr=d.count?d.wins/d.count*100:0;return`<div class="bar-row"><div class="bar-name" title="${d.name}">${d.name}</div><div class="bar-track"><div class="bar-fill ${wr>=50?'pos':'neg'}" style="width:${Math.max(wr,3)}%">${wr>20?wr.toFixed(0)+'%':''}</div></div><div style="font-size:10px;font-weight:800;color:${wr>=50?'#00c853':'#ff3d57'};width:36px;text-align:right;flex-shrink:0">${wr.toFixed(0)}%</div><div class="bar-count">${d.count}t</div></div>`;}).join('')}
   </div></div>
 
+  <!-- CROSS STATS -->
+  <div class="desktop-col-full"><div id="cross-stats-container"></div></div>
+
   <!-- ⑤ MOTIVOS SALIDA -->
   ${Object.keys(bySalida).length?`<div><div class="chart-box" style="cursor:default">
     <div class="chart-label">🚪 Motivos de salida</div>
@@ -1637,6 +1706,9 @@ function renderGraficos(){
     <div class="chart-label">📆 Rendimiento por día de semana</div>
     ${dayData.map(d=>`<div class="bar-row"><div class="bar-name">${d.name}</div><div class="bar-track"><div class="bar-fill ${d.avg>=0?'pos':'neg'}" style="width:${Math.abs(d.avg)/mxD*100}%">${Math.abs(d.avg)>2?(d.avg>=0?'+':'')+d.avg.toFixed(1)+'%':''}</div></div><div class="bar-count" title="WR ${d.count?Math.round(d.wins/d.count*100):0}%">${d.count}t</div></div>`).join('')}
   </div></div>
+
+  <!-- HORA DEL DÍA -->
+  <div class="desktop-col-full"><div id="hour-stats-container"></div></div>
 
   <!-- ⑦ TEMPORALIDAD con EV -->
   <div>
@@ -1695,6 +1767,9 @@ function renderGraficos(){
       </div>`;
     })()}
   </div></div>`:''}
+
+  <!-- DRAWDOWN POR MES -->
+  <div class="desktop-col-full"><div id="dd-month-container"></div></div>
 
   <!-- ⑧b DURATION BY TICKER & OTHER TIME STATS -->
   <div class="desktop-col-full">
@@ -1766,7 +1841,6 @@ function renderGraficos(){
   </div></div>
 
   </div>`; // close desktop-grid
-  renderPikachuStatsBlock(T);
 }
 
 // ══ HELPERS ══
@@ -1830,6 +1904,10 @@ init();
         <label>Motivo de salida</label>
         <select id="mcp-salida"></select>
       </div>
+      <div class="field" id="mcp-patron-row" style="display:none">
+        <label>Patrón Pikachu #</label>
+        <select id="mcp-patron"><option value="">Sin especificar</option><option value="1">1° Patrón</option><option value="2">2° Patrón</option><option value="3">3° Patrón</option><option value="4">4° Patrón</option><option value="5">5° Patrón</option><option value="6">6° Patrón</option><option value="7">7° Patrón</option><option value="8">8° Patrón</option></select>
+      </div>
       <div class="field">
         <label>Observaciones (opcional)</label>
         <input type="text" id="mcp-obs" placeholder="Notas del cierre...">
@@ -1880,6 +1958,11 @@ function openMCP(id, fullClose){
      </div>`;
   document.getElementById('mcp-pct').style.display=fullClose?'none':'block';
   document.getElementById('mcp-pct').previousElementSibling.style.display=fullClose?'none':'block';
+  // Show patron field for Pikachu trades
+  const _mcpPatRow=document.getElementById('mcp-patron-row');
+  if(_mcpPatRow)_mcpPatRow.style.display=t.estrategia==='Pikachu'?'block':'none';
+  const _mcpPat=document.getElementById('mcp-patron');
+  if(_mcpPat)_mcpPat.value=t.patron||'';
   mcpCalc();
   document.getElementById('modal-close-partial').classList.add('open');
 }
@@ -1910,6 +1993,7 @@ function saveMCP(){
   const pctClose=mcpFullClose?100:parseFloat(document.getElementById('mcp-pct').value)||100;
   const salida=document.getElementById('mcp-salida').value;
   const obs=document.getElementById('mcp-obs').value;
+  const mcpPatron=document.getElementById('mcp-patron').value||null;
   const pct=precio&&t.entrada?calcPct(t.entrada,precio,t.pos,t.lev):t.resultado;
   
   // Store close time for duration calc
@@ -1926,30 +2010,39 @@ function saveMCP(){
     t.resultado=pct||t.resultado;
     if(salida)t.salida=salida;
     if(obs)t.obs=obs;
+    if(mcpPatron)t.patron=mcpPatron;
     t.closedHora=closedHora;
     t.fecha=closedHora.slice(0,10);
+    // Restore original margin for historial display
+    if(t.margenOriginal)t.margen=t.margenOriginal;
     // mark p10 if reached
     if(pct>=10)t.p10=true;
-    // merge partial closes into avg if any exist
+    // merge partial closes into weighted avg if any exist
     if(t.partialCloses&&t.partialCloses.length){
       t.partialCloses.push({pct,pctClose,pnl:t.margen*(pctClose/100)*pct/100,precio,closedHora});
       const allCloses=t.partialCloses;
-      const totalMargen=allCloses.reduce((s,c)=>s+c.pctClose,0);
-      const avgPct=totalMargen>0?allCloses.reduce((s,c)=>s+c.pct*(c.pctClose/100),0)/(totalMargen/100):pct;
+      const totalPctClosed=allCloses.reduce((s,c)=>s+c.pctClose,0);
+      const avgPct=totalPctClosed>0?allCloses.reduce((s,c)=>s+c.pct*(c.pctClose/100),0)/(totalPctClosed/100):pct;
       t.resultado=avgPct;
-      t.obs=`Cierre promedio de ${allCloses.length} cierres. Último: ${obs||salida||'—'}`;
+      // P&L total = suma de todos los cierres sobre margen original
+      const totalPnl=allCloses.reduce((s,c)=>s+c.pnl,0);
+      t.obs=`${allCloses.length} cierres · P&L total: ${totalPnl>=0?'+':''}$${totalPnl.toFixed(2)} · Último: ${obs||salida||'—'}`;
     }
   } else {
     // Partial close — record it, keep trade open with remaining margin
     if(!t.partialCloses)t.partialCloses=[];
-    t.partialCloses.push({pct,pctClose,pnl:t.margen*(pctClose/100)*pct/100,precio,closedHora,salida,obs});
+    // Save original margin before first reduction
+    if(!t.margenOriginal)t.margenOriginal=t.margen;
+    const pnlEste=t.margen*(pctClose/100)*pct/100;
+    t.partialCloses.push({pct,pctClose,pnl:pnlEste,precio,closedHora,salida,obs});
     // reduce remaining margin
     t.margen=parseFloat((t.margen*(1-pctClose/100)).toFixed(2));
     // update actual price
     t.actual=precio;
     // Add note
     const totalClosed=t.partialCloses.reduce((s,c)=>s+c.pctClose,0);
-    t.obs=`${totalClosed}% cerrado · quedan $${t.margen}`;
+    const totalPnlSoFar=t.partialCloses.reduce((s,c)=>s+c.pnl,0);
+    t.obs=`${totalClosed}% cerrado · P&L hasta acá: ${totalPnlSoFar>=0?'+':''}$${totalPnlSoFar.toFixed(2)} · quedan $${t.margen}`;
   }
   
   persist(D);closeMCP();updateKPIs();updateOpenCount();renderOpenTrades();
@@ -2291,4 +2384,283 @@ function renderPikachuStatsBlock(T){
     '</div>';
 }
 
+</script><script>
+// ══ TOGGLE OBS ROW IN HISTORIAL ══
+function toggleObs(id){
+  const row=document.getElementById('obs-'+id);
+  if(!row)return loadTradeForEdit(id);
+  row.style.display=row.style.display==='none'?'table-row':'none';
+}
+
+// ══ RISK EXPOSURE BAR ══
+function renderRiskExposure(openTrades){
+  const box=document.getElementById('risk-exposure-bar');
+  if(!box)return;
+  if(!openTrades.length){box.style.display='none';return;}
+  const capital=parseFloat(localStorage.getItem('tpro_capital'))||0;
+  const totalExposed=openTrades.reduce((s,t)=>s+t.margen,0);
+  const pctExposed=capital?((totalExposed/capital)*100).toFixed(1):null;
+  const col=pctExposed&&parseFloat(pctExposed)>10?'#ff3d57':pctExposed&&parseFloat(pctExposed)>5?'#ffd100':'#00c853';
+  box.style.display='block';
+  box.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center">'+
+    '<div style="font-size:11px;font-weight:700;color:var(--text2)">💼 Capital en riesgo</div>'+
+    '<div style="font-size:13px;font-weight:900;color:'+col+'">$'+totalExposed.toFixed(0)+
+    (pctExposed?' <span style="font-size:11px;color:var(--text2);">('+pctExposed+'% del capital)</span>':
+    ' <span style="font-size:10px;color:var(--text2)">— ingresá capital en Recomendaciones</span>')+
+    '</div></div>'+
+    '<div style="height:4px;background:var(--border);border-radius:2px;margin-top:6px;overflow:hidden">'+
+    '<div style="height:100%;width:'+Math.min(pctExposed||0,100)+'%;background:'+col+';border-radius:2px;transition:width .5s"></div>'+
+    '</div>';
+}
+
+// Hook into renderOpenTrades
+const _rOT_orig=renderOpenTrades;
+renderOpenTrades=function(){
+  _rOT_orig();
+  const open=D.trades.filter(t=>t.open);
+  renderRiskExposure(open);
+};
+
+// ══ CAPITAL TRACKER ══
+function getCapitalMovements(){
+  try{return JSON.parse(localStorage.getItem('tpro_capital_moves')||'[]');}catch{return[];}
+}
+function saveCapitalMovements(m){localStorage.setItem('tpro_capital_moves',JSON.stringify(m));}
+
+function toggleCapitalTracker(){
+  const el=document.getElementById('capital-tracker-content');if(!el)return;
+  const open=el.style.display==='none';
+  el.style.display=open?'block':'none';
+  const btn=document.getElementById('ct-toggle-btn');if(btn)btn.textContent=open?'Cerrar':'Ver';
+  if(open){
+    const d=new Date();const pad=n=>String(n).padStart(2,'0');
+    const el2=document.getElementById('ct-date');
+    if(el2)el2.value=d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
+    renderCapitalTracker();
+  }
+}
+
+function addCapitalMovement(){
+  const amount=parseFloat(document.getElementById('ct-amount').value)||0;
+  const type=document.getElementById('ct-type').value;
+  const date=document.getElementById('ct-date').value;
+  if(!amount||!date){alert('Ingresá monto y fecha');return;}
+  const moves=getCapitalMovements();
+  moves.push({id:uid(),date,amount,type});
+  moves.sort((a,b)=>a.date.localeCompare(b.date));
+  saveCapitalMovements(moves);
+  document.getElementById('ct-amount').value='';
+  renderCapitalTracker();
+}
+
+function deleteCapitalMovement(id){
+  const moves=getCapitalMovements().filter(m=>m.id!==id);
+  saveCapitalMovements(moves);
+  renderCapitalTracker();
+}
+
+function renderCapitalTracker(){
+  const moves=getCapitalMovements();
+  const s=computeStats(D.trades.filter(t=>!t.open));
+  const totalPnl=s?s.totalPnl:0;
+  const totalDeposits=moves.filter(m=>m.type==='deposit').reduce((a,m)=>a+m.amount,0);
+  const totalWithdrawals=moves.filter(m=>m.type==='withdrawal').reduce((a,m)=>a+m.amount,0);
+  const netCapital=totalDeposits-totalWithdrawals+totalPnl;
+  const roi=totalDeposits>0?(totalPnl/totalDeposits*100):0;
+
+  const sumEl=document.getElementById('ct-summary');
+  if(sumEl){
+    sumEl.innerHTML='<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px">'+
+      '<div style="background:var(--surface2);border-radius:8px;padding:8px;text-align:center"><div style="font-size:9px;color:var(--text2);margin-bottom:3px">DEPÓSITOS</div><div style="font-size:15px;font-weight:900;color:#00c853">+$'+totalDeposits.toFixed(0)+'</div></div>'+
+      '<div style="background:var(--surface2);border-radius:8px;padding:8px;text-align:center"><div style="font-size:9px;color:var(--text2);margin-bottom:3px">RETIROS</div><div style="font-size:15px;font-weight:900;color:#ff3d57">-$'+totalWithdrawals.toFixed(0)+'</div></div>'+
+      '<div style="background:var(--surface2);border-radius:8px;padding:8px;text-align:center"><div style="font-size:9px;color:var(--text2);margin-bottom:3px">P&L TRADING</div><div style="font-size:15px;font-weight:900;color:'+(totalPnl>=0?'#00c853':'#ff3d57')+'">'+(totalPnl>=0?'+':'')+' $'+totalPnl.toFixed(2)+'</div></div>'+
+      '<div style="background:var(--surface2);border-radius:8px;padding:8px;text-align:center"><div style="font-size:9px;color:var(--text2);margin-bottom:3px">CAPITAL NETO</div><div style="font-size:15px;font-weight:900;color:#ff6b00">$'+netCapital.toFixed(2)+'</div></div>'+
+    '</div>'+
+    (totalDeposits>0?'<div style="text-align:center;font-size:12px;font-weight:700;color:'+(roi>=0?'#00c853':'#ff3d57')+'">ROI: '+(roi>=0?'+':'')+roi.toFixed(1)+'% sobre capital depositado</div>':'');
+  }
+  const listEl=document.getElementById('ct-movements');
+  if(listEl){
+    if(!moves.length){listEl.innerHTML='<div style="color:var(--text2);font-size:12px;padding:8px;text-align:center">Sin movimientos registrados</div>';return;}
+    listEl.innerHTML=moves.slice().reverse().map(m=>'<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 10px;background:var(--surface2);border-radius:7px;margin-bottom:5px">'+
+      '<div><div style="font-size:12px;font-weight:700;color:'+(m.type==='deposit'?'#00c853':'#ff3d57')+'">'+(m.type==='deposit'?'+ Depósito':'- Retiro')+' $'+m.amount.toFixed(0)+'</div>'+
+      '<div style="font-size:10px;color:var(--text2)">'+m.date+'</div></div>'+
+      '<button onclick="deleteCapitalMovement(\''+m.id+'\')" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:14px;padding:4px">✕</button>'+
+    '</div>').join('');
+  }
+}
+
+// ══ PRICE ALERTS ══
+const ALERTS_KEY='tpro_price_alerts';
+function getAlerts(){try{return JSON.parse(localStorage.getItem(ALERTS_KEY)||'[]');}catch{return[];}}
+function saveAlerts(a){localStorage.setItem(ALERTS_KEY,JSON.stringify(a));}
+
+function toggleAlertsPanel(){
+  const el=document.getElementById('alerts-new-panel');if(!el)return;
+  el.style.display=el.style.display==='none'?'block':'none';
+  renderAlertsList();
+}
+
+function addPriceAlert(){
+  const ticker=document.getElementById('al-ticker').value.toUpperCase().trim();
+  const price=parseFloat(document.getElementById('al-price').value);
+  const cond=document.getElementById('al-cond').value;
+  if(!ticker||!price){alert('Ingresá ticker y precio');return;}
+  const alerts=getAlerts();
+  alerts.push({id:uid(),ticker,price,cond,active:true,created:new Date().toLocaleDateString('es-AR')});
+  saveAlerts(alerts);
+  document.getElementById('al-ticker').value='';
+  document.getElementById('al-price').value='';
+  document.getElementById('alerts-new-panel').style.display='none';
+  renderAlertsList();
+}
+
+function deleteAlert(id){saveAlerts(getAlerts().filter(a=>a.id!==id));renderAlertsList();}
+
+function renderAlertsList(){
+  const el=document.getElementById('alerts-list');if(!el)return;
+  const alerts=getAlerts();
+  if(!alerts.length){el.innerHTML='<div style="font-size:11px;color:var(--text2);text-align:center;padding:8px">Sin alertas activas</div>';return;}
+  el.innerHTML=alerts.map(a=>{
+    const currentPrice=livePrices[a.ticker]||0;
+    const triggered=currentPrice&&((a.cond==='above'&&currentPrice>=a.price)||(a.cond==='below'&&currentPrice<=a.price));
+    const col=triggered?'#ffd100':a.cond==='above'?'#00c853':'#ff3d57';
+    return '<div style="display:flex;align-items:center;gap:8px;background:var(--surface2);border-radius:8px;padding:8px 10px;margin-bottom:5px;border-left:3px solid '+col+'">'+
+      '<div style="flex:1"><div style="font-size:12px;font-weight:800">'+a.ticker+' '+(a.cond==='above'?'↑':'↓')+' $'+a.price+'</div>'+
+      '<div style="font-size:10px;color:var(--text2)">'+(triggered?'⚡ ¡Condición cumplida!':a.cond==='above'?'Alerta si sube por encima':'Alerta si baja por debajo')+
+      (currentPrice?' · Precio actual: $'+fmtPriceShort(currentPrice):'')+'</div></div>'+
+      '<button onclick="deleteAlert(\''+a.id+'\')" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:14px">✕</button>'+
+    '</div>';
+  }).join('');
+}
+
+// Check alerts on price update
+const _origRefreshPrices2=refreshPrices;
+refreshPrices=async function(){
+  await _origRefreshPrices2();
+  checkPriceAlerts();
+  renderAlertsList();
+};
+
+function checkPriceAlerts(){
+  const alerts=getAlerts();
+  alerts.forEach(a=>{
+    const p=livePrices[a.ticker];
+    if(!p)return;
+    const triggered=(a.cond==='above'&&p>=a.price)||(a.cond==='below'&&p<=a.price);
+    if(triggered&&'Notification' in window&&Notification.permission==='granted'){
+      new Notification('🔔 Alerta Polytrades: '+a.ticker,{
+        body:(a.cond==='above'?'Subió':'Bajó')+' a $'+p.toFixed(4)+' (objetivo: $'+a.price+')'
+      });
+    }
+  });
+}
+
+// ══ CROSS STATS TIMING × ESTRATEGIA ══
+// Added to renderGraficos via a separate function
+function renderCrossStats(T){
+  // This is called within the stats template — returns HTML string
+  const timings=['A tiempo','Retest','Antes','Tarde'];
+  const strats=[...new Set(T.map(t=>t.estrategia).filter(Boolean))];
+  if(!strats.length)return '';
+  const rows=strats.map(st=>{
+    const cells=timings.map(tm=>{
+      const group=T.filter(t=>t.estrategia===st&&t.timing===tm);
+      if(!group.length)return '<td style="text-align:center;padding:6px;color:var(--text2);font-size:11px">—</td>';
+      const wins=group.filter(t=>t.resultado>0).length;
+      const avg=group.reduce((s,t)=>s+t.resultado,0)/group.length;
+      const col=avg>=0?'#00c853':'#ff3d57';
+      return '<td style="text-align:center;padding:6px"><div style="font-size:12px;font-weight:900;color:'+col+'">'+(avg>=0?'+':'')+avg.toFixed(0)+'%</div><div style="font-size:9px;color:var(--text2)">'+group.length+'t WR'+Math.round(wins/group.length*100)+'%</div></td>';
+    }).join('');
+    return '<tr><td style="padding:6px 10px;font-weight:800;font-size:12px;border-right:1px solid var(--border)">'+st+'</td>'+cells+'</tr>';
+  }).join('');
+  return '<div class="chart-box" style="cursor:default"><div class="chart-label">🔀 Cross — Estrategia × Timing <span style="font-size:10px;color:var(--text2)">(avg R%)</span></div>'+
+    '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">'+
+    '<thead><tr><th style="padding:6px 10px;text-align:left;border-right:1px solid var(--border);color:var(--text2);font-size:11px">Estrategia</th>'+
+    timings.map(t=>'<th style="padding:6px;text-align:center;color:var(--text2);font-size:11px">'+t+'</th>').join('')+
+    '</tr></thead><tbody>'+rows+'</tbody></table></div></div>';
+}
+
+// ══ HORA DEL DÍA STATS — injected into renderGraficos output ══
+// Called separately after renderGraficos sets innerHTML
+function renderHourStats(T){
+  const el=document.getElementById('hour-stats-container');
+  if(!el)return;
+  const withHour=T.filter(t=>t.fechahora);
+  if(withHour.length<5){el.innerHTML='';return;}
+  const byHour={};
+  withHour.forEach(t=>{
+    const h=new Date(t.fechahora).getHours();
+    const bucket=h<6?'00-06':h<12?'06-12':h<18?'12-18':'18-24';
+    if(!byHour[bucket])byHour[bucket]=[];
+    byHour[bucket].push(t.resultado);
+  });
+  const hData=Object.entries(byHour).sort((a,b)=>a[0].localeCompare(b[0])).map(([k,v])=>{
+    const wins=v.filter(x=>x>0).length;
+    const avg=v.reduce((a,x)=>a+x,0)/v.length;
+    return{label:k,avg,count:v.length,wr:wins/v.length*100};
+  });
+  const mxH=Math.max(...hData.map(d=>Math.abs(d.avg)),1);
+  el.innerHTML='<div class="chart-box" style="cursor:default">'+
+    '<div class="chart-label">🕐 Rendimiento por hora de entrada</div>'+
+    '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">'+
+    hData.map(d=>{
+      const col=d.avg>=0?'#00c853':'#ff3d57';
+      return '<div style="background:var(--surface2);border-radius:9px;padding:10px;text-align:center">'+
+        '<div style="font-size:11px;font-weight:800;color:var(--text2);margin-bottom:4px">'+d.label+'h</div>'+
+        '<div style="font-size:18px;font-weight:900;color:'+col+'">'+(d.avg>=0?'+':'')+d.avg.toFixed(1)+'%</div>'+
+        '<div style="font-size:10px;color:var(--text2);margin-top:2px">WR '+d.wr.toFixed(0)+'% · '+d.count+'t</div>'+
+      '</div>';
+    }).join('')+
+    '</div></div>';
+}
+
+// ══ DRAWDOWN POR MES ══
+function renderDrawdownByMonth(T){
+  const el=document.getElementById('dd-month-container');
+  if(!el)return;
+  if(!T.length){el.innerHTML='';return;}
+  const byMonth={};
+  T.forEach(t=>{
+    const m=t.fecha.slice(0,7);
+    if(!byMonth[m])byMonth[m]=[];
+    byMonth[m].push(t.margen*t.resultado/100);
+  });
+  const months=Object.keys(byMonth).sort();
+  const data=months.map(m=>{
+    const vals=byMonth[m];
+    const pnl=vals.reduce((a,x)=>a+x,0);
+    const worstDay=Math.min(...vals);
+    return{month:m.slice(5),pnl,worst:worstDay,count:vals.length};
+  });
+  const mxAbs=Math.max(...data.map(d=>Math.abs(d.pnl)),1);
+  el.innerHTML='<div class="chart-box" style="cursor:default">'+
+    '<div class="chart-label">📉 P&L y peor trade por mes ($)</div>'+
+    data.map(d=>{
+      const pnlCol=d.pnl>=0?'#00c853':'#ff3d57';
+      const ddCol='#ff3d57';
+      return '<div class="bar-row">'+
+        '<div class="bar-name">'+d.month+'</div>'+
+        '<div style="flex:1;display:flex;flex-direction:column;gap:2px">'+
+          '<div class="bar-track"><div class="bar-fill '+(d.pnl>=0?'pos':'neg')+'" style="width:'+Math.max(Math.abs(d.pnl)/mxAbs*100,2)+'%">'+
+            (Math.abs(d.pnl)>5?(d.pnl>=0?'+':'')+' $'+d.pnl.toFixed(0):'')+'</div></div>'+
+          '<div style="font-size:9px;color:#ff3d57">peor: $'+d.worst.toFixed(1)+'</div>'+
+        '</div>'+
+        '<div style="font-size:10px;font-weight:800;color:'+pnlCol+';width:55px;text-align:right;flex-shrink:0">'+(d.pnl>=0?'+':'')+' $'+d.pnl.toFixed(0)+'</div>'+
+      '</div>';
+    }).join('')+
+  '</div>';
+}
+
+// Hook all new stats into renderGraficos end
+const _origRenderGraficos=renderGraficos;
+renderGraficos=function(){
+  _origRenderGraficos();
+  const T=D.trades.filter(t=>!t.open);
+  renderHourStats(T);
+  renderDrawdownByMonth(T);
+  // Inject cross stats after estrategias section
+  const crossEl=document.getElementById('cross-stats-container');
+  if(crossEl)crossEl.innerHTML=renderCrossStats(T);
+  renderPikachuStatsBlock(T);
+};
 </script>
