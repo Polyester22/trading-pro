@@ -248,14 +248,34 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
 
 <div id="streak-banner" style="display:none;padding:5px 16px;font-size:12px;font-weight:800;text-align:center;letter-spacing:.3px"></div>
 <div class="tabs">
-  <div class="tab active" onclick="switchTab('cargar')">Cargar</div>
-  <div class="tab" onclick="switchTab('abiertos')">🟢 <span id="open-count-tab"></span></div>
+  <div class="tab active" onclick="switchTab('cargar')"><span id="semaforo-dot" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#555;margin-right:5px;vertical-align:middle;transition:background .4s,box-shadow .4s"></span>Cargar</div>
+  <div class="tab" onclick="switchTab('abiertos')"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#00c853;margin-right:5px;vertical-align:middle"></span><span id="open-count-tab">En curso</span></div>
   <div class="tab" onclick="switchTab('historial')">Historial</div>
   <div class="tab" onclick="switchTab('graficos')">Stats</div>
 </div>
 
 <!-- ══ CARGAR ══ -->
 <div class="page active" id="page-cargar">
+  <!-- SEMÁFORO ALTCOINS -->
+  <div id="market-cycle-panel" style="margin-bottom:10px">
+    <button onclick="toggleCyclePanel()" id="cycle-toggle-btn" style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:10px 14px;font-family:'Nunito',sans-serif;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:10px">
+      <div style="display:flex;align-items:center;gap:8px">
+        <span id="cycle-semaphore" style="font-size:20px">⚪</span>
+        <div style="text-align:left">
+          <div style="font-size:12px;font-weight:800;color:var(--text)" id="cycle-title">Semáforo Altcoins</div>
+          <div style="font-size:10px;color:var(--text2)" id="cycle-subtitle">Tocá para analizar el ciclo</div>
+        </div>
+      </div>
+      <span id="cycle-arrow" style="color:var(--text2);font-size:12px">▼</span>
+    </button>
+    <div id="cycle-body" style="display:none;background:var(--surface);border:1px solid var(--border);border-top:none;border-radius:0 0 10px 10px;padding:12px 14px">
+      <div id="cycle-status">
+        <div style="font-size:11px;color:var(--text2);text-align:center;padding:8px">Cargando...</div>
+      </div>
+      <button onclick="checkMarketCycle()" id="cycle-refresh-btn" class="btn btn-dark btn-sm" style="width:100%;margin-top:8px;margin-bottom:0;font-size:11px">⟳ Actualizar análisis</button>
+    </div>
+  </div>
+
   <div id="edit-banner" class="edit-banner" style="display:none">✏️ Editando — <span id="edit-banner-ticker"></span></div>
   <div class="card">
     <div class="card-title">📋 Datos del trade</div>
@@ -527,8 +547,7 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
   <div id="price-banner" style="display:none;background:rgba(255,107,0,.1);border:1px solid rgba(255,107,0,.3);border-radius:10px;padding:10px 14px;margin-bottom:10px;font-size:11px;font-weight:700;color:#ff6b00">
     ⚡ Cotizaciones en vivo disponibles solo en HTTPS (GitHub Pages). Ahora mostrando precios guardados.
   </div>
-  <!-- SEMÁFORO ALTCOINS -->
-  <div id="market-cycle-panel" style="margin-bottom:10px">
+  <!-- semaforo moved to Cargar tab -->
     <button onclick="toggleCyclePanel()" id="cycle-toggle-btn" style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:10px 14px;font-family:'Nunito',sans-serif;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:10px">
       <div style="display:flex;align-items:center;gap:8px">
         <span id="cycle-semaphore" style="font-size:20px">⚪</span>
@@ -545,7 +564,6 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
       </div>
       <button onclick="checkMarketCycle()" id="cycle-refresh-btn" class="btn btn-dark btn-sm" style="width:100%;margin-top:8px;margin-bottom:0;font-size:11px">⟳ Actualizar análisis</button>
     </div>
-  </div>
   <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
     <div style="font-size:12px;color:var(--text2);font-weight:700">Tocá un trade para editarlo</div>
     <button onclick="refreshPrices()" id="refresh-btn" class="btn btn-dark btn-sm" style="gap:6px">⟳ Actualizar precios</button>
@@ -720,7 +738,6 @@ function switchTab(tab){
   if(tab==='graficos')renderGraficos();
   if(tab==='abiertos'){
     renderOpenTrades();
-    startCycleMonitor();
     // Auto-refresh: immediately + every 60 seconds
     if(location.protocol.startsWith('https')){
       refreshPrices();
@@ -735,7 +752,7 @@ function switchTab(tab){
     // Stop auto-refresh when leaving the tab
     if(priceInterval){clearInterval(priceInterval);priceInterval=null;}
   }
-  if(tab==='cargar'){updatePreviews();updateKPIs();}
+  if(tab==='cargar'){updatePreviews();updateKPIs();startCycleMonitor();}
 }
 
 // ══ INIT ══
@@ -2460,13 +2477,15 @@ async function checkMarketCycle(){
     // ❌ No longear: BTC cayendo fuerte
     const noLongOverride=btc24<-5||btc1h<-3;
 
-    // Update toggle button
+    // Update toggle button + dot in Cargar tab
     const semEl=document.getElementById('cycle-semaphore');
     const titleEl=document.getElementById('cycle-title');
     const subEl=document.getElementById('cycle-subtitle');
+    const dot=document.getElementById('semaforo-dot');
     if(semEl)semEl.textContent=semaphore;
     if(titleEl)titleEl.textContent='Semáforo Altcoins';
     if(subEl){subEl.textContent=action;subEl.style.color=semColor;}
+    if(dot){dot.style.background=mode==='long'?'#00c853':mode==='short'?'#ff3d57':'#ffd100';dot.style.boxShadow='0 0 5px '+(mode==='long'?'#00c853':mode==='short'?'#ff3d57':'#ffd100');}
 
     // ── BUILD DETAILED PANEL ──────────────────────────────────
     function condRow(ok, label, detail){
@@ -2593,9 +2612,9 @@ function startCycleMonitor(){
   if(cycleOpen)checkMarketCycle();
   if(cycleInterval)clearInterval(cycleInterval);
   cycleInterval=setInterval(()=>{
-    if(document.getElementById('page-abiertos').classList.contains('active')&&cycleOpen)
+    if(document.getElementById('page-cargar').classList.contains('active')&&cycleOpen)
       checkMarketCycle();
-    else if(!document.getElementById('page-abiertos').classList.contains('active')){
+    else if(!document.getElementById('page-cargar').classList.contains('active')){
       clearInterval(cycleInterval);cycleInterval=null;
     }
   },300000);
