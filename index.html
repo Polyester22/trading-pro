@@ -275,13 +275,13 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
     </div>
     <div class="row2">
       <div class="field"><label>Posición</label>
-        <select id="f-pos" onchange="calcResult()"><option value="Long">Long</option><option value="Short">Short</option></select>
+        <select id="f-pos" onchange="calcResult(false)"><option value="Long">Long</option><option value="Short">Short</option></select>
       </div>
-      <div class="field"><label>Margen ($)</label><input type="number" id="f-margen" placeholder="50" oninput="onMargenChange()"></div>
+      <div class="field"><label>Margen ($)</label><input type="text" inputmode="decimal" id="f-margen" placeholder="50" autocomplete="off" oninput="onMargenChange()"></div>
     </div>
     <div class="row2">
-      <div class="field"><label>Precio entrada</label><input type="number" id="f-entrada" placeholder="Opcional" step="any" oninput="calcResult()"></div>
-      <div class="field"><label>Precio cierre/actual</label><input type="number" id="f-actual" placeholder="Opcional" step="any" oninput="calcResult()"></div>
+      <div class="field"><label>Precio entrada</label><input type="text" inputmode="decimal" id="f-entrada" placeholder="Opcional" autocomplete="off" oninput="calcResult(false)"></div>
+      <div class="field"><label>Precio cierre/actual</label><input type="text" inputmode="decimal" id="f-actual" placeholder="Opcional" autocomplete="off" oninput="calcResult(true)"></div>
     </div>
     <div class="row2">
       <div class="field">
@@ -296,7 +296,7 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
     <div class="note-small" id="result-note">Ingresá precios, R% o P&L$ — se calculan entre sí.</div>
     <div class="field"><label>Resultado en tiempo real</label><div class="result-live zero" id="result-live">— %</div></div>
     <div class="row2">
-      <div class="field"><label>Apalancamiento</label><input type="number" id="f-lev" placeholder="5" min="1" max="125" value="5" oninput="calcResult()"></div>
+      <div class="field"><label>Apalancamiento</label><input type="text" inputmode="decimal" id="f-lev" placeholder="5" value="5" autocomplete="off" oninput="calcResult(false)"></div>
       <div class="field"><label>Temporalidad</label>
         <select id="f-temp">
           <option value="1m">1m</option><option value="5m">5m</option>
@@ -558,6 +558,7 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
     <div id="kpi-projection" style="display:none;background:var(--surface);border:1px solid rgba(255,107,0,.35);border-top:none;border-radius:0 0 10px 10px;padding:10px 12px"></div>
   </div>
   <div id="open-trades-list"></div>
+  <div id="risk-exposure-bar" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:10px 14px;margin-top:10px;margin-bottom:6px"></div>
   <div id="open-empty" style="display:none" class="empty-state">
     <div class="empty-icon">🟢</div>
     <div class="empty-text">No hay trades abiertos</div>
@@ -884,10 +885,19 @@ function clearFilters(){
 }
 function sortBy(col){if(sortCol===col)sortDir*=-1;else{sortCol=col;sortDir=-1;}renderHistorial();}
 
-// ══ CALC RESULT ══
+// Clean price for display — no trailing zeros, sensible precision
+function cleanPrice(v){
+  if(!v||isNaN(v))return '';
+  const n=parseFloat(v);
+  if(n>=1000)return String(Math.round(n*100)/100);
+  if(n>=1)return String(parseFloat(n.toFixed(4)));
+  return String(parseFloat(n.toFixed(6)));
+}
+
+
 function calcPct(en,ac,pos,lev){if(!en||!ac||en===0)return null;let p=((ac-en)/en)*100*(lev||1);if(pos==='Short')p=-p;return p;}
 function applyLive(pct,elId='result-live'){const el=document.getElementById(elId);if(pct===null){el.textContent='— %';el.className='result-live zero';return;}el.textContent=(pct>=0?'+':'')+pct.toFixed(2)+'%';el.className='result-live '+(pct>0?'pos':pct<0?'neg':'zero');}
-function calcResult(){
+function calcResult(fromActual){
   if(resultManualMode)return;
   const pct=calcPct(
     parseFloat(document.getElementById('f-entrada').value),
@@ -900,8 +910,8 @@ function calcResult(){
     const margen=parseFloat(document.getElementById('f-margen').value)||0;
     if(margen) document.getElementById('f-pnl').value=(margen*pct/100).toFixed(2);
     applyLive(pct);
-    // calc precio de salida from entry + pct
-    _updatePrecioSalida(pct);
+    // Only back-calculate exit price when typing in ENTRADA (not when typing in ACTUAL)
+    if(!fromActual) _updatePrecioSalida(pct);
     document.getElementById('result-note').textContent='✅ Calculado desde precios.';
   } else {
     applyLive(null);
@@ -934,16 +944,16 @@ function onResultManual(source){
 }
 
 function _updatePrecioSalida(pct){
-  // If entry price is known, back-calculate exit price
+  // Only back-calculate if f-actual is empty — never overwrite user input
+  const actualEl=document.getElementById('f-actual');
+  if(!actualEl||actualEl.value.trim()!=='')return;
   const entrada=parseFloat(document.getElementById('f-entrada').value);
   const lev=parseFloat(document.getElementById('f-lev').value)||1;
   const pos=document.getElementById('f-pos').value;
   if(!entrada||!lev)return;
   const rawPct=pos==='Short'?-pct/lev:pct/lev;
   const salida=entrada*(1+rawPct/100);
-  if(salida>0&&isFinite(salida)){
-    document.getElementById('f-actual').value=salida.toFixed(salida>=100?2:salida>=1?4:6);
-  }
+  if(salida>0&&isFinite(salida))actualEl.value=cleanPrice(salida);
 }
 // onResultManual defined above
 function onMargenChange(){
@@ -951,7 +961,7 @@ function onMargenChange(){
   const pct=parseFloat(document.getElementById('f-resultado').value);
   if(margen&&!isNaN(pct))
     document.getElementById('f-pnl').value=(margen*pct/100).toFixed(2);
-  calcResult();
+  calcResult(false);
 }
 
 // ══ SAVE TRADE ══
@@ -1003,8 +1013,8 @@ function loadTradeForEdit(id){
     document.getElementById('f-ticker').value=t.ticker;
     document.getElementById('f-pos').value=t.pos;
     document.getElementById('f-margen').value=t.margen;
-    document.getElementById('f-entrada').value=t.entrada||'';
-    document.getElementById('f-actual').value=t.actual||'';
+    document.getElementById('f-entrada').value=t.entrada?cleanPrice(t.entrada):'';
+    document.getElementById('f-actual').value=t.actual?cleanPrice(t.actual):'';
     document.getElementById('f-lev').value=t.lev||5;
     document.getElementById('f-temp').value=t.temp;
     document.getElementById('f-estrategia').value=t.estrategia;
@@ -1868,7 +1878,7 @@ function renderPartialClosesEditor(t){
         '<div class="field" style="margin:0"><label>Resultado %</label>' +
           '<input type="number" step="any" value="'+(c.pct||0).toFixed(2)+'" onchange="updatePartialClose(\''+t.id+'\','+i+',\'pct\',this.value)" style="font-size:13px;padding:8px 10px"></div>' +
         '<div class="field" style="margin:0"><label>Precio cierre</label>' +
-          '<input type="number" step="any" value="'+(c.precio||'')+'" onchange="updatePartialClose(\''+t.id+'\','+i+',\'precio\',this.value)" style="font-size:13px;padding:8px 10px"></div>' +
+          '<input type="text" inputmode="decimal" value="'+(c.precio||'')+'" onchange="updatePartialClose(\''+t.id+'\','+i+',\'precio\',this.value)" style="font-size:13px;padding:8px 10px"></div>' +
       '</div>' +
       '<div class="field" style="margin-top:8px"><label>Fecha y hora</label>' +
         '<input type="datetime-local" value="'+(c.closedHora||'')+'" onchange="updatePartialClose(\''+t.id+'\','+i+',\'closedHora\',this.value)" style="font-size:13px;padding:8px 10px"></div>' +
@@ -1946,7 +1956,7 @@ init();
         </div>
         <div class="field">
           <label>Precio de cierre</label>
-          <input type="number" id="mcp-precio" placeholder="Opcional" step="any" oninput="mcpCalc()">
+          <input type="text" inputmode="decimal" id="mcp-precio" placeholder="Opcional" autocomplete="off" oninput="mcpCalc()">
         </div>
       </div>
       <div id="mcp-result" style="background:var(--input-bg);border:1.5px solid var(--border);border-radius:8px;padding:12px;text-align:center;margin-bottom:14px;font-size:13px;color:var(--text2)">
@@ -2397,6 +2407,10 @@ async function checkMarketCycle(){
       .filter(c=>c.price_change_percentage_1h_in_currency>0)
       .sort((a,b)=>b.price_change_percentage_1h_in_currency-a.price_change_percentage_1h_in_currency)
       .slice(0,6);
+    const topMovers24=alts
+      .filter(c=>(c.price_change_percentage_24h||0)>0)
+      .sort((a,b)=>(b.price_change_percentage_24h||0)-(a.price_change_percentage_24h||0))
+      .slice(0,6);
 
     // ── SEMÁFORO FINAL ───────────────────────────────────────
     const score=[c1,c2,c3,c4].filter(Boolean).length;
@@ -2500,16 +2514,24 @@ async function checkMarketCycle(){
     }
 
     // Top movers
-    const topMoversHTML=topMovers.length?
-      '<div style="margin-bottom:10px"><div style="font-size:11px;font-weight:700;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">🚀 Líderes 1h</div>'+
-      '<div style="display:flex;flex-wrap:wrap;gap:5px">'+
-      topMovers.map(c=>{
-        const isMine=userTickers.includes(c.symbol.toUpperCase());
-        return '<span style="background:'+(isMine?'rgba(255,107,0,.2)':'rgba(0,200,83,.12)')+';color:'+(isMine?'#ff6b00':'#00c853')+';border-radius:6px;padding:3px 8px;font-size:11px;font-weight:800">'+(isMine?'★ ':'')+
-          c.symbol.toUpperCase()+' +'+(c.price_change_percentage_1h_in_currency||0).toFixed(1)+'%</span>';
-      }).join('')+
-      '<div style="font-size:9px;color:var(--text2);margin-top:4px;width:100%">★ = tickers que operás</div>'+
-      '</div></div>':'';
+    function moversRow(list, field, label){
+      if(!list.length)return '';
+      return '<div style="margin-bottom:8px">'+
+        '<div style="font-size:11px;font-weight:700;color:var(--text2);margin-bottom:5px;text-transform:uppercase;letter-spacing:.5px">'+label+'</div>'+
+        '<div style="display:flex;flex-wrap:wrap;gap:5px">'+
+        list.map(c=>{
+          const isMine=userTickers.includes(c.symbol.toUpperCase());
+          const val=(c[field]||0).toFixed(1);
+          return '<span style="background:'+(isMine?'rgba(255,107,0,.2)':'rgba(0,200,83,.12)')+';color:'+(isMine?'#ff6b00':'#00c853')+';border-radius:6px;padding:3px 8px;font-size:11px;font-weight:800">'+(isMine?'★ ':'')+c.symbol.toUpperCase()+' +'+val+'%</span>';
+        }).join('')+
+        '</div></div>';
+    }
+    const topMoversHTML=(topMovers.length||topMovers24.length)?
+      '<div style="margin-bottom:10px">'+
+      moversRow(topMovers,'price_change_percentage_1h_in_currency','🚀 Líderes 1h')+
+      moversRow(topMovers24,'price_change_percentage_24h','📈 Líderes 24h')+
+      '<div style="font-size:9px;color:var(--text2);margin-top:2px">★ = tickers que operás</div>'+
+      '</div>':'';
 
     // Warning rules
     const warningsHTML=
