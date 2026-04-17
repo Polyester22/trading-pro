@@ -1069,6 +1069,111 @@ function updateOpenCount(){
 // ══ OPEN TRADES ══
 let livePrices={};
 
+
+// ══ TRADE RECOMMENDATION ENGINE ══
+function getTradeRecommendation(t, livePct, totalMins){
+  const closed=D.trades.filter(x=>!x.open&&x.resultado!==undefined);
+
+  // ── Market context from semaphore cache ──────────────────
+  const mkt=_cgCache?_cgCache.pd:null;
+  const btc1h=mkt&&mkt.bitcoin?mkt.bitcoin.usd_1h_change||0:null;
+  const btc24=mkt&&mkt.bitcoin?mkt.bitcoin.usd_24h_change||0:null;
+  const marketDown=btc24!==null&&btc24<-4;
+  const marketUp=btc24!==null&&btc24>3;
+  const btcLateral=btc1h!==null&&Math.abs(btc1h)<1.5;
+
+  // ── Historical stats for this trade's setup ───────────────
+  const similar=closed.filter(x=>x.estrategia===t.estrategia&&x.pos===t.pos);
+  const similarAvgTP=similar.filter(x=>x.resultado>0).length?
+    similar.filter(x=>x.resultado>0).reduce((s,x)=>s+x.resultado,0)/similar.filter(x=>x.resultado>0).length:null;
+  const similarAvgSL=similar.filter(x=>x.resultado<0).length?
+    Math.abs(similar.filter(x=>x.resultado<0).reduce((s,x)=>s+x.resultado,0)/similar.filter(x=>x.resultado<0).length):null;
+  const similarAvgDur=closed.filter(x=>x.estrategia===t.estrategia&&x.fechahora&&x.closedHora).map(x=>{
+    return Math.max(0,(new Date(x.closedHora)-new Date(x.fechahora))/60000);
+  });
+  const avgDurMins=similarAvgDur.length?similarAvgDur.reduce((a,x)=>a+x,0)/similarAvgDur.length:null;
+
+  // ── Ticker-specific stats ─────────────────────────────────
+  const byTicker=closed.filter(x=>x.ticker===t.ticker);
+  const tkWins=byTicker.filter(x=>x.resultado>0);
+  const tkLosses=byTicker.filter(x=>x.resultado<0);
+  const tkWR=byTicker.length?tkWins.length/byTicker.length:null;
+  const tkEV=byTicker.length?byTicker.reduce((s,x)=>s+x.resultado,0)/byTicker.length:null;
+  const tkAvgTP=tkWins.length?tkWins.reduce((s,x)=>s+x.resultado,0)/tkWins.length:null;
+  const tkAvgSL=tkLosses.length?Math.abs(tkLosses.reduce((s,x)=>s+x.resultado,0)/tkLosses.length):null;
+  // Ticker + same pos
+  const tkPos=byTicker.filter(x=>x.pos===t.pos);
+  const tkPosWR=tkPos.length?tkPos.filter(x=>x.resultado>0).length/tkPos.length:null;
+  const tkPosEV=tkPos.length?tkPos.reduce((s,x)=>s+x.resultado,0)/tkPos.length:null;
+  // Best salida for this ticker
+  const tkBestSalida=tkPos.length>=3?(()=>{
+    const bySal={};tkPos.forEach(x=>{if(x.salida&&x.salida!=='SL'){if(!bySal[x.salida])bySal[x.salida]=[];bySal[x.salida].push(x.resultado);}});
+    const entries=Object.entries(bySal).filter(e=>e[1].length>=2).map(([k,v])=>({k,ev:v.reduce((a,x)=>a+x,0)/v.length}));
+    return entries.length?entries.sort((a,b)=>b.ev-a.ev)[0].k:null;
+  })():null;
+  // Use ticker stats to refine TP/SL targets (prefer ticker-specific if enough data)
+  const effectiveTP=tkWins.length>=3?tkAvgTP:similarAvgTP;
+  const effectiveSL=tkLosses.length>=3?tkAvgSL:similarAvgSL;
+
+  const pct=livePct||0;
+  const isLong=t.pos==='Long';
+  const atTP=effectiveTP&&pct>=effectiveTP*0.85;
+  const atSL=effectiveSL&&pct<=-effectiveSL*0.8;
+  const overtime=avgDurMins&&totalMins>avgDurMins*1.5;
+  const inProfit=pct>5;
+  const inLoss=pct<-5;
+
+  // Ticker context string
+  const tkCtx=byTicker.length>=3?
+    ' | '+t.ticker+': WR '+(tkWR*100).toFixed(0)+'% · EV '+(tkEV>=0?'+':'')+tkEV.toFixed(1)+'%'+
+    (tkPosWR!==null?' ('+t.pos+' '+(tkPosWR*100).toFixed(0)+'%)':''):
+    byTicker.length>0?' | '+t.ticker+': '+byTicker.length+' trade'+(byTicker.length>1?'s':'')+'':'';
+  const salidaHint=tkBestSalida?' Tu mejor salida en '+t.ticker+': '+tkBestSalida+'.':'';
+
+  // ── Decision logic ────────────────────────────────────────
+  // 🔴 CERRAR
+  if(marketDown&&isLong&&pct<2)
+    return{action:'🔴 Cerrar',color:'#ff3d57',bg:'rgba(255,61,87,.1)',border:'rgba(255,61,87,.35)',
+      reason:'Mercado cayendo (BTC '+(btc24>=0?'+':'')+btc24.toFixed(1)+'%) y tu Long no avanza'+tkCtx};
+  if(!isLong&&marketUp&&pct<2)
+    return{action:'🔴 Cerrar',color:'#ff3d57',bg:'rgba(255,61,87,.1)',border:'rgba(255,61,87,.35)',
+      reason:'Mercado subiendo (BTC '+(btc24>=0?'+':'')+btc24.toFixed(1)+'%) con Short abierto'+tkCtx};
+  if(atSL)
+    return{action:'🔴 Cerrar',color:'#ff3d57',bg:'rgba(255,61,87,.1)',border:'rgba(255,61,87,.35)',
+      reason:'Cerca de tu SL histórico para '+(t.estrategia)+' ('+(-effectiveSL).toFixed(1)+'%)'+tkCtx};
+  if(overtime&&inLoss)
+    return{action:'🔴 Cerrar',color:'#ff3d57',bg:'rgba(255,61,87,.1)',border:'rgba(255,61,87,.35)',
+      reason:'Más tiempo del promedio ('+(avgDurMins<60?Math.round(avgDurMins)+'m':Math.floor(avgDurMins/60)+'h')+') y en pérdida'+tkCtx};
+
+  // 🟡 PROTEGER
+  if(atTP&&!marketUp)
+    return{action:'🟡 Proteger BE',color:'#ffd100',bg:'rgba(255,209,0,.08)',border:'rgba(255,209,0,.4)',
+      reason:'Cerca de tu TP histórico ('+effectiveTP.toFixed(1)+'%). Mové SL a entrada. '+salidaHint+tkCtx};
+  if(inProfit&&marketDown)
+    return{action:'🟡 Proteger BE',color:'#ffd100',bg:'rgba(255,209,0,.08)',border:'rgba(255,209,0,.4)',
+      reason:'Ganancia asegurada. Mercado perdiendo fuerza (BTC '+(btc24>=0?'+':'')+btc24.toFixed(1)+'%)'+tkCtx};
+  if(inProfit&&overtime)
+    return{action:'🟡 Cierre parcial',color:'#ffd100',bg:'rgba(255,209,0,.08)',border:'rgba(255,209,0,.4)',
+      reason:'Buen resultado pero más tiempo del promedio. '+salidaHint+tkCtx};
+  if(btcLateral&&btc1h!==null&&inLoss&&isLong)
+    return{action:'🟡 Esperar',color:'#ffd100',bg:'rgba(255,209,0,.08)',border:'rgba(255,209,0,.4)',
+      reason:'BTC lateral, sin señal clara. Esperá movimiento antes de cerrar'+tkCtx};
+
+  // 🟢 MANTENER
+  if(atTP&&marketUp)
+    return{action:'🟢 Dejar correr',color:'#00c853',bg:'rgba(0,200,83,.08)',border:'rgba(0,200,83,.35)',
+      reason:'Llegando a TP histórico ('+effectiveTP.toFixed(1)+'%) CON mercado a favor. Podés estirar. '+salidaHint+tkCtx};
+  if(marketUp&&isLong&&pct>0)
+    return{action:'🟢 Mantener',color:'#00c853',bg:'rgba(0,200,83,.08)',border:'rgba(0,200,83,.35)',
+      reason:'Mercado alcista (BTC +'+(btc24).toFixed(1)+'%). Tu Long está funcionando'+tkCtx};
+  if(!isLong&&marketDown&&pct>0)
+    return{action:'🟢 Mantener',color:'#00c853',bg:'rgba(0,200,83,.08)',border:'rgba(0,200,83,.35)',
+      reason:'Mercado bajando. Tu Short está bien posicionado'+tkCtx};
+
+  // Default: sin señal
+  return{action:'⚪ Sin señal',color:'var(--text2)',bg:'var(--surface2)',border:'var(--border)',
+    reason:(mkt===null?'Actualizá los precios para análisis en tiempo real':'Sin señal clara por ahora')+tkCtx};
+}
 function renderOpenTrades(){
   const open=D.trades.filter(t=>t.open).sort((a,b)=>b.fecha.localeCompare(a.fecha));
   const list=document.getElementById('open-trades-list');
@@ -1139,6 +1244,7 @@ function renderOpenTrades(){
         </div>
       </div>
       ${t.obs?`<div style="margin-top:8px;font-size:11px;color:var(--text2);font-style:italic;padding:0 2px">${t.obs}</div>`:''}
+      ${(()=>{const rec=getTradeRecommendation(t,livePct,totalMins);return`<div style="display:flex;align-items:center;gap:8px;background:${rec.bg};border:1px solid ${rec.border};border-radius:8px;padding:8px 10px;margin-top:8px"><div style="flex:1"><div style="font-size:12px;font-weight:900;color:${rec.color}">${rec.action}</div><div style="font-size:10px;color:var(--text2);margin-top:1px">${rec.reason}</div></div></div>`;})()}
       <div style="display:flex;gap:6px;margin-top:10px" onclick="event.stopPropagation()">
         <button class="btn btn-dark btn-sm" style="flex:1;font-size:12px" onclick="openMCP('${t.id}',false)">📉 Cierre parcial</button>
         <button class="btn btn-orange btn-sm" style="flex:1;font-size:12px" onclick="openMCP('${t.id}',true)">✅ Cerrar trade</button>
