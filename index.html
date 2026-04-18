@@ -770,7 +770,7 @@ function switchTab(tab){
 function getPartialPnl(){
   let total=0;
   D.trades.filter(t=>t.open).forEach(t=>{
-    // Try 1: partialCloses[].pnl (dollar amount)
+    // Try 1: partialCloses array
     if(t.partialCloses&&t.partialCloses.length){
       const margenOrig=t.margenOriginal||t.margen||0;
       let fromCloses=0;
@@ -787,13 +787,15 @@ function getPartialPnl(){
       });
       if(Math.abs(fromCloses)>0){total+=fromCloses;return;}
     }
-    // Try 2: parse obs string "P&L hasta acá: +$41.66"
+    // Try 2: manual format "parcial:41.66" in obs
     if(t.obs){
-      const m=t.obs.match(/P&L hasta ac.{0,2}:\s*([+-]?\$?[\d.]+)/i);
-      if(m){
-        const val=parseFloat(m[1].replace('$',''));
-        if(!isNaN(val)){total+=val;return;}
-      }
+      const m2=t.obs.match(/parcial:\s*([+-]?[\d.]+)/i);
+      if(m2){total+=parseFloat(m2[1]);return;}
+    }
+    // Try 3: any "P&L" dollar amount in obs
+    if(t.obs){
+      const m3=t.obs.match(/\+\$(\d+\.?\d*)/);
+      if(m3){total+=parseFloat(m3[1]);return;}
     }
   });
   return total;
@@ -1775,7 +1777,20 @@ function renderHistorial(){
   if(s&&closedList.length){
     const wr=(s.winRate*100).toFixed(0);
     const avg=(closedList.reduce((a,t)=>a+t.resultado,0)/closedList.length).toFixed(1);
-    const pnl=s.totalPnl.toFixed(2);
+    // P&L total = closed trades + partial closes already realized from open trades in this list
+    const partialInList=openList.reduce((sum,t)=>{
+      if(!t.partialCloses||!t.partialCloses.length)return sum;
+      const margenOrig=t.margenOriginal||t.margen||0;
+      return sum+t.partialCloses.reduce((s,c)=>{
+        const pnlNum=parseFloat(c.pnl);
+        if(!isNaN(pnlNum)&&Math.abs(pnlNum)>0)return s+pnlNum;
+        const pctNum=parseFloat(c.pct),pctCloseNum=parseFloat(c.pctClose);
+        if(!isNaN(pctNum)&&!isNaN(pctCloseNum))return s+(margenOrig*(pctCloseNum/100)*(pctNum/100));
+        return s;
+      },0);
+    },0);
+    const pnlTotal=s.totalPnl+partialInList;
+    const pnl=pnlTotal.toFixed(2);
     sb.innerHTML=`<div class="hs-item"><div class="hs-label">Cerrados</div><div class="hs-val" style="color:#ff6b00">${closedList.length}${openList.length?' <span style="font-size:10px;color:#00c853">(+'+openList.length+')</span>':''}</div></div>
     <div class="hs-item"><div class="hs-label">Win Rate</div><div class="hs-val ${parseFloat(wr)>=50?'pos':'neg'}">${wr}%</div></div>
     <div class="hs-item"><div class="hs-label">Avg R%</div><div class="hs-val ${parseFloat(avg)>=0?'pos':'neg'}">${parseFloat(avg)>=0?'+':''}${avg}%</div></div>
