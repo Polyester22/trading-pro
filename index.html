@@ -1234,18 +1234,26 @@ function getWeekKey(date){
 // ── Shared helper: get realized PnL for a trade (closed or partial) ──
 function getRealisedPnl(t){
   if(!t.open)return t.margen*t.resultado/100;
-  // Open trade with partial closes
-  if(!t.partialCloses||!t.partialCloses.length)return 0;
-  const margenOrig=t.margenOriginal||t.margen||0;
-  return t.partialCloses.reduce(function(s,c){
-    var pnlNum=parseFloat(c.pnl);
-    if(!isNaN(pnlNum)&&Math.abs(pnlNum)>0)return s+pnlNum;
-    var pctNum=parseFloat(c.pct),pctCloseNum=parseFloat(c.pctClose);
-    if(!isNaN(pctNum)&&!isNaN(pctCloseNum))return s+(margenOrig*(pctCloseNum/100)*(pctNum/100));
-    // fallback: obs string
-    if(t.obs){var m=t.obs.match(/\+\$(\d+\.?\d*)/);if(m)return s+parseFloat(m[1]);}
-    return s;
-  },0);
+  // For open trades: try same logic as getPartialPnl
+  var fromCloses=0;
+  if(t.partialCloses&&t.partialCloses.length){
+    var margenOrig=t.margenOriginal||t.margen||0;
+    t.partialCloses.forEach(function(c){
+      var pnlNum=parseFloat(c.pnl);
+      if(!isNaN(pnlNum)&&Math.abs(pnlNum)>0){fromCloses+=pnlNum;return;}
+      var pctNum=parseFloat(c.pct),pctCloseNum=parseFloat(c.pctClose);
+      if(!isNaN(pctNum)&&!isNaN(pctCloseNum)&&pctCloseNum>0)fromCloses+=margenOrig*(pctCloseNum/100)*(pctNum/100);
+    });
+    if(Math.abs(fromCloses)>0)return fromCloses;
+  }
+  // Fallback: parse obs string (same as getPartialPnl Try 2 & 3)
+  if(t.obs){
+    var m2=t.obs.match(/parcial:\s*([+-]?[\d.]+)/i);
+    if(m2)return parseFloat(m2[1]);
+    var m3=t.obs.match(/\+\$(\d+\.?\d*)/);
+    if(m3)return parseFloat(m3[1]);
+  }
+  return 0;
 }
 
 function renderWeeklySummary(){
