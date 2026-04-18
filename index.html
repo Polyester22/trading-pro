@@ -2857,12 +2857,37 @@ function updateOpenCount(){
 function getTradeRecommendation(t, livePct, totalMins){
   const closed=D.trades.filter(x=>!x.open&&x.resultado!==undefined);
 
-  // ── Market context from semaphore cache ──────────────────
-  // Market context: use semaphore cache if available, otherwise use what we have
+  // ── Semaphore full score (recompute from cache) ───────────
+  let semScore=null, semMode=null;
+  if(_cgCache){
+    const pd=_cgCache.pd, gd=_cgCache.gd, md=_cgCache.md||[];
+    const btc=pd&&pd.bitcoin?pd.bitcoin:{};
+    const eth=pd&&pd.ethereum?pd.ethereum:{};
+    const _btc1h=btc.usd_1h_change||0, _btc24=btc.usd_24h_change||0;
+    const _eth1h=eth.usd_1h_change||0, _eth24=eth.usd_24h_change||0;
+    const _dom=gd&&gd.data&&gd.data.market_cap_percentage?gd.data.market_cap_percentage.btc||50:50;
+    // Condition 1: BTC lateral
+    const _c1=Math.abs(_btc1h)<1.5&&_btc24>-5;
+    // Condition 2: ETH leads BTC
+    const _eL1h=_eth1h>_btc1h+0.3, _eL24=_eth24>_btc24+1, _domFav=_dom<55;
+    const _c2=(_eL1h&&_eL24)||(_eL1h&&_domFav)||(_eL24&&_domFav);
+    // Condition 3: Amplitude
+    const _alts=md.filter(c=>c.id!=='bitcoin'&&c.id!=='ethereum'&&c.price_change_percentage_24h!=null);
+    const _t50=_alts.slice(0,50), _t100=_alts.slice(50,100);
+    const _t50p=_t50.length?Math.round(_t50.filter(c=>(c.price_change_percentage_24h||0)>0).length/_t50.length*100):0;
+    const _t100p=_t100.length?Math.round(_t100.filter(c=>(c.price_change_percentage_24h||0)>0).length/_t100.length*100):0;
+    const _c4=(_t50p>=65&&_t100p>=65)||(_t100p>=65&&_t50p>=50&&_t50p<65)||(_t50p>=65&&_t100.length<10);
+    const _sC1=_btc24<=-2||_btc1h<=-1.5, _sC2=!_c2, _sC4=_t50p<35&&(_t100p<40||!_t100.length);
+    const _longScore=[_c1,_c2,_c4].filter(Boolean).length;
+    const _shortScore=[_sC1,_sC2,_sC4].filter(Boolean).length;
+    semScore={long:_longScore, short:_shortScore, btc24:_btc24, btc1h:_btc1h};
+    semMode=_longScore>=2?'long':_shortScore>=2?'short':'wait';
+  }
+
+  // ── Market context (BTC only, for thresholds) ─────────────
   const mkt=_cgCache?_cgCache.pd:null;
-  const btc1h=mkt&&mkt.bitcoin?mkt.bitcoin.usd_1h_change||0:null;
-  const btc24=mkt&&mkt.bitcoin?mkt.bitcoin.usd_24h_change||0:null;
-  // Even without semaphore, if we have live prices we can infer direction from stored BTC data
+  const btc1h=semScore?semScore.btc1h:null;
+  const btc24=semScore?semScore.btc24:null;
   const hasMktData=btc24!==null;
   const marketDown=hasMktData&&btc24<-4;
   const marketUp=hasMktData&&btc24>3;
@@ -2917,48 +2942,60 @@ function getTradeRecommendation(t, livePct, totalMins){
   const salidaHint=tkBestSalida?' Tu mejor salida en '+t.ticker+': '+tkBestSalida+'.':'';
 
   // ── Decision logic ────────────────────────────────────────
-  // 🔴 CERRAR
-  if(marketDown&&isLong&&pct<2)
-    return{action:'🔴 Cerrar',color:'#ff3d57',bg:'rgba(255,61,87,.1)',border:'rgba(255,61,87,.35)',
-      reason:'Mercado cayendo (BTC '+(btc24>=0?'+':'')+btc24.toFixed(1)+'%) y tu Long no avanza'+tkCtx};
-  if(!isLong&&marketUp&&pct<2)
-    return{action:'🔴 Cerrar',color:'#ff3d57',bg:'rgba(255,61,87,.1)',border:'rgba(255,61,87,.35)',
-      reason:'Mercado subiendo (BTC '+(btc24>=0?'+':'')+btc24.toFixed(1)+'%) con Short abierto'+tkCtx};
+
+  // 🔴 CERRAR URGENTE — semáforo completamente en contra (único caso donde el semáforo manda)
+  if(semMode==='short'&&semScore&&semScore.short>=3&&isLong)
+    return{action:'🔴 Cerrar urgente',color:'#ff3d57',bg:'rgba(255,61,87,.15)',border:'rgba(255,61,87,.5)',
+      reason:'Semáforo SHORT 3/3 con tu Long abierto. Mercado en risk-off total'+tkCtx};
+  if(semMode==='long'&&semScore&&semScore.long>=3&&!isLong)
+    return{action:'🔴 Cerrar urgente',color:'#ff3d57',bg:'rgba(255,61,87,.15)',border:'rgba(255,61,87,.5)',
+      reason:'Semáforo LONG 3/3 con tu Short abierto. Las alts están subiendo fuerte'+tkCtx};
+
+  // 🔴 CERRAR — basado en precio y estadísticas
   if(atSL)
     return{action:'🔴 Cerrar',color:'#ff3d57',bg:'rgba(255,61,87,.1)',border:'rgba(255,61,87,.35)',
-      reason:'Cerca de tu SL histórico para '+(t.estrategia)+' ('+(-effectiveSL).toFixed(1)+'%)'+tkCtx};
+      reason:'Cerca de tu SL histórico para '+t.estrategia+' ('+(-effectiveSL).toFixed(1)+'%)'+tkCtx};
   if(overtime&&inLoss)
     return{action:'🔴 Cerrar',color:'#ff3d57',bg:'rgba(255,61,87,.1)',border:'rgba(255,61,87,.35)',
       reason:'Más tiempo del promedio ('+(avgDurMins<60?Math.round(avgDurMins)+'m':Math.floor(avgDurMins/60)+'h')+') y en pérdida'+tkCtx};
+  if(marketDown&&isLong&&pct<2)
+    return{action:'🔴 Cerrar',color:'#ff3d57',bg:'rgba(255,61,87,.1)',border:'rgba(255,61,87,.35)',
+      reason:'BTC -'+(Math.abs(btc24)).toFixed(1)+'% en 24h y tu Long no avanza'+tkCtx};
+  if(!isLong&&marketUp&&pct<2)
+    return{action:'🔴 Cerrar',color:'#ff3d57',bg:'rgba(255,61,87,.1)',border:'rgba(255,61,87,.35)',
+      reason:'BTC +'+(btc24).toFixed(1)+'% en 24h con Short abierto que no avanza'+tkCtx};
 
-  // 🟡 PROTEGER
-  if(atTP&&!marketUp)
+  // 🟡 PROTEGER — basado en TP histórico, tiempo y precio
+  if(atTP&&inProfit)
     return{action:'🟡 Proteger BE',color:'#ffd100',bg:'rgba(255,209,0,.08)',border:'rgba(255,209,0,.4)',
-      reason:'Cerca de tu TP histórico ('+effectiveTP.toFixed(1)+'%). Mové SL a entrada. '+salidaHint+tkCtx};
+      reason:'Llegaste al '+(pct/effectiveTP*100).toFixed(0)+'% de tu TP histórico ('+effectiveTP.toFixed(1)+'%). '+salidaHint+tkCtx};
   if(inProfit&&marketDown)
     return{action:'🟡 Proteger BE',color:'#ffd100',bg:'rgba(255,209,0,.08)',border:'rgba(255,209,0,.4)',
-      reason:'Ganancia asegurada. Mercado perdiendo fuerza (BTC '+(btc24>=0?'+':'')+btc24.toFixed(1)+'%)'+tkCtx};
+      reason:'En ganancia con BTC perdiendo fuerza. Mové SL a entrada'+tkCtx};
   if(inProfit&&overtime)
     return{action:'🟡 Cierre parcial',color:'#ffd100',bg:'rgba(255,209,0,.08)',border:'rgba(255,209,0,.4)',
       reason:'Buen resultado pero más tiempo del promedio. '+salidaHint+tkCtx};
-  if(btcLateral&&btc1h!==null&&inLoss&&isLong)
+  if(btcLateral&&hasMktData&&inLoss&&isLong)
     return{action:'🟡 Esperar',color:'#ffd100',bg:'rgba(255,209,0,.08)',border:'rgba(255,209,0,.4)',
-      reason:'BTC lateral, sin señal clara. Esperá movimiento antes de cerrar'+tkCtx};
+      reason:'BTC lateral. Sin señal clara — esperá antes de cortar'+tkCtx};
 
-  // 🟢 MANTENER
+  // 🟢 MANTENER — basado en precio, TP y estadísticas del ticker
   if(atTP&&marketUp)
     return{action:'🟢 Dejar correr',color:'#00c853',bg:'rgba(0,200,83,.08)',border:'rgba(0,200,83,.35)',
-      reason:'Llegando a TP histórico ('+effectiveTP.toFixed(1)+'%) CON mercado a favor. Podés estirar. '+salidaHint+tkCtx};
-  if(marketUp&&isLong&&pct>0)
+      reason:'TP histórico ('+effectiveTP.toFixed(1)+'%) con mercado a favor. Podés estirar. '+salidaHint+tkCtx};
+  if(inProfit&&isLong&&marketUp)
     return{action:'🟢 Mantener',color:'#00c853',bg:'rgba(0,200,83,.08)',border:'rgba(0,200,83,.35)',
-      reason:'Mercado alcista (BTC +'+(btc24).toFixed(1)+'%). Tu Long está funcionando'+tkCtx};
-  if(!isLong&&marketDown&&pct>0)
+      reason:'Long en ganancia con mercado alcista. '+tkCtx};
+  if(inProfit&&!isLong&&marketDown)
     return{action:'🟢 Mantener',color:'#00c853',bg:'rgba(0,200,83,.08)',border:'rgba(0,200,83,.35)',
-      reason:'Mercado bajando. Tu Short está bien posicionado'+tkCtx};
+      reason:'Short en ganancia con mercado bajando. '+tkCtx};
+  if(inProfit&&tkPosWR!==null&&tkPosWR>=0.6)
+    return{action:'🟢 Mantener',color:'#00c853',bg:'rgba(0,200,83,.08)',border:'rgba(0,200,83,.35)',
+      reason:t.ticker+' '+t.pos+' tiene WR '+(tkPosWR*100).toFixed(0)+'% en tu historial. Dejalo correr'+tkCtx};
 
-  // Default: sin señal de mercado
+  // Default
   return{action:'⚪ Sin señal',color:'var(--text2)',bg:'var(--surface2)',border:'var(--border)',
-    reason:(mkt===null?'Abrí el Semáforo para análisis de mercado en tiempo real':'Sin señal clara por ahora')+tkCtx};
+    reason:(!semScore?'Actualizá precios para análisis completo':'Sin señal clara aún')+tkCtx};
 }
 // what-if replaced by renderKpiProjection
 
