@@ -388,7 +388,7 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
         <div id="rg-capital-display" style="font-size:14px;font-weight:900;color:#ff6b00">$—</div>
       </div>
       <div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:10px">
-        <div class="field" style="margin:0"><label>Riesgo por trade</label><select id="rg-risk-pct" onchange="renderRiskRecs()" style="font-size:14px;padding:9px 12px"><option value="1">1% conservador</option><option value="2" selected>2% moderado</option><option value="3">3% agresivo</option></select></div>
+        <div class="field" style="margin:0"><label>Riesgo por trade</label><select id="rg-risk-pct" onchange="syncRiskPctFromRec()" style="font-size:14px;padding:9px 12px"><option value="1">1% conservador</option><option value="2" selected>2% moderado</option><option value="3">3% agresivo</option></select></div>
       </div>
       <div id="rg-recs"></div>
 
@@ -814,17 +814,26 @@ function getCapital(){
 }
 
 function getRiskPct(){
-  // Read from capital tracker selector (source of truth), fallback to recs selector
+  // Read from whichever is open/visible — sync both selectors
   const ct=document.getElementById('ct-risk-pct');
-  if(ct)return parseFloat(ct.value)||2;
   const rg=document.getElementById('rg-risk-pct');
-  return rg?parseFloat(rg.value)||2:2;
+  // Return value from ct if it exists, else rg
+  return parseFloat((ct||rg||{}).value)||2;
 }
 function syncRiskPct(){
-  // Keep both selectors in sync
+  // Keep both selectors in sync (ct → rg)
   const val=(document.getElementById('ct-risk-pct')||{}).value||'2';
   const rg=document.getElementById('rg-risk-pct');
   if(rg)rg.value=val;
+  renderRiskRecs();
+  calcSizing();
+  updateCapitalDisplay();
+}
+function syncRiskPctFromRec(){
+  // Keep both selectors in sync (rg → ct)
+  const val=(document.getElementById('rg-risk-pct')||{}).value||'2';
+  const ct=document.getElementById('ct-risk-pct');
+  if(ct)ct.value=val;
   renderRiskRecs();
   calcSizing();
   updateCapitalDisplay();
