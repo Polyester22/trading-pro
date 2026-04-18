@@ -2942,35 +2942,6 @@ function getTradeRecommendation(t, livePct, totalMins, tc){
   const tkCtx=tkTrades.length>=3?` | ${t.ticker}: WR ${(tkPosWR!==null?(tkPosWR*100).toFixed(0):'-')}% EV ${tkEV>=0?'+':''}${tkEV.toFixed(1)}%`
     :tkTrades.length>0?` | ${t.ticker}: ${tkTrades.length} trade${tkTrades.length>1?'s':''}`:'';
 
-  // ── Only extreme semaphore override ──────────────────────
-  let semScore=null,semMode=null;
-  if(_cgCache){
-    const pd=_cgCache.pd,gd=_cgCache.gd,md=_cgCache.md||[];
-    const btc=pd&&pd.bitcoin?pd.bitcoin:{};
-    const eth=pd&&pd.ethereum?pd.ethereum:{};
-    const _b1=btc.usd_1h_change||0,_b24=btc.usd_24h_change||0;
-    const _e1=eth.usd_1h_change||0,_e24=eth.usd_24h_change||0;
-    const _dom=gd?.data?.market_cap_percentage?.btc||50;
-    const _c1=Math.abs(_b1)<1.5&&_b24>-5;
-    const _c2=(_e1>_b1+0.3&&_e24>_b24+1)||(_e1>_b1+0.3&&_dom<55)||(_e24>_b24+1&&_dom<55);
-    const _alts=(md).filter(c=>c.id!=='bitcoin'&&c.id!=='ethereum'&&c.price_change_percentage_24h!=null);
-    const _t50=_alts.slice(0,50),_t100=_alts.slice(50,100);
-    const _t50p=_t50.length?Math.round(_t50.filter(c=>(c.price_change_percentage_24h||0)>0).length/_t50.length*100):0;
-    const _t100p=_t100.length?Math.round(_t100.filter(c=>(c.price_change_percentage_24h||0)>0).length/_t100.length*100):0;
-    const _c4=(_t50p>=65&&_t100p>=65)||(_t100p>=65&&_t50p>=50&&_t50p<65)||(_t50p>=65&&_t100.length<10);
-    const _sC1=_b24<=-2||_b1<=-1.5,_sC2=!_c2,_sC4=_t50p<35;
-    const _ls=[_c1,_c2,_c4].filter(Boolean).length;
-    const _ss=[_sC1,_sC2,_sC4].filter(Boolean).length;
-    semScore={long:_ls,short:_ss};
-    semMode=_ls>=2?'long':_ss>=2?'short':'wait';
-  }
-  if(semMode==='short'&&semScore.short>=3&&isLong)
-    return{action:'🔴 Cerrar urgente',color:'#ff3d57',bg:'rgba(255,61,87,.15)',border:'rgba(255,61,87,.5)',
-      reason:'Semáforo SHORT 3/3 — mercado en risk-off total con tu Long'+tkCtx+tkMov};
-  if(semMode==='long'&&semScore.long>=3&&!isLong)
-    return{action:'🔴 Cerrar urgente',color:'#ff3d57',bg:'rgba(255,61,87,.15)',border:'rgba(255,61,87,.5)',
-      reason:'Semáforo LONG 3/3 — alts subiendo fuerte con tu Short'+tkCtx+tkMov};
-
   // ── DECISION basada en precio del ticker + estadísticas ──
 
   // 🔴 CERRAR
