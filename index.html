@@ -3317,11 +3317,13 @@ function renderRiskRecs(){
   }
   // Margen
   if(capital>0){
-    const maxM=capital*riskPct/100;
+    const maxLossPct=parseFloat((document.getElementById('ct-sl-pct')||{}).value)||10;
+    const riskDollars=capital*riskPct/100;
+    const recM=(riskDollars)/(maxLossPct/100); // same as Capital Tracker
     const closedWithM=closed.filter(t=>t.margen);
     const avgM=closedWithM.length?closedWithM.reduce((a,t)=>a+t.margen,0)/closedWithM.length:0;
-    const ok=avgM<=maxM*1.3;
-    recs.push({col:ok?'#00c853':'#ff3d57',icon:ok?'✅':'⚠️',title:'Margen por trade',body:'Con $'+capital+' y riesgo '+riskPct+'%: margen máximo $'+maxM.toFixed(0)+' por trade. Tu promedio actual: $'+(avgM?avgM.toFixed(0):'—')+'. '+(avgM>maxM*1.3?'Estás arriesgando demasiado.':avgM>0?'Dentro del rango correcto.':'Completá capital para evaluar.')});
+    const ok=avgM<=recM*1.5;
+    recs.push({col:ok?'#00c853':'#ff3d57',icon:ok?'✅':'⚠️',title:'Margen por trade',body:'Capital: $'+capital.toFixed(0)+' · Riesgo '+riskPct+'%: máx $'+riskDollars.toFixed(0)+' · <strong>Margen recomendado: $'+recM.toFixed(0)+'</strong>. Tu promedio actual: $'+(avgM?avgM.toFixed(0):'—')+'. '+(avgM>recM*1.5?'Estás arriesgando demasiado.':avgM>0?'Dentro del rango correcto.':'Registrá capital para evaluar.')});
   }
   // SL
   const slN=closed.filter(t=>t.salida==='SL').length;
@@ -3433,18 +3435,18 @@ function updateStaticRiskGuide(){
     const deps=moves.filter(m=>m.type==='deposit').reduce((a,m)=>a+m.amount,0);
     const wths=moves.filter(m=>m.type==='withdrawal').reduce((a,m)=>a+m.amount,0);
     const totalPnl=s?s.totalPnl:0;
-    const capitalNeto=getCapital(); // deps - wths + pnl
+    const capitalNeto=getCapital();
     const riskPct=getRiskPct();
     const sl=parseFloat((document.getElementById('ct-sl-pct')||{}).value)||10;
-    const lev=parseFloat((document.getElementById('sz-lev')||{}).value)||5;
-    const maxMargen=capitalNeto>0?(capitalNeto*riskPct/100)/(sl/100*lev):0;
+    // Use same formula as Capital Tracker: capital × riskPct% / maxLoss%
+    const maxMargen=capitalNeto>0?(capitalNeto*riskPct/100)/(sl/100):0;
     if(capitalNeto>0){
       capEl.innerHTML=
         (deps>0?'Depósitos: <strong>$'+deps.toFixed(0)+'</strong>'+
           (wths>0?' − Retiros: <strong>$'+wths.toFixed(0)+'</strong>':'')+
           ' + P&L: <strong style="color:'+(totalPnl>=0?'#00c853':'#ff3d57')+'">'+(totalPnl>=0?'+':'')+'$'+totalPnl.toFixed(2)+'</strong><br>':'')+
         'Capital actual: <strong style="color:#ff6b00">$'+capitalNeto.toFixed(2)+'</strong><br>'+
-        'Margen recomendado: <strong>$'+maxMargen.toFixed(2)+'</strong> por trade (SL '+sl+'% del margen · '+lev+'x)';
+        'Margen recomendado: <strong>$'+maxMargen.toFixed(2)+'</strong> por trade (pérdida máx '+sl+'% del margen = '+riskPct+'% del capital)';
     } else {
       capEl.textContent='Registrá tu capital en Capital Tracker para ver el cálculo actualizado.';
     }
