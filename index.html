@@ -766,6 +766,38 @@ function switchTab(tab){
 // ══ INIT ══
 
 // ══ CAPITAL — single source of truth (from Capital Tracker) ══
+// Get realized partial PnL separately (for display)
+function getPartialPnl(){
+  let total=0;
+  D.trades.filter(t=>t.open).forEach(t=>{
+    // Try 1: partialCloses[].pnl (dollar amount)
+    if(t.partialCloses&&t.partialCloses.length){
+      const margenOrig=t.margenOriginal||t.margen||0;
+      let fromCloses=0;
+      t.partialCloses.forEach(c=>{
+        const pnlNum=parseFloat(c.pnl);
+        if(!isNaN(pnlNum)&&Math.abs(pnlNum)>0){
+          fromCloses+=pnlNum;
+        } else {
+          const pctNum=parseFloat(c.pct),pctCloseNum=parseFloat(c.pctClose);
+          if(!isNaN(pctNum)&&!isNaN(pctCloseNum)&&pctCloseNum>0){
+            fromCloses+=margenOrig*(pctCloseNum/100)*(pctNum/100);
+          }
+        }
+      });
+      if(Math.abs(fromCloses)>0){total+=fromCloses;return;}
+    }
+    // Try 2: parse obs string "P&L hasta acá: +$41.66"
+    if(t.obs){
+      const m=t.obs.match(/P&L hasta ac.{0,2}:\s*([+-]?\$?[\d.]+)/i);
+      if(m){
+        const val=parseFloat(m[1].replace('$',''));
+        if(!isNaN(val)){total+=val;return;}
+      }
+    }
+  });
+  return total;
+}
 function getCapital(){
   // Compute from tracker: deposits - withdrawals + PnL cerrados + PnL parciales realizados
   const moves=getCapitalMovements();
@@ -774,32 +806,11 @@ function getCapital(){
   const s=computeStats(D.trades.filter(t=>!t.open));
   const pnl=s?s.totalPnl:0;
   // Add P&L already realized from partial closes of open trades
-  const partialPnl=D.trades
-    .filter(t=>t.open&&t.partialCloses&&t.partialCloses.length)
-    .reduce((sum,t)=>{
-      const margenOrig=t.margenOriginal||t.margen;
-      return sum+t.partialCloses.reduce((s,c)=>{
-        const pnl=c.pnl!==undefined?c.pnl:(margenOrig*(c.pctClose/100)*(c.pct||0)/100);
-        return s+pnl;
-      },0);
-    },0);
+  const partialPnl=getPartialPnl();
   const computed=deps-wths+pnl+partialPnl;
   return computed>0?computed:(parseFloat(localStorage.getItem('tpro_capital'))||0);
 }
 
-// Get realized partial PnL separately (for display)
-function getPartialPnl(){
-  return D.trades
-    .filter(t=>t.open&&t.partialCloses&&t.partialCloses.length)
-    .reduce((sum,t)=>{
-      const margenOrig=t.margenOriginal||t.margen;
-      return sum+t.partialCloses.reduce((s,c)=>{
-        // Use stored pnl if available, else calculate from pct + pctClose + margenOriginal
-        const pnl=c.pnl!==undefined?c.pnl:(margenOrig*(c.pctClose/100)*(c.pct||0)/100);
-        return s+pnl;
-      },0);
-    },0);
-}
 function getRiskPct(){
   // Read from capital tracker selector (source of truth), fallback to recs selector
   const ct=document.getElementById('ct-risk-pct');
