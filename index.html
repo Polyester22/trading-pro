@@ -3123,19 +3123,23 @@ function renderRiskExposure(openTrades){
   const box=document.getElementById('risk-exposure-bar');
   if(!box)return;
   if(!openTrades.length){box.style.display='none';return;}
-  const capital=parseFloat(localStorage.getItem('tpro_capital'))||0;
+  const capital=getCapital();
+  const riskPct=getRiskPct();
   const totalExposed=openTrades.reduce((s,t)=>s+t.margen,0);
   const pctExposed=capital?((totalExposed/capital)*100).toFixed(1):null;
-  const col=pctExposed&&parseFloat(pctExposed)>10?'#ff3d57':pctExposed&&parseFloat(pctExposed)>5?'#ffd100':'#00c853';
+  // Color: green if within riskPct per open trade, yellow if 2x, red if 3x+
+  const pctNum=parseFloat(pctExposed)||0;
+  const limit=riskPct*openTrades.length;
+  const col=pctNum>riskPct*openTrades.length*2?'#ff3d57':pctNum>limit?'#ffd100':'#00c853';
   box.style.display='block';
   box.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center">'+
     '<div style="font-size:11px;font-weight:700;color:var(--text2)">💼 Capital en riesgo</div>'+
     '<div style="font-size:13px;font-weight:900;color:'+col+'">$'+totalExposed.toFixed(0)+
     (pctExposed?' <span style="font-size:11px;color:var(--text2);">('+pctExposed+'% del capital)</span>':
-    ' <span style="font-size:10px;color:var(--text2)">— ingresá capital en Recomendaciones</span>')+
+    ' <span style="font-size:10px;color:var(--text2)">— registrá tu capital en Capital Tracker</span>')+
     '</div></div>'+
     '<div style="height:4px;background:var(--border);border-radius:2px;margin-top:6px;overflow:hidden">'+
-    '<div style="height:100%;width:'+Math.min(pctExposed||0,100)+'%;background:'+col+';border-radius:2px;transition:width .5s"></div>'+
+    '<div style="height:100%;width:'+Math.min(pctNum,100)+'%;background:'+col+';border-radius:2px;transition:width .5s"></div>'+
     '</div>';
 }
 
