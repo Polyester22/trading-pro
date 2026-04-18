@@ -2289,7 +2289,7 @@ async function updateDotSilent(){
     const t50p=top50b.length?Math.round(top50b.filter(c=>(c.price_change_percentage_24h||0)>0).length/top50b.length*100):0;
     const t100p=top100b.length?Math.round(top100b.filter(c=>(c.price_change_percentage_24h||0)>0).length/top100b.length*100):0;
     const altsPct2=t50p;
-    const c4=(t50p>=65&&t100p>=65)||(t100p>=65&&t50p>=50&&t50p<65);
+    const c4=(t50p>=65&&t100p>=65)||(t100p>=65&&t50p>=50&&t50p<65)||(t50p>=65&&top100b.length<10);
     const score=[c1,c2,c4].filter(Boolean).length;
     const sC1=btc24<-2||btc1h<-1.5,sC2=!c2,sC4=altsPct2<35;
     const shortScore=[sC1,sC2,sC4].filter(Boolean).length;
@@ -2859,15 +2859,13 @@ async function checkMarketCycle(){
     const altsPct24=top50Pct;
     const altsPct100=top100Pct;
 
-    // Lógica:
-    // 🟢 Fuerte: ambos ≥65%
-    // 🟡 Temprana: top100 ≥65% pero top50 <65% (mid caps liderando, top50 por llegar)
-    // 🔴 Débil/sin señal: resto
+    // 🟢 Fuerte: ambos ≥65% | 🟡 Temprana: top51-100 ≥65% y top50 50-64% | fallback: top50 solo ≥65%
     const bothStrong=top50Pct>=65&&top100Pct>=65;
     const earlySignal=top100Pct>=65&&top50Pct>=50&&top50Pct<65;
-    const c4=bothStrong||earlySignal;
+    const top50Only=top50Pct>=65&&top100alts.length<10; // no hay datos del segundo grupo
+    const c4=bothStrong||earlySignal||top50Only;
 
-    const amplitudSignal=bothStrong?'🟢 Señal fuerte':earlySignal?'🟡 Señal temprana (mid caps liderando)':top100Pct>=50?'🔴 Señal débil':'🔴 Sin señal';
+    const amplitudSignal=bothStrong?'🟢 Señal fuerte':earlySignal?'🟡 Señal temprana (mid caps liderando)':top50Only?'🟢 Top50 sólido (sin datos Top100)':top100Pct>=50?'🔴 Señal débil':'🔴 Sin señal';
     const userAltsInPool=alts.filter(c=>userTickers.includes(c.symbol.toUpperCase()));
     const userAltsUp=userAltsInPool.filter(c=>(c.price_change_percentage_24h||0)>0).length;
     const userAltsNote=userAltsInPool.length?' · Tus alts: '+userAltsUp+'/'+userAltsInPool.length+' verdes':'';
