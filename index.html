@@ -383,21 +383,15 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
       <button class="btn btn-dark btn-sm" onclick="toggleRiskGuide()" id="rg-toggle-btn">Ver análisis</button>
     </div>
     <div id="risk-guide-content" style="display:none">
+      <div style="background:var(--surface2);border-radius:10px;padding:10px 12px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center">
+        <div style="font-size:12px;color:var(--text2)">Capital desde Capital Tracker</div>
+        <div id="rg-capital-display" style="font-size:14px;font-weight:900;color:#ff6b00">$—</div>
+      </div>
       <div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:10px">
-        <div class="row2">
-          <div class="field" style="margin:0"><label>Capital ($)</label><input type="number" id="rg-capital" placeholder="ej: 1000" oninput="saveCapital();renderRiskRecs()" style="font-size:14px;padding:9px 12px"></div>
-          <div class="field" style="margin:0"><label>Riesgo por trade</label><select id="rg-risk-pct" onchange="renderRiskRecs()" style="font-size:14px;padding:9px 12px"><option value="1">1% conservador</option><option value="2" selected>2% moderado</option><option value="3">3% agresivo</option></select></div>
-        </div>
+        <div class="field" style="margin:0"><label>Riesgo por trade</label><select id="rg-risk-pct" onchange="renderRiskRecs()" style="font-size:14px;padding:9px 12px"><option value="1">1% conservador</option><option value="2" selected>2% moderado</option><option value="3">3% agresivo</option></select></div>
       </div>
       <div id="rg-recs"></div>
-      <div style="background:rgba(255,107,0,.08);border:1px solid rgba(255,107,0,.3);border-radius:10px;padding:12px;margin-top:8px">
-        <div style="font-size:12px;font-weight:900;color:#ff6b00;margin-bottom:8px">📐 Calculadora de sizing</div>
-        <div class="row2">
-          <div class="field" style="margin:0"><label>SL %</label><input type="number" id="sz-sl" placeholder="10" step="0.1" oninput="calcSizing()" style="font-size:13px;padding:8px 10px"></div>
-          <div class="field" style="margin:0"><label>Apalancamiento</label><input type="number" id="sz-lev" placeholder="5" oninput="calcSizing()" style="font-size:13px;padding:8px 10px"></div>
-        </div>
-        <div id="sz-result" style="background:var(--input-bg);border-radius:8px;padding:10px;margin-top:8px;font-size:13px;color:var(--text2);text-align:center">Completá tu capital y los campos para calcular</div>
-      </div>
+
     </div>
   </div>
 
@@ -459,6 +453,14 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
         </div>
         <div class="field" style="margin-bottom:8px"><label>Fecha</label><input type="date" id="ct-date" style="font-size:13px;padding:8px 10px"></div>
         <button class="btn btn-orange btn-sm" onclick="addCapitalMovement()" style="width:100%;margin:0">+ Registrar movimiento</button>
+      </div>
+      <div style="background:var(--surface2);border-radius:10px;padding:10px 12px;margin-bottom:8px">
+        <div class="row2" style="margin:0">
+          <div class="field" style="margin:0"><label>Riesgo por trade</label><select id="ct-risk-pct" onchange="syncRiskPct()" style="font-size:13px;padding:8px 10px"><option value="1">1% conservador</option><option value="2" selected>2% moderado</option><option value="3">3% agresivo</option></select></div>
+          <div class="field" style="margin:0"><label>SL % (sizing)</label><input type="number" id="ct-sl-pct" placeholder="10" step="0.1" oninput="calcSizing()" style="font-size:13px;padding:8px 10px" value="10"></div>
+        </div>
+        <div id="sz-result" style="background:var(--input-bg);border-radius:8px;padding:8px;margin-top:8px;font-size:12px;color:var(--text2);text-align:center">Margen recomendado aparece aquí</div>
+      <div style="display:none">
       </div>
       <div id="ct-summary" style="margin-bottom:10px"></div>
       <div id="ct-movements" style="max-height:200px;overflow-y:auto"></div>
@@ -752,12 +754,49 @@ function switchTab(tab){
 }
 
 // ══ INIT ══
+
+// ══ CAPITAL — single source of truth (from Capital Tracker) ══
+function getCapital(){
+  // Compute from tracker: deposits - withdrawals + PnL
+  const moves=getCapitalMovements();
+  const deps=moves.filter(m=>m.type==='deposit').reduce((a,m)=>a+m.amount,0);
+  const wths=moves.filter(m=>m.type==='withdrawal').reduce((a,m)=>a+m.amount,0);
+  const s=computeStats(D.trades.filter(t=>!t.open));
+  const pnl=s?s.totalPnl:0;
+  const computed=deps-wths+pnl;
+  // Fallback to manual input if no movements registered
+  return computed>0?computed:(parseFloat(localStorage.getItem('tpro_capital'))||0);
+}
+function getRiskPct(){
+  // Read from capital tracker selector (source of truth), fallback to recs selector
+  const ct=document.getElementById('ct-risk-pct');
+  if(ct)return parseFloat(ct.value)||2;
+  const rg=document.getElementById('rg-risk-pct');
+  return rg?parseFloat(rg.value)||2:2;
+}
+function syncRiskPct(){
+  // Keep both selectors in sync
+  const val=(document.getElementById('ct-risk-pct')||{}).value||'2';
+  const rg=document.getElementById('rg-risk-pct');
+  if(rg)rg.value=val;
+  renderRiskRecs();
+  calcSizing();
+  updateCapitalDisplay();
+}
+function updateCapitalDisplay(){
+  const cap=getCapital();
+  const el=document.getElementById('rg-capital-display');
+  if(el)el.textContent=cap>0?'$'+cap.toFixed(2):'Sin movimientos en Capital Tracker';
+  // Also update legacy rg-capital hidden value for compatibility
+  const legacy=document.getElementById('rg-capital');
+  if(legacy&&cap>0)legacy.value=cap;
+}
 function saveCapital(){const v=document.getElementById('rg-capital').value;if(v)localStorage.setItem('tpro_capital',v);}
 function loadCapital(){const v=localStorage.getItem('tpro_capital');if(v){const el=document.getElementById('rg-capital');if(el)el.value=v;}}
 function init(){
   setNowDatetime();
   document.getElementById('f-lev').value=5;
-  loadCapital();migratePatronFromObs();populateSelects();updateTickerDropdown();updatePreviews();updateKPIs();updateOpenCount();updateSyncLastTime();setTimeout(startCycleMonitor,2000);
+  loadCapital();migratePatronFromObs();setTimeout(updateCapitalDisplay,100);populateSelects();updateTickerDropdown();updatePreviews();updateKPIs();updateOpenCount();updateSyncLastTime();setTimeout(startCycleMonitor,2000);
 }
 
 function setNowDatetime(){
@@ -2540,13 +2579,13 @@ function toggleRiskGuide(){
   const open=el.style.display==='none';
   el.style.display=open?'block':'none';
   const btn=document.getElementById('rg-toggle-btn');if(btn)btn.textContent=open?'Cerrar':'Ver análisis';
-  if(open)renderRiskRecs();
+  if(open){updateCapitalDisplay();renderRiskRecs();}
 }
 
 function renderRiskRecs(){
   const el=document.getElementById('rg-recs');if(!el)return;
-  const capital=parseFloat((document.getElementById('rg-capital')||{}).value)||0;
-  const riskPct=parseFloat((document.getElementById('rg-risk-pct')||{}).value)||2;
+  const capital=getCapital();
+  const riskPct=getRiskPct();
   const closed=D.trades.filter(t=>!t.open);
   const s=computeStats(closed);
   if(!s||s.n<3){el.innerHTML='<div style="color:var(--text2);font-size:12px;padding:8px">Necesitás al menos 3 trades cerrados para ver recomendaciones.</div>';calcSizing();return;}
@@ -2595,10 +2634,10 @@ function renderRiskRecs(){
 }
 
 function calcSizing(){
-  const capital=parseFloat((document.getElementById('rg-capital')||{}).value)||0;
-  const riskPct=parseFloat((document.getElementById('rg-risk-pct')||{}).value)||2;
-  const sl=parseFloat((document.getElementById('sz-sl')||{}).value)||0;
-  const lev=parseFloat((document.getElementById('sz-lev')||{}).value)||1;
+  const capital=getCapital();
+  const riskPct=getRiskPct();
+  const sl=parseFloat((document.getElementById('ct-sl-pct')||document.getElementById('sz-sl')||{}).value)||0;
+  const lev=parseFloat((document.getElementById('sz-lev')||{}).value)||5;
   const el=document.getElementById('sz-result');if(!el)return;
   if(!capital||!sl||!lev){el.textContent='Completá tu capital y los campos para calcular';el.style.color='var(--text2)';return;}
   const margen=(capital*riskPct/100)/(sl/100*lev);
@@ -2621,8 +2660,8 @@ function updateStaticRiskGuide(){
   // capital summary with PnL auto-update
   const capEl=document.getElementById('rgs-capital-summary');
   if(capEl){
-    const capital=parseFloat((document.getElementById('rg-capital')||{}).value)||0;
-    const riskPct=parseFloat((document.getElementById('rg-risk-pct')||{}).value)||2;
+    const capital=getCapital();
+    const riskPct=getRiskPct();
     const sl=parseFloat((document.getElementById('sz-sl')||{}).value)||10;
     const lev=parseFloat((document.getElementById('sz-lev')||{}).value)||5;
     const totalPnl=s?s.totalPnl:0;
@@ -3047,6 +3086,7 @@ function toggleCapitalTracker(){
   el.style.display=open?'block':'none';
   const btn=document.getElementById('ct-toggle-btn');if(btn)btn.textContent=open?'Cerrar':'Ver';
   if(open){
+    updateCapitalDisplay();
     const d=new Date();const pad=n=>String(n).padStart(2,'0');
     const el2=document.getElementById('ct-date');
     if(el2)el2.value=d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
@@ -3077,6 +3117,7 @@ function renderCapitalTracker(){
   const moves=getCapitalMovements();
   const s=computeStats(D.trades.filter(t=>!t.open));
   const totalPnl=s?s.totalPnl:0;
+  updateCapitalDisplay();
   const totalDeposits=moves.filter(m=>m.type==='deposit').reduce((a,m)=>a+m.amount,0);
   const totalWithdrawals=moves.filter(m=>m.type==='withdrawal').reduce((a,m)=>a+m.amount,0);
   const netCapital=totalDeposits-totalWithdrawals+totalPnl;
@@ -3478,22 +3519,22 @@ function renderSessionStats(T){
   var asiaLabel=dst?'21–06h':'21–06h'; // Tokyo always same relative to AR
 
   var sessions=[
-    {key:'asia',    label:'🌏 Asia',    range:'21–06h',           hours:[21,22,23,0,1,2,3,4,5],                col:'#00aaff', desc:'Tokio/Hong Kong · Baja liquidez en alts'},
-    {key:'europa',  label:'🌍 Europa',  range:(euOpen)+'–10h',    hours:Array.from({length:10-euOpen},(_,i)=>euOpen+i), col:'#ffd100', desc:'Londres abre · '+(euOpen)+':00 AR'},
-    {key:'overlap', label:'🔀 Overlap', range:'10–13h',            hours:[10,11,12,13],                         col:'#ff6b00', desc:'Europa+NY · Mayor volumen'},
-    {key:'ny',      label:'🌎 NY',      range:(nyOpen<10?'0':'')+nyOpen+'–17h', hours:Array.from({length:17-(nyOpen+1)+1},(_,i)=>nyOpen+i+1).concat([nyOpen]), col:'#00c853', desc:'Nueva York · '+(nyOpen)+':30 AR'},
-    {key:'tarde',   label:'🌙 Tarde/Noche', range:'17–21h',       hours:[17,18,19,20],                         col:'#9999b8', desc:'NY cierra · Mercado tranquilo'}
+    {key:'asia',    label:'🌏 Asia',       range:'21–06h',  hours:[21,22,23,0,1,2,3,4,5],  col:'#00aaff', desc:'Tokio/Hong Kong'},
+    {key:'europa',  label:'🌍 Europa',     range:(euOpen)+'–10h', hours:Array.from({length:10-euOpen},function(_,i){return euOpen+i;}), col:'#ffd100', desc:'Londres · '+(euOpen)+':00 AR'},
+    {key:'overlap', label:'🔀 Europa+NY',  range:'10–13h',  hours:[10,11,12,13],            col:'#ff6b00', desc:'Ambos mercados abiertos · Mayor volumen'},
+    {key:'ny',      label:'🌎 NY',         range:'',        hours:[],                        col:'#00c853', desc:'Nueva York · '+(nyOpen)+':30 AR'},
+    {key:'tarde',   label:'🌙 Tarde/Noche',range:'17–21h',  hours:[17,18,19,20],             col:'#9999b8', desc:'NY cierra · Mercado tranquilo'}
   ];
-  // Fix ny hours properly
   sessions[3].hours=[];for(var h=nyOpen;h<=17;h++)sessions[3].hours.push(h);
   sessions[3].range=(nyOpen<10?'0'+nyOpen:''+nyOpen)+':30–17h';
 
   function getSessionKey(fechahora){
     var h=new Date(fechahora).getHours();
+    // Check each session — Asia spans midnight so check all
     for(var i=0;i<sessions.length;i++){
       if(sessions[i].hours.indexOf(h)!==-1)return sessions[i].key;
     }
-    return 'noche';
+    return 'tarde';
   }
 
   var bySession={};
