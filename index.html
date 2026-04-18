@@ -617,6 +617,7 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
 
 // ══ GLOBAL STATE ══
 let livePrices={};
+let projectionOpen=false;
 
 // ══ DATA ══
 const STORE='tradingpro_v6';
@@ -3107,7 +3108,6 @@ function saveMCP(){
 }
 
 // ══ KPI PROJECTION ══
-let projectionOpen=false;
 function toggleProjection(){
   projectionOpen=!projectionOpen;
   const box=document.getElementById('kpi-projection');
@@ -3120,14 +3120,14 @@ function renderKpiProjection(openTrades){
   const btn=document.getElementById('proj-toggle-btn');
   const box=document.getElementById('kpi-projection');
   if(!box||!btn)return;
-  const tradeable=openTrades.filter(t=>t.entrada&&(livePrices[t.ticker]||t.actual));
+  const tradeable=openTrades.filter(t=>t.entrada&&(livePrices[t.ticker]||t.actual||t.resultado!==undefined));
   if(!tradeable.length){btn.style.display='none';box.style.display='none';return;}
   btn.style.display='flex';
   const closedTrades=D.trades.filter(t=>!t.open);
   const current=computeStats(closedTrades.length?closedTrades:D.trades);
   const resolvedOpen=tradeable.map(t=>{
     const price=livePrices[t.ticker]||t.actual||0;
-    const pct=calcPct(t.entrada,price,t.pos,t.lev);
+    const pct=price&&t.entrada?calcPct(t.entrada,price,t.pos,t.lev):t.resultado||0;
     return{...t,resultado:pct!==null?pct:0,open:false};
   });
   const proj=computeStats([...closedTrades,...resolvedOpen]);
