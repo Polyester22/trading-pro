@@ -457,7 +457,14 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
       <div style="background:var(--surface2);border-radius:10px;padding:10px 12px;margin-bottom:8px">
         <div class="row2" style="margin:0">
           <div class="field" style="margin:0"><label>Riesgo por trade</label><select id="ct-risk-pct" onchange="syncRiskPct()" style="font-size:13px;padding:8px 10px"><option value="1">1% conservador</option><option value="2" selected>2% moderado</option><option value="3">3% agresivo</option></select></div>
-          <div class="field" style="margin:0"><label>SL % (sizing)</label><input type="number" id="ct-sl-pct" placeholder="10" step="0.1" oninput="calcSizing()" style="font-size:13px;padding:8px 10px" value="10"></div>
+          <div class="field" style="margin:0">
+            <label>Pérdida máx del margen <span style="color:var(--text2);font-size:9px">%</span></label>
+            <input type="number" id="ct-sl-pct" placeholder="10" step="1" oninput="calcSizing()" style="font-size:13px;padding:8px 10px" value="10">
+          </div>
+        </div>
+        <div class="field" style="margin-top:8px;margin-bottom:0">
+          <label>Apalancamiento <span id="sz-lev-rec-label" style="color:var(--text2);font-size:9px;font-weight:600"></span></label>
+          <input type="number" id="sz-lev" placeholder="5" step="1" oninput="calcSizing()" style="font-size:13px;padding:8px 10px" value="5">
         </div>
         <div id="sz-result" style="background:var(--input-bg);border-radius:8px;padding:8px;margin-top:8px;font-size:12px;color:var(--text2);text-align:center">Margen recomendado aparece aquí</div>
       </div>
@@ -2635,13 +2642,68 @@ function renderRiskRecs(){
 function calcSizing(){
   const capital=getCapital();
   const riskPct=getRiskPct();
-  const sl=parseFloat((document.getElementById('ct-sl-pct')||document.getElementById('sz-sl')||{}).value)||0;
+  const maxLossPct=parseFloat((document.getElementById('ct-sl-pct')||{}).value)||10;
   const lev=parseFloat((document.getElementById('sz-lev')||{}).value)||5;
   const el=document.getElementById('sz-result');if(!el)return;
-  if(!capital||!sl||!lev){el.textContent='Completá tu capital y los campos para calcular';el.style.color='var(--text2)';return;}
-  const margen=(capital*riskPct/100)/(sl/100*lev);
-  el.style.color='#ff6b00';
-  el.innerHTML='<span style="font-size:18px;font-weight:900;color:#ff6b00">Margen: $'+margen.toFixed(2)+'</span><br><span style="font-size:11px;color:var(--text2)">Exposición: $'+(margen*lev).toFixed(2)+' · Pérdida máx: $'+(margen*sl/100).toFixed(2)+' ('+riskPct+'% del capital)</span>';
+
+  // ── Stats-based recommendations ──────────────────────────
+  const s=computeStats(D.trades.filter(t=>!t.open));
+  const optLev=s&&s.n>=5?(s.rr>=2&&s.winRate>=0.55?5:s.rr>=2?4:s.rr>=1.5&&s.winRate>=0.5?3:s.rr>=1?2:1):5;
+  const optSL=s&&s.n>=5&&s.avgLoss?Math.abs(s.avgLoss):10; // avg loss from history
+  const recLabel=document.getElementById('sz-lev-rec-label');
+  if(recLabel)recLabel.textContent=s&&s.n>=5?'(recomendado: '+optLev+'x según tu R/B y WR)':'(default: 5x)';
+
+  if(!capital){
+    el.innerHTML='<div style="color:var(--text2);font-size:12px">Registrá tu capital en Capital Tracker para ver el margen recomendado.</div>';
+    return;
+  }
+
+  // ── Core calculations ─────────────────────────────────────
+  const recMargen=(capital*riskPct/100)/(maxLossPct/100);
+  const slPrice=(maxLossPct/lev).toFixed(1);
+  const maxLossDlr=recMargen*maxLossPct/100;
+  const levCol=lev<=optLev?'#00c853':lev===optLev+1?'#ffd100':'#ff3d57';
+  const levOk=lev<=optLev;
+
+  // ── Build output ──────────────────────────────────────────
+  let html2='<div style="background:rgba(255,107,0,.06);border-radius:10px;padding:12px;text-align:left">';
+
+  // Big rec: margen
+  html2+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">'+
+    '<div style="font-size:11px;color:var(--text2);font-weight:700">MARGEN RECOMENDADO</div>'+
+    '<div style="font-size:22px;font-weight:900;color:#ff6b00">$'+recMargen.toFixed(2)+'</div>'+
+  '</div>';
+
+  // Grid: SL, pérdida, exposición
+  html2+='<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:10px">'+
+    '<div style="background:var(--surface2);border-radius:8px;padding:8px;text-align:center">'+
+      '<div style="font-size:9px;color:var(--text2);margin-bottom:3px">SL EN PRECIO</div>'+
+      '<div style="font-size:16px;font-weight:900;color:#ff6b00">'+slPrice+'%</div>'+
+      '<div style="font-size:9px;color:var(--text2)">con '+lev+'x</div>'+
+    '</div>'+
+    '<div style="background:var(--surface2);border-radius:8px;padding:8px;text-align:center">'+
+      '<div style="font-size:9px;color:var(--text2);margin-bottom:3px">PÉRDIDA MÁX</div>'+
+      '<div style="font-size:16px;font-weight:900;color:#ff3d57">$'+maxLossDlr.toFixed(2)+'</div>'+
+      '<div style="font-size:9px;color:var(--text2)">'+maxLossPct+'% del margen</div>'+
+    '</div>'+
+    '<div style="background:var(--surface2);border-radius:8px;padding:8px;text-align:center">'+
+      '<div style="font-size:9px;color:var(--text2);margin-bottom:3px">% DEL CAPITAL</div>'+
+      '<div style="font-size:16px;font-weight:900;color:'+(riskPct<=2?'#00c853':'#ffd100')+'">'+riskPct+'%</div>'+
+      '<div style="font-size:9px;color:var(--text2)">$'+capital.toFixed(0)+' capital</div>'+
+    '</div>'+
+  '</div>';
+
+  // Leverage assessment
+  html2+='<div style="padding:8px 10px;border-radius:8px;background:var(--surface2);font-size:11px;color:'+levCol+'">'+
+    (levOk?'✅ ':lev===optLev+1?'🟡 ':'⚠️ ')+
+    (s&&s.n>=5?
+      (levOk?lev+'x adecuado para tu sistema · R/B '+s.rr.toFixed(1)+'x · WR '+(s.winRate*100).toFixed(0)+'%':
+       'Tu sistema sugiere '+optLev+'x (R/B '+s.rr.toFixed(1)+'x · WR '+(s.winRate*100).toFixed(0)+'%). '+lev+'x es '+( lev>optLev+2?'demasiado alto':'un poco alto')):
+      'Con '+lev+'x y SL '+slPrice+'% en precio → '+maxLossPct+'% del margen en riesgo')+
+  '</div>';
+
+  html2+='</div>';
+  el.innerHTML=html2;
 }
 function updateRiskGuide(){renderRiskRecs();}
 function calcRiskGuide(){renderRiskRecs();}
@@ -3086,6 +3148,7 @@ function toggleCapitalTracker(){
   const btn=document.getElementById('ct-toggle-btn');if(btn)btn.textContent=open?'Cerrar':'Ver';
   if(open){
     updateCapitalDisplay();
+    calcSizing();
     const d=new Date();const pad=n=>String(n).padStart(2,'0');
     const el2=document.getElementById('ct-date');
     if(el2)el2.value=d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
@@ -3117,6 +3180,7 @@ function renderCapitalTracker(){
   const s=computeStats(D.trades.filter(t=>!t.open));
   const totalPnl=s?s.totalPnl:0;
   updateCapitalDisplay();
+  calcSizing();
   const totalDeposits=moves.filter(m=>m.type==='deposit').reduce((a,m)=>a+m.amount,0);
   const totalWithdrawals=moves.filter(m=>m.type==='withdrawal').reduce((a,m)=>a+m.amount,0);
   const netCapital=totalDeposits-totalWithdrawals+totalPnl;
