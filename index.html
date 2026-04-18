@@ -2053,7 +2053,13 @@ function renderGraficos(){
   const tempData=Object.entries(byTemp).map(([k,v])=>{const w=v.filter(x=>x>0).length;const ev2=(w/v.length)*v.filter(x=>x>0).reduce((a,x)=>a+x,0)/Math.max(w,1)+(v.length-w)/v.length*v.filter(x=>x<=0).reduce((a,x)=>a+x,0)/Math.max(v.length-w,1);return{name:k,avg:v.reduce((a,x)=>a+x,0)/v.length,count:v.length,wins:w,wr:(w/v.length*100),ev:ev2};}).sort((a,b)=>b.ev-a.ev);
   const mxT=Math.max(...tempData.map(d=>Math.abs(d.avg)),1);
   // Monthly P&L
-  const byMonth={};T.filter(t=>!t.open).forEach(t=>{const m=t.fecha.slice(0,7);if(!byMonth[m])byMonth[m]=[];byMonth[m].push(t.margen*t.resultado/100);});
+  const byMonth={};
+  T.filter(t=>!t.open).forEach(t=>{const m=t.fecha.slice(0,7);if(!byMonth[m])byMonth[m]=[];byMonth[m].push(t.margen*t.resultado/100);});
+  // Add partial closes from open trades to their respective month
+  D.trades.filter(t=>t.open&&t.fecha).forEach(t=>{
+    const pnl=getRealisedPnl(t);
+    if(pnl!==0){const m=t.fecha.slice(0,7);if(!byMonth[m])byMonth[m]=[];byMonth[m].push(pnl);}
+  });
   const months=Object.keys(byMonth).sort();
   const monthVals=months.map(m=>byMonth[m].reduce((a,x)=>a+x,0));
   const mxM=Math.max(...monthVals.map(Math.abs),1);
