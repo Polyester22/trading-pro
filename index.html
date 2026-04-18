@@ -2300,7 +2300,7 @@ async function updateDotSilent(){
     if(sem)sem.textContent=mode==='long'?'🟢':mode==='short'?'🔴':'🟡';
     if(sub){
       sub.style.color=col;
-      sub.textContent=mode==='long'?'LONG — Modo altcoins ('+score+'/4)':mode==='short'?'SHORT — Modo risk-off ('+shortScore+'/4)':'NO TRADE — Sin señal clara';
+      sub.textContent=mode==='long'?'LONG — Modo altcoins ('+score+'/3)':mode==='short'?'SHORT — Modo risk-off ('+shortScore+'/3)':'NO TRADE — Sin señal clara';
     }
     // If panel is open, do full render too
     if(cycleOpen)checkMarketCycle();
