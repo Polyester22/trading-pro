@@ -2718,20 +2718,26 @@ function toggleRiskGuideStatic(){
 }
 function updateStaticRiskGuide(){
   const s=computeStats(D.trades.filter(t=>!t.open));
-  // capital summary with PnL auto-update
   const capEl=document.getElementById('rgs-capital-summary');
   if(capEl){
-    const capital=getCapital();
-    const riskPct=getRiskPct();
-    const sl=parseFloat((document.getElementById('sz-sl')||{}).value)||10;
-    const lev=parseFloat((document.getElementById('sz-lev')||{}).value)||5;
+    const moves=getCapitalMovements();
+    const deps=moves.filter(m=>m.type==='deposit').reduce((a,m)=>a+m.amount,0);
+    const wths=moves.filter(m=>m.type==='withdrawal').reduce((a,m)=>a+m.amount,0);
     const totalPnl=s?s.totalPnl:0;
-    const capitalActual=capital+totalPnl;
-    const maxMargen=capital>0?(capitalActual*riskPct/100)/(sl/100*lev):0;
-    if(capital>0){
-      capEl.innerHTML='Capital inicial: <strong>$'+capital.toFixed(0)+'</strong> + P&L acumulado: <strong style="color:'+(totalPnl>=0?'#00c853':'#ff3d57')+'">'+(totalPnl>=0?'+':'')+'$'+totalPnl.toFixed(2)+'</strong> = Capital actual: <strong style="color:#ff6b00">$'+capitalActual.toFixed(2)+'</strong><br>Margen recomendado: <strong>$'+maxMargen.toFixed(2)+'</strong> por trade (SL '+sl+'% · '+lev+'x)';
+    const capitalNeto=getCapital(); // deps - wths + pnl
+    const riskPct=getRiskPct();
+    const sl=parseFloat((document.getElementById('ct-sl-pct')||{}).value)||10;
+    const lev=parseFloat((document.getElementById('sz-lev')||{}).value)||5;
+    const maxMargen=capitalNeto>0?(capitalNeto*riskPct/100)/(sl/100*lev):0;
+    if(capitalNeto>0){
+      capEl.innerHTML=
+        (deps>0?'Depósitos: <strong>$'+deps.toFixed(0)+'</strong>'+
+          (wths>0?' − Retiros: <strong>$'+wths.toFixed(0)+'</strong>':'')+
+          ' + P&L: <strong style="color:'+(totalPnl>=0?'#00c853':'#ff3d57')+'">'+(totalPnl>=0?'+':'')+'$'+totalPnl.toFixed(2)+'</strong><br>':'')+
+        'Capital actual: <strong style="color:#ff6b00">$'+capitalNeto.toFixed(2)+'</strong><br>'+
+        'Margen recomendado: <strong>$'+maxMargen.toFixed(2)+'</strong> por trade (SL '+sl+'% del margen · '+lev+'x)';
     } else {
-      capEl.textContent='Ingresá tu capital en "Recomendaciones" arriba para ver el cálculo actualizado.';
+      capEl.textContent='Registrá tu capital en Capital Tracker para ver el cálculo actualizado.';
     }
   }
   if(!s)return;
