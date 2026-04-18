@@ -1590,6 +1590,8 @@ async function refreshPrices(){
   renderOpenTrades();
   if(btn){
     btn.innerHTML='✅ Actualizado';
+    // Also update semaphore cache silently so trade recommendations have market data
+    updateDotSilent();
     setTimeout(()=>{if(btn){btn.innerHTML='⟳ Actualizar precios';btn.disabled=false;}},2000);
   }
 }
@@ -2856,12 +2858,15 @@ function getTradeRecommendation(t, livePct, totalMins){
   const closed=D.trades.filter(x=>!x.open&&x.resultado!==undefined);
 
   // ── Market context from semaphore cache ──────────────────
+  // Market context: use semaphore cache if available, otherwise use what we have
   const mkt=_cgCache?_cgCache.pd:null;
   const btc1h=mkt&&mkt.bitcoin?mkt.bitcoin.usd_1h_change||0:null;
   const btc24=mkt&&mkt.bitcoin?mkt.bitcoin.usd_24h_change||0:null;
-  const marketDown=btc24!==null&&btc24<-4;
-  const marketUp=btc24!==null&&btc24>3;
-  const btcLateral=btc1h!==null&&Math.abs(btc1h)<1.5;
+  // Even without semaphore, if we have live prices we can infer direction from stored BTC data
+  const hasMktData=btc24!==null;
+  const marketDown=hasMktData&&btc24<-4;
+  const marketUp=hasMktData&&btc24>3;
+  const btcLateral=hasMktData&&Math.abs(btc1h||0)<1.5;
 
   // ── Historical stats for this trade's setup ───────────────
   const similar=closed.filter(x=>x.estrategia===t.estrategia&&x.pos===t.pos);
@@ -2951,9 +2956,9 @@ function getTradeRecommendation(t, livePct, totalMins){
     return{action:'🟢 Mantener',color:'#00c853',bg:'rgba(0,200,83,.08)',border:'rgba(0,200,83,.35)',
       reason:'Mercado bajando. Tu Short está bien posicionado'+tkCtx};
 
-  // Default: sin señal
+  // Default: sin señal de mercado
   return{action:'⚪ Sin señal',color:'var(--text2)',bg:'var(--surface2)',border:'var(--border)',
-    reason:(mkt===null?'Actualizá los precios para análisis en tiempo real':'Sin señal clara por ahora')+tkCtx};
+    reason:(mkt===null?'Abrí el Semáforo para análisis de mercado en tiempo real':'Sin señal clara por ahora')+tkCtx};
 }
 // what-if replaced by renderKpiProjection
 
