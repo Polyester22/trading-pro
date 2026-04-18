@@ -3444,7 +3444,6 @@ function renderBestTradeRec(T){
   if(bestSalida)insights.push('Cerrar por <span style="color:#ff6b00;font-weight:800">'+bestSalida.name+'</span> te da mejor resultado promedio ('+bestSalida.s.n+' trades, EV '+(bestSalida.s.ev>=0?'+':'')+bestSalida.s.ev.toFixed(1)+'%)');
   if(bestTiming)insights.push('Entrar <span style="color:#ff6b00;font-weight:800">'+(bestTiming.name||'').toLowerCase()+'</span> mejora tus resultados');
   if(bestSession)insights.push('Tu mejor sesión de mercado es <span style="color:#ff6b00;font-weight:800">'+bestSession.name+'</span> (EV '+(bestSession.s.ev>=0?'+':'')+bestSession.s.ev.toFixed(1)+'%, WR '+Math.round(bestSession.s.wr*100)+'%)');
-  if(bestHour&&withHour.length>=5)insights.push('Mejor franja horaria: <span style="color:#ff6b00;font-weight:800">'+bestHour.name+'</span> (EV '+(bestHour.s.ev>=0?'+':'')+bestHour.s.ev.toFixed(1)+'%, '+bestHour.s.n+' trades)');
 
   el.innerHTML=
     '<div class="chart-box" style="cursor:default">'+
@@ -3459,7 +3458,6 @@ function renderBestTradeRec(T){
         (bestTiming?chip('Timing','Entrar '+bestTiming.name,'#00c853'):'')+
         (bestLev?chip('Apalancamiento',bestLev.name,'#ffd100'):'')+
         (bestSession?chip('Sesión',bestSession.name,'#00aaff'):'')+
-        (bestHour&&withHour.length>=5?chip('Horario',bestHour.name,'#00aaff'):'')+
         chip('SL típico','-'+avgSL.toFixed(1)+'%','#ff3d57')+
         chip('TP típico','+'+avgTP.toFixed(1)+'%','#00c853')+
         chip('Margen típico','$'+medianMargen.toFixed(0),'#ff6b00')+
