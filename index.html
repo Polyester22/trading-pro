@@ -2925,7 +2925,7 @@ async function checkMarketCycle(){
 
     // Conditions block
     const conditionsHTML=
-      '<div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;margin-top:2px">4 condiciones</div>'+
+      '<div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;margin-top:2px">3 condiciones</div>'+
       condRow(c1,'BTC lateral',c1detail)+
       condRow(c2,'ETH lidera vs BTC',c2detail)+
       condRow(c4,'Amplitud alts ≥65%',c4detail);
@@ -2964,7 +2964,7 @@ async function checkMarketCycle(){
             '❌ <strong>No forzar trade</strong><br>'+
             '❌ <strong>No adivinar techo/piso</strong><br>'+
             '✔️ Esperar, mirar, paciencia<br>'+
-            '✔️ Esperá que se cumplan 3/4 condiciones en un sentido claro'+
+            '✔️ Esperá que se cumplan 2/3 condiciones en un sentido claro'+
           '</div>'+
         '</div>';
     }
@@ -3014,9 +3014,9 @@ async function checkMarketCycle(){
 
     // Notification
     if(mode==='long'&&'Notification' in window&&Notification.permission==='granted'){
-      new Notification('🟢 Polytrades — Modo LONG',{body:score+'/4 condiciones ✓ Buscar long en retest.'});
+      new Notification('🟢 Polytrades — Modo LONG',{body:score+'/3 condiciones ✓ Buscar long en retest.'});
     } else if(mode==='short'&&'Notification' in window&&Notification.permission==='granted'){
-      new Notification('🔴 Polytrades — Modo SHORT',{body:shortScore+'/4 condiciones ✓ Buscar short en rebote.'});
+      new Notification('🔴 Polytrades — Modo SHORT',{body:shortScore+'/3 condiciones ✓ Buscar short en rebote.'});
     } else if((mode==='long'||mode==='short')&&'Notification' in window&&Notification.permission!=='denied'){
       Notification.requestPermission();
     }
