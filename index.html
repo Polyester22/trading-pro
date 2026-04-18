@@ -2288,16 +2288,16 @@ async function updateDotSilent(){
     const eth1h=eth.usd_1h_change||0,eth24=eth.usd_24h_change||0;
     const btcDom=gd?.data?.market_cap_percentage?.btc||0;
     const c1=Math.abs(btc1h)<1.5&&btc24>-5;
-    const ethOut=eth24>btc24+1,domFav=btcDom<55;
-    const c2=domFav||ethOut;
-    const c3=eth1h>btc1h+0.3;
+    const ethLeads1h2=eth1h>btc1h+0.3,ethLeads242=eth24>btc24+1,domFav2=btcDom<55;
+    const c2=(ethLeads1h2&&ethLeads242)||(ethLeads1h2&&domFav2)||(ethLeads242&&domFav2);
+    const c3=c2;
     const alts=md.filter(c=>c.id!=='bitcoin'&&c.id!=='ethereum'&&c.price_change_percentage_1h_in_currency!=null);
-    const altsPct=alts.length?Math.round(alts.filter(c=>c.price_change_percentage_1h_in_currency>0).length/alts.length*100):0;
-    const c4=altsPct>=60;
-    const score=[c1,c2,c3,c4].filter(Boolean).length;
-    const sC1=btc24<-2||btc1h<-1.5,sC2=!domFav&&!ethOut,sC3=eth1h<btc1h-0.3,sC4=altsPct<40;
-    const shortScore=[sC1,sC2,sC3,sC4].filter(Boolean).length;
-    const mode=score>=3?'long':shortScore>=3?'short':'wait';
+    const altsPct2=alts.length?Math.round(alts.filter(c=>c.price_change_percentage_1h_in_currency>0).length/alts.length*100):0;
+    const c4=altsPct2>=65;
+    const score=[c1,c2,c4].filter(Boolean).length;
+    const sC1=btc24<-2||btc1h<-1.5,sC2=!c2,sC4=altsPct2<35;
+    const shortScore=[sC1,sC2,sC4].filter(Boolean).length;
+    const mode=score>=2?'long':shortScore>=2?'short':'wait';
     const col=mode==='long'?'#00c853':mode==='short'?'#ff3d57':'#ffd100';
     const dot=document.getElementById('semaforo-dot');
     if(dot){dot.style.background=col;dot.style.boxShadow='0 0 5px '+col;}
@@ -2809,24 +2809,25 @@ async function checkMarketCycle(){
     const c1=Math.abs(btc1h)<1.5&&btc24>-5;
     const c1detail='BTC 1h: '+(btc1h>=0?'+':'')+btc1h.toFixed(2)+'% · 24h: '+(btc24>=0?'+':'')+btc24.toFixed(1)+'%';
 
-    // ── CONDICIÓN 2: Dominancia BTC bajando ──────────────────
-    // CoinGecko no da tendencia directa, pero btcDom < 55% es señal favorable
-    // y si BTC sube menos que ETH en 24h, la dominancia probablemente está bajando
-    const ethOutperforms24=eth24>btc24+1; // ETH gana +1% vs BTC en 24h
-    const domFavorable=btcDom<55;
-    const c2=domFavorable||ethOutperforms24;
-    const c2detail='Dominancia BTC: '+btcDom.toFixed(1)+'%'+(domFavorable?' (baja, favorece alts)':' (alta)')+
-      ' · ETH vs BTC 24h: '+(ethOutperforms24?'ETH lider ✓':'BTC lidera');
+    // ── CONDICIÓN 2: ETH lidera vs BTC (fusiona Dominancia + ETH/BTC) ──
+    // ETH outperforms BTC en 1h Y/O en 24h — señal de rotación hacia alts
+    const ethLeads1h=eth1h>btc1h+0.3;   // ETH más fuerte en última hora
+    const ethLeads24=eth24>btc24+1;      // ETH más fuerte en 24h
+    const domFavorable=btcDom<55;        // Dominancia baja = capital saliendo de BTC
+    const ethOutperforms24=ethLeads24;
+    const c2=(ethLeads1h&&ethLeads24)||(ethLeads1h&&domFavorable)||(ethLeads24&&domFavorable);
+    const c2detail=
+      'ETH 1h: '+(eth1h>=0?'+':'')+eth1h.toFixed(2)+'% vs BTC 1h: '+(btc1h>=0?'+':'')+btc1h.toFixed(2)+'%'+
+      (ethLeads1h?' ✓':'')+
+      ' · ETH 24h: '+(eth24>=0?'+':'')+eth24.toFixed(1)+'% vs BTC 24h: '+(btc24>=0?'+':'')+btc24.toFixed(1)+'%'+
+      (ethLeads24?' ✓':'')+
+      ' · DOM: '+btcDom.toFixed(1)+'%'+(domFavorable?' ✓':'');
+    // Keep c3 as alias for short score compatibility
+    const ethBtcRising=ethLeads1h;
+    const c3=ethLeads1h; // used in short score
 
-    // ── CONDICIÓN 3: ETH/BTC subiendo ────────────────────────
-    // ETH rinde mejor que BTC en última hora
-    const ethBtcRising=eth1h>btc1h+0.3;
-    const c3=ethBtcRising;
-    const c3detail='ETH 1h: '+(eth1h>=0?'+':'')+eth1h.toFixed(2)+'% vs BTC 1h: '+(btc1h>=0?'+':'')+btc1h.toFixed(2)+'%'+
-      (ethBtcRising?' → ETH liderando ✓':' → BTC liderando');
-
-    // ── CONDICIÓN 4: Amplitud de altcoins ────────────────────
-    // Excluir BTC y ETH, contar las que suben en 1h
+    // ── CONDICIÓN 3: Amplitud de altcoins ≥65% (era c4) ─────
+    // Umbral más alto para reducir ruido de 1h — 65% es señal más confiable
     // Top 50 alts (excluding BTC+ETH)
     const alts=marketsData.filter(c=>c.id!=='bitcoin'&&c.id!=='ethereum'&&c.price_change_percentage_1h_in_currency!==null);
 
@@ -2851,11 +2852,11 @@ async function checkMarketCycle(){
 
     const altsUp=alts.filter(c=>c.price_change_percentage_1h_in_currency>0).length;
     const altsPct=alts.length?Math.round(altsUp/alts.length*100):0;
-    const c4=altsPct>=60;
+    const c4=altsPct>=65; // raised from 60% to reduce 1h noise
     const userAltsInPool=alts.filter(c=>userTickers.includes(c.symbol.toUpperCase()));
     const userAltsUp=userAltsInPool.filter(c=>c.price_change_percentage_1h_in_currency>0).length;
     const userAltsNote=userAltsInPool.length?' · Tus alts: '+userAltsUp+'/'+userAltsInPool.length+' verdes':'';
-    const c4detail=altsUp+' de '+alts.length+' alts subiendo en 1h ('+altsPct+'%)'+userAltsNote+(c4?' 🟢':altsPct>=40?' 🟡':' 🔴');
+    const c4detail=altsUp+' de '+alts.length+' alts subiendo en 1h ('+altsPct+'% · umbral: 65%)'+userAltsNote+(c4?' 🟢':altsPct>=50?' 🟡':' 🔴');
 
     // ── TOP MOVERS ───────────────────────────────────────────
     const topMovers=alts
@@ -2867,29 +2868,25 @@ async function checkMarketCycle(){
       .sort((a,b)=>(b.price_change_percentage_24h||0)-(a.price_change_percentage_24h||0))
       .slice(0,6);
 
-    // ── SEMÁFORO FINAL ───────────────────────────────────────
-    const score=[c1,c2,c3,c4].filter(Boolean).length;
+    // ── SEMÁFORO FINAL — 3 condiciones ───────────────────────
+    const score=[c1,c2,c4].filter(Boolean).length; // 3 conditions
 
-    // Also compute short score: opposite conditions
-    const shortC1=btc24<-2||btc1h<-1.5;          // BTC cayendo
-    const shortC2=!domFavorable&&!ethOutperforms24; // BTC.D subiendo
-    const shortC3=!ethBtcRising&&eth1h<btc1h-0.3;  // ETH más débil que BTC
-    const shortC4=altsPct<40;                       // Alts mayormente rojas
-    const shortScore=[shortC1,shortC2,shortC3,shortC4].filter(Boolean).length;
+    // Short score: opposite signals
+    const shortC1=btc24<-2||btc1h<-1.5;       // BTC cayendo
+    const shortC2=!c2;                          // ETH NO lidera BTC
+    const shortC4=altsPct<35;                   // Alts mayormente rojas (65% bajando)
+    const shortScore=[shortC1,shortC2,shortC4].filter(Boolean).length;
 
     let semaphore, semColor, semBg, action, actionColor, mode;
-    if(score>=3){
+    if(score>=2){
       semaphore='🟢'; semColor='#00c853'; semBg='rgba(0,200,83,.08)';
-      action='LONG — Modo altcoins activado ('+score+'/4)'; actionColor='#00c853'; mode='long';
-    } else if(shortScore>=3){
+      action='LONG — Modo altcoins activado ('+score+'/3)'; actionColor='#00c853'; mode='long';
+    } else if(shortScore>=2){
       semaphore='🔴'; semColor='#ff3d57'; semBg='rgba(255,61,87,.08)';
-      action='SHORT — Modo risk-off ('+shortScore+'/4)'; actionColor='#ff3d57'; mode='short';
-    } else if(score===2){
-      semaphore='🟡'; semColor='#ffd100'; semBg='rgba(255,209,0,.08)';
-      action='NO TRADE — Mercado mixto, esperá confirmación'; actionColor='#ffd100'; mode='wait';
+      action='SHORT — Modo risk-off ('+shortScore+'/3)'; actionColor='#ff3d57'; mode='short';
     } else {
       semaphore='🟡'; semColor='#ffd100'; semBg='rgba(255,209,0,.08)';
-      action='NO TRADE — Sin dirección clara, paciencia'; actionColor='#ffd100'; mode='wait';
+      action='NO TRADE — Sin señal clara, esperá'; actionColor='#ffd100'; mode='wait';
     }
 
     // Special override rules
@@ -2930,9 +2927,8 @@ async function checkMarketCycle(){
     const conditionsHTML=
       '<div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;margin-top:2px">4 condiciones</div>'+
       condRow(c1,'BTC lateral',c1detail)+
-      condRow(c2,'Dominancia BTC bajando / ETH > BTC',c2detail)+
-      condRow(c3,'ETH/BTC subiendo',c3detail)+
-      condRow(c4,'Amplitud alts ≥60%',c4detail);
+      condRow(c2,'ETH lidera vs BTC',c2detail)+
+      condRow(c4,'Amplitud alts ≥65%',c4detail);
 
     // Execution guide
     let execHTML='';
