@@ -437,7 +437,6 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
     </div>
   </div>
 
-
   <!-- CAPITAL TRACKER -->
   <div class="card">
     <div class="section-header">
@@ -490,7 +489,6 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
     <button class="btn btn-dark" onclick="exportExcel()" style="margin:0">📊 Exportar a Excel (.csv)</button>
   </div>
 </div>
-
 
 <!-- ══ HISTORIAL ══ -->
 <div class="page" id="page-historial">
@@ -965,7 +963,6 @@ function cleanPrice(v){
   return String(parseFloat(n.toFixed(6)));
 }
 
-
 function calcPct(en,ac,pos,lev){if(!en||!ac||en===0)return null;let p=((ac-en)/en)*100*(lev||1);if(pos==='Short')p=-p;return p;}
 function applyLive(pct,elId='result-live'){const el=document.getElementById(elId);if(pct===null){el.textContent='— %';el.className='result-live zero';return;}el.textContent=(pct>=0?'+':'')+pct.toFixed(2)+'%';el.className='result-live '+(pct>0?'pos':pct<0?'neg':'zero');}
 function calcResult(fromActual){
@@ -1141,7 +1138,6 @@ function updateOpenCount(){
 
 // ══ OPEN TRADES ══
 let livePrices={};
-
 
 // ══ TRADE RECOMMENDATION ENGINE ══
 function getTradeRecommendation(t, livePct, totalMins){
@@ -2190,7 +2186,6 @@ function deletePartialClose(tradeId, idx){
   renderPartialClosesEditor(t);
 }
 
-
 function onEstrategiaChange(){
   const val=document.getElementById('f-estrategia').value;
   const row=document.getElementById('f-patron-row');
@@ -2209,8 +2204,6 @@ function migratePatronFromObs(){
   });
   if(changed){persist(D);}
 }
-
-
 
 // ══ COINGECKO FETCH — cached + resilient (partial results ok) ══
 let _cgCache = null;
@@ -2322,10 +2315,8 @@ function startCycleMonitor(){
   cycleInterval=setInterval(updateDotSilent,300000);
 }
 
-
 init();
 </script>
-
 
 <!-- MODAL RESUMEN SEMANAL -->
 <div class="modal-overlay" id="modal-weekly" onclick="if(event.target===this)closeWeeklySummary()">
@@ -3012,14 +3003,6 @@ async function checkMarketCycle(){
       topMoversHTML+
       warningsHTML;
 
-    // Notification
-    if(mode==='long'&&'Notification' in window&&Notification.permission==='granted'){
-      new Notification('🟢 Polytrades — Modo LONG',{body:score+'/3 condiciones ✓ Buscar long en retest.'});
-    } else if(mode==='short'&&'Notification' in window&&Notification.permission==='granted'){
-      new Notification('🔴 Polytrades — Modo SHORT',{body:shortScore+'/3 condiciones ✓ Buscar short en rebote.'});
-    } else if((mode==='long'||mode==='short')&&'Notification' in window&&Notification.permission!=='denied'){
-      Notification.requestPermission();
-    }
   } catch(e){
     const box=document.getElementById('cycle-status');
     if(box)box.innerHTML='<div style="color:#ff3d57;font-size:11px;text-align:center;padding:8px">❌ Error: '+e.message+'</div>';
@@ -3028,7 +3011,6 @@ async function checkMarketCycle(){
 }
 
 // Auto-check every 5 minutes when on En Curso tab
-
 
 // ══ PIKACHU PATRON STATS ══
 function getPatronNum(t){
