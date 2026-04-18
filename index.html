@@ -1515,17 +1515,22 @@ function renderHistorial(){
   list.sort((a,b)=>{let av=a[sortCol]??'',bv=b[sortCol]??'';if(typeof av==='number')return(av-bv)*sortDir;return av.localeCompare(bv)*sortDir;});
   // update sort icons
   ['fecha','ticker','pos','resultado','temp','margen','lev','estrategia','salida','timing','durMins'].forEach(c=>{const el=document.getElementById('sort-'+c);if(el){el.textContent=c===sortCol?(sortDir===1?'↑':'↓'):'↕';el.parentElement.classList.toggle('sorted',c===sortCol);}});
-  // summary bar
-  const s=computeStats(list);
+  // summary bar — only closed trades for accurate stats
+  const closedList=list.filter(t=>!t.open);
+  const openList=list.filter(t=>t.open);
+  const s=computeStats(closedList);
   const sb=document.getElementById('hist-summary');
-  if(s&&list.length){
+  if(s&&closedList.length){
     const wr=(s.winRate*100).toFixed(0);
-    const avg=(list.reduce((a,t)=>a+t.resultado,0)/list.length).toFixed(1);
+    const avg=(closedList.reduce((a,t)=>a+t.resultado,0)/closedList.length).toFixed(1);
     const pnl=s.totalPnl.toFixed(2);
-    sb.innerHTML=`<div class="hs-item"><div class="hs-label">Trades</div><div class="hs-val" style="color:#ff6b00">${list.length}</div></div>
+    sb.innerHTML=`<div class="hs-item"><div class="hs-label">Cerrados</div><div class="hs-val" style="color:#ff6b00">${closedList.length}${openList.length?' <span style="font-size:10px;color:#00c853">(+'+openList.length+')</span>':''}</div></div>
     <div class="hs-item"><div class="hs-label">Win Rate</div><div class="hs-val ${parseFloat(wr)>=50?'pos':'neg'}">${wr}%</div></div>
     <div class="hs-item"><div class="hs-label">Avg R%</div><div class="hs-val ${parseFloat(avg)>=0?'pos':'neg'}">${parseFloat(avg)>=0?'+':''}${avg}%</div></div>
     <div class="hs-item"><div class="hs-label">P&L $</div><div class="hs-val ${parseFloat(pnl)>=0?'pos':'neg'}">${parseFloat(pnl)>=0?'+':''}$${pnl}</div></div>`;
+    sb.style.display='grid';
+  }else if(list.length){
+    sb.innerHTML=`<div class="hs-item" style="grid-column:1/-1;text-align:center;color:var(--text2);font-size:12px">${openList.length} trade${openList.length>1?'s':''} abierto${openList.length>1?'s':''} — sin cerrados en este filtro</div>`;
     sb.style.display='grid';
   }else{sb.style.display='none';}
 
