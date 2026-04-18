@@ -1231,30 +1231,49 @@ function getWeekKey(date){
   return monday.toISOString().slice(0,10);
 }
 
+// ── Shared helper: get realized PnL for a trade (closed or partial) ──
+function getRealisedPnl(t){
+  if(!t.open)return t.margen*t.resultado/100;
+  // Open trade with partial closes
+  if(!t.partialCloses||!t.partialCloses.length)return 0;
+  const margenOrig=t.margenOriginal||t.margen||0;
+  return t.partialCloses.reduce(function(s,c){
+    var pnlNum=parseFloat(c.pnl);
+    if(!isNaN(pnlNum)&&Math.abs(pnlNum)>0)return s+pnlNum;
+    var pctNum=parseFloat(c.pct),pctCloseNum=parseFloat(c.pctClose);
+    if(!isNaN(pctNum)&&!isNaN(pctCloseNum))return s+(margenOrig*(pctCloseNum/100)*(pctNum/100));
+    // fallback: obs string
+    if(t.obs){var m=t.obs.match(/\+\$(\d+\.?\d*)/);if(m)return s+parseFloat(m[1]);}
+    return s;
+  },0);
+}
+
 function renderWeeklySummary(){
   var el=document.getElementById('weekly-summary-modal-body');
   if(!el)return;
-  var closed=D.trades.filter(function(t){return!t.open&&t.fecha;});
-  if(!closed.length){el.innerHTML='<div style="color:var(--text2);font-size:13px;text-align:center;padding:20px">Sin trades cerrados todavía.</div>';return;}
+  // Include ALL trades (closed + open with partials)
+  var allTrades=D.trades.filter(function(t){return t.fecha&&(!t.open||getRealisedPnl(t)>0);});
+  if(!allTrades.length){el.innerHTML='<div style="color:var(--text2);font-size:13px;text-align:center;padding:20px">Sin trades todavía.</div>';return;}
 
   // Group by week
   var byWeek={};
-  closed.forEach(function(t){var wk=getWeekKey(t.fecha);if(!byWeek[wk])byWeek[wk]=[];byWeek[wk].push(t);});
+  allTrades.forEach(function(t){var wk=getWeekKey(t.fecha);if(!byWeek[wk])byWeek[wk]=[];byWeek[wk].push(t);});
   var weeks=Object.keys(byWeek).sort().reverse().slice(0,8);
 
   el.innerHTML=weeks.map(function(wk,idx){
     var trades=byWeek[wk];
-    var wins=trades.filter(function(t){return t.resultado>0;}).length;
-    var pnl=trades.reduce(function(s,t){return s+(t.margen*t.resultado/100);},0);
-    var avgR=trades.reduce(function(s,t){return s+t.resultado;},0)/trades.length;
-    var wr=wins/trades.length*100;
+    var closedInWeek=trades.filter(function(t){return!t.open;});
+    var wins=closedInWeek.filter(function(t){return t.resultado>0;}).length;
+    var pnl=trades.reduce(function(s,t){return s+getRealisedPnl(t);},0);
+    var avgR=closedInWeek.length?closedInWeek.reduce(function(s,t){return s+t.resultado;},0)/closedInWeek.length:0;
+    var wr=closedInWeek.length?wins/closedInWeek.length*100:0;
     var wkEnd=new Date(wk+'T12:00:00');wkEnd.setDate(wkEnd.getDate()+6);
     var label=wk.slice(5).replace('-','/')+'→'+wkEnd.toISOString().slice(5,10).replace('-','/');
     var pnlCol=pnl>=0?'#00c853':'#ff3d57';
 
-    // Best/worst trade of week
-    var best=trades.reduce(function(a,b){return b.resultado>a.resultado?b:a;});
-    var worst=trades.reduce(function(a,b){return b.resultado<a.resultado?b:a;});
+    // Best/worst trade of closed trades only
+    var best=closedInWeek.length?closedInWeek.reduce(function(a,b){return b.resultado>a.resultado?b:a;}):null;
+    var worst=closedInWeek.length?closedInWeek.reduce(function(a,b){return b.resultado<a.resultado?b:a;}):null;
 
     // Estado breakdown
     var estadosWk={};trades.forEach(function(t){if(t.estado){if(!estadosWk[t.estado])estadosWk[t.estado]=0;estadosWk[t.estado]++;}});
@@ -1266,15 +1285,15 @@ function renderWeeklySummary(){
         '<div style="font-size:18px;font-weight:900;color:'+pnlCol+'">'+(pnl>=0?'+':'')+'$'+pnl.toFixed(2)+'</div>'+
       '</div>'+
       '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:8px">'+
-        '<div style="text-align:center"><div style="font-size:9px;color:var(--text2)">TRADES</div><div style="font-size:14px;font-weight:800;color:#ff6b00">'+trades.length+'</div></div>'+
+        '<div style="text-align:center"><div style="font-size:9px;color:var(--text2)">TRADES</div><div style="font-size:14px;font-weight:800;color:#ff6b00">'+closedInWeek.length+'</div></div>'+
         '<div style="text-align:center"><div style="font-size:9px;color:var(--text2)">WR</div><div style="font-size:14px;font-weight:800;color:'+(wr>=50?'#00c853':'#ff3d57')+'">'+wr.toFixed(0)+'%</div></div>'+
         '<div style="text-align:center"><div style="font-size:9px;color:var(--text2)">AVG R%</div><div style="font-size:14px;font-weight:800;color:'+(avgR>=0?'#00c853':'#ff3d57')+'">'+(avgR>=0?'+':'')+avgR.toFixed(1)+'%</div></div>'+
         '<div style="text-align:center"><div style="font-size:9px;color:var(--text2)">P&L</div><div style="font-size:14px;font-weight:800;color:'+pnlCol+'">'+(pnl>=0?'+':'')+'$'+Math.abs(pnl).toFixed(0)+'</div></div>'+
       '</div>'+
-      '<div style="font-size:11px;color:var(--text2);margin-bottom:4px">'+
+      (best&&worst?'<div style="font-size:11px;color:var(--text2);margin-bottom:4px">'+
         '🏆 Mejor: <strong style="color:#00c853">'+best.ticker+'</strong> '+(best.resultado>=0?'+':'')+best.resultado.toFixed(1)+'% · '+
         '💔 Peor: <strong style="color:#ff3d57">'+worst.ticker+'</strong> '+(worst.resultado>=0?'+':'')+worst.resultado.toFixed(1)+'%'+
-      '</div>'+
+      '</div>':'')+
       (estadoStr?'<div style="font-size:11px;color:var(--text2)">🧠 Estado: '+estadoStr+'</div>':'')+
     '</div>';
   }).join('');
@@ -2104,7 +2123,7 @@ function renderGraficos(){
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
       <div class="stat-card" onclick="openDetail('wr')" style="padding:10px"><div class="stat-lbl">Win Rate</div><div class="stat-v" style="font-size:26px;color:${s.winRate>=.5?'#00c853':'#ff3d57'}">${(s.winRate*100).toFixed(0)}%</div></div>
-      <div class="stat-card" onclick="openDetail('pnl')" style="padding:10px"><div class="stat-lbl">P&L Total $</div><div class="stat-v" style="font-size:22px;color:${s.totalPnl>=0?'#00c853':'#ff3d57'}">${s.totalPnl>=0?'+':''}$${s.totalPnl.toFixed(0)}</div></div>
+      <div class="stat-card" onclick="openDetail('pnl')" style="padding:10px"><div class="stat-lbl">P&L Total $</div><div class="stat-v" style="font-size:22px;color:${(s.totalPnl+getPartialPnl())>=0?'#00c853':'#ff3d57'}">${(s.totalPnl+getPartialPnl())>=0?'+':''}$${(s.totalPnl+getPartialPnl()).toFixed(0)}</div></div>
       <div class="stat-card" style="cursor:default;padding:10px"><div class="stat-lbl">Ratio R/B</div><div class="stat-v" style="font-size:26px;color:${s.rr>=1?'#00c853':'#ff3d57'}">${s.rr.toFixed(2)}</div></div>
       <div class="stat-card" style="cursor:default;padding:10px"><div class="stat-lbl">Llegaron 10%</div><div class="stat-v" style="font-size:18px;color:#ffd100">${p10c} de ${n}<br><span style="font-size:13px">(${n?(p10c/n*100).toFixed(0):0}%)</span></div></div>
       <div class="stat-card" style="cursor:default;padding:10px"><div class="stat-lbl">Avg Ganador</div><div class="stat-v" style="font-size:24px;color:#00c853">+${s.avgWin.toFixed(1)}%</div></div>
