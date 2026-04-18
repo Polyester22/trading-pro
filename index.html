@@ -2878,7 +2878,7 @@ async function checkMarketCycle(){
     // Short score: opposite signals
     const shortC1=btc24<-2||btc1h<-1.5;       // BTC cayendo
     const shortC2=!c2;                          // ETH NO lidera BTC
-    const shortC4=top50Pct<35&&top100Pct<40;   // Ambos tops mayormente rojos
+    const shortC4=(altsPct24<35)&&(altsPct100<40);   // Ambos tops mayormente rojos
     const shortScore=[shortC1,shortC2,shortC4].filter(Boolean).length;
 
     let semaphore, semColor, semBg, action, actionColor, mode;
