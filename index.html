@@ -618,6 +618,7 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
 // ══ GLOBAL STATE ══
 let livePrices={};
 let projectionOpen=false;
+let tickerChangeCache={}; // {TICKER: {change1h, change4h, change24h, fetchedAt}}
 
 // ══ DATA ══
 const STORE='tradingpro_v6';
@@ -1429,8 +1430,39 @@ function renderRiskExposure(openTrades){
     '</div>';
 }
 
+// ══ TICKER PRICE CHANGES (Binance 1h/4h/24h) ══
+async function fetchTickerChanges(tickers){
+  const now=Date.now();
+  const toFetch=tickers.filter(tk=>{
+    const c=tickerChangeCache[tk];
+    return!c||(now-c.fetchedAt)>90000; // 90s cache
+  });
+  if(!toFetch.length)return;
+  await Promise.all(toFetch.map(async tk=>{
+    try{
+      const sym=tk+'USDT';
+      const [stats,k1h,k4h]=await Promise.all([
+        fetch('https://api.binance.com/api/v3/ticker/24hr?symbol='+sym).then(r=>r.json()),
+        fetch('https://api.binance.com/api/v3/klines?symbol='+sym+'&interval=1h&limit=2').then(r=>r.json()),
+        fetch('https://api.binance.com/api/v3/klines?symbol='+sym+'&interval=4h&limit=2').then(r=>r.json())
+      ]);
+      const c24=parseFloat(stats.priceChangePercent)||0;
+      // kline format: [openTime, open, high, low, close, ...]
+      const c1h=k1h&&k1h.length>=1?(parseFloat(k1h[k1h.length-1][4])-parseFloat(k1h[0][1]))/parseFloat(k1h[0][1])*100:0;
+      const c4h=k4h&&k4h.length>=1?(parseFloat(k4h[k4h.length-1][4])-parseFloat(k4h[0][1]))/parseFloat(k4h[0][1])*100:0;
+      tickerChangeCache[tk]={change1h:c1h,change4h:c4h,change24h:c24,fetchedAt:now};
+    }catch(e){ /* ignore per-ticker errors */ }
+  }));
+}
+
 function renderOpenTrades(){
   const open=D.trades.filter(t=>t.open).sort((a,b)=>b.fecha.localeCompare(a.fecha));
+  // Fetch ticker-specific price changes in background
+  if(open.length&&location.protocol==='https:'){
+    const tickers=[...new Set(open.map(t=>t.ticker))];
+    fetchTickerChanges(tickers).then(()=>renderOpenTrades._dirty&&renderOpenTrades());
+    renderOpenTrades._dirty=false;
+  }
   const list=document.getElementById('open-trades-list');
   const empty=document.getElementById('open-empty');
   const isHTTPS=location.protocol==='https:';
@@ -1499,7 +1531,7 @@ function renderOpenTrades(){
         </div>
       </div>
       ${t.obs?`<div style="margin-top:8px;font-size:11px;color:var(--text2);font-style:italic;padding:0 2px">${t.obs}</div>`:''}
-      ${(()=>{const rec=getTradeRecommendation(t,livePct,totalMins);return`<div style="display:flex;align-items:center;gap:8px;background:${rec.bg};border:1px solid ${rec.border};border-radius:8px;padding:8px 10px;margin-top:8px"><div style="flex:1"><div style="font-size:12px;font-weight:900;color:${rec.color}">${rec.action}</div><div style="font-size:10px;color:var(--text2);margin-top:1px">${rec.reason}</div></div></div>`;})()}
+      ${(()=>{const rec=getTradeRecommendation(t,livePct,totalMins,tickerChangeCache[t.ticker]||null);return`<div style="display:flex;align-items:center;gap:8px;background:${rec.bg};border:1px solid ${rec.border};border-radius:8px;padding:8px 10px;margin-top:8px"><div style="flex:1"><div style="font-size:12px;font-weight:900;color:${rec.color}">${rec.action}</div><div style="font-size:10px;color:var(--text2);margin-top:1px">${rec.reason}</div></div></div>`;})()}
       <div style="display:flex;gap:6px;margin-top:10px" onclick="event.stopPropagation()">
         <button class="btn btn-dark btn-sm" style="flex:1;font-size:12px" onclick="openMCP('${t.id}',false)">📉 Cierre parcial</button>
         <button class="btn btn-orange btn-sm" style="flex:1;font-size:12px" onclick="openMCP('${t.id}',true)">✅ Cerrar trade</button>
@@ -2854,149 +2886,152 @@ function updateOpenCount(){
 // ══ OPEN TRADES ══
 
 // ══ TRADE RECOMMENDATION ENGINE ══
-function getTradeRecommendation(t, livePct, totalMins){
+function getTradeRecommendation(t, livePct, totalMins, tc){
   const closed=D.trades.filter(x=>!x.open&&x.resultado!==undefined);
-
-  // ── Semaphore full score (recompute from cache) ───────────
-  let semScore=null, semMode=null;
-  if(_cgCache){
-    const pd=_cgCache.pd, gd=_cgCache.gd, md=_cgCache.md||[];
-    const btc=pd&&pd.bitcoin?pd.bitcoin:{};
-    const eth=pd&&pd.ethereum?pd.ethereum:{};
-    const _btc1h=btc.usd_1h_change||0, _btc24=btc.usd_24h_change||0;
-    const _eth1h=eth.usd_1h_change||0, _eth24=eth.usd_24h_change||0;
-    const _dom=gd&&gd.data&&gd.data.market_cap_percentage?gd.data.market_cap_percentage.btc||50:50;
-    // Condition 1: BTC lateral
-    const _c1=Math.abs(_btc1h)<1.5&&_btc24>-5;
-    // Condition 2: ETH leads BTC
-    const _eL1h=_eth1h>_btc1h+0.3, _eL24=_eth24>_btc24+1, _domFav=_dom<55;
-    const _c2=(_eL1h&&_eL24)||(_eL1h&&_domFav)||(_eL24&&_domFav);
-    // Condition 3: Amplitude
-    const _alts=md.filter(c=>c.id!=='bitcoin'&&c.id!=='ethereum'&&c.price_change_percentage_24h!=null);
-    const _t50=_alts.slice(0,50), _t100=_alts.slice(50,100);
-    const _t50p=_t50.length?Math.round(_t50.filter(c=>(c.price_change_percentage_24h||0)>0).length/_t50.length*100):0;
-    const _t100p=_t100.length?Math.round(_t100.filter(c=>(c.price_change_percentage_24h||0)>0).length/_t100.length*100):0;
-    const _c4=(_t50p>=65&&_t100p>=65)||(_t100p>=65&&_t50p>=50&&_t50p<65)||(_t50p>=65&&_t100.length<10);
-    const _sC1=_btc24<=-2||_btc1h<=-1.5, _sC2=!_c2, _sC4=_t50p<35&&(_t100p<40||!_t100.length);
-    const _longScore=[_c1,_c2,_c4].filter(Boolean).length;
-    const _shortScore=[_sC1,_sC2,_sC4].filter(Boolean).length;
-    semScore={long:_longScore, short:_shortScore, btc24:_btc24, btc1h:_btc1h};
-    semMode=_longScore>=2?'long':_shortScore>=2?'short':'wait';
-  }
-
-  // ── Market context (BTC only, for thresholds) ─────────────
-  const mkt=_cgCache?_cgCache.pd:null;
-  const btc1h=semScore?semScore.btc1h:null;
-  const btc24=semScore?semScore.btc24:null;
-  const hasMktData=btc24!==null;
-  const marketDown=hasMktData&&btc24<-4;
-  const marketUp=hasMktData&&btc24>3;
-  const btcLateral=hasMktData&&Math.abs(btc1h||0)<1.5;
-
-  // ── Historical stats for this trade's setup ───────────────
-  const similar=closed.filter(x=>x.estrategia===t.estrategia&&x.pos===t.pos);
-  const similarAvgTP=similar.filter(x=>x.resultado>0).length?
-    similar.filter(x=>x.resultado>0).reduce((s,x)=>s+x.resultado,0)/similar.filter(x=>x.resultado>0).length:null;
-  const similarAvgSL=similar.filter(x=>x.resultado<0).length?
-    Math.abs(similar.filter(x=>x.resultado<0).reduce((s,x)=>s+x.resultado,0)/similar.filter(x=>x.resultado<0).length):null;
-  const similarAvgDur=closed.filter(x=>x.estrategia===t.estrategia&&x.fechahora&&x.closedHora).map(x=>{
-    return Math.max(0,(new Date(x.closedHora)-new Date(x.fechahora))/60000);
-  });
-  const avgDurMins=similarAvgDur.length?similarAvgDur.reduce((a,x)=>a+x,0)/similarAvgDur.length:null;
-
-  // ── Ticker-specific stats ─────────────────────────────────
-  const byTicker=closed.filter(x=>x.ticker===t.ticker);
-  const tkWins=byTicker.filter(x=>x.resultado>0);
-  const tkLosses=byTicker.filter(x=>x.resultado<0);
-  const tkWR=byTicker.length?tkWins.length/byTicker.length:null;
-  const tkEV=byTicker.length?byTicker.reduce((s,x)=>s+x.resultado,0)/byTicker.length:null;
-  const tkAvgTP=tkWins.length?tkWins.reduce((s,x)=>s+x.resultado,0)/tkWins.length:null;
-  const tkAvgSL=tkLosses.length?Math.abs(tkLosses.reduce((s,x)=>s+x.resultado,0)/tkLosses.length):null;
-  // Ticker + same pos
-  const tkPos=byTicker.filter(x=>x.pos===t.pos);
-  const tkPosWR=tkPos.length?tkPos.filter(x=>x.resultado>0).length/tkPos.length:null;
-  const tkPosEV=tkPos.length?tkPos.reduce((s,x)=>s+x.resultado,0)/tkPos.length:null;
-  // Best salida for this ticker
-  const tkBestSalida=tkPos.length>=3?(()=>{
-    const bySal={};tkPos.forEach(x=>{if(x.salida&&x.salida!=='SL'){if(!bySal[x.salida])bySal[x.salida]=[];bySal[x.salida].push(x.resultado);}});
-    const entries=Object.entries(bySal).filter(e=>e[1].length>=2).map(([k,v])=>({k,ev:v.reduce((a,x)=>a+x,0)/v.length}));
-    return entries.length?entries.sort((a,b)=>b.ev-a.ev)[0].k:null;
-  })():null;
-  // Use ticker stats to refine TP/SL targets (prefer ticker-specific if enough data)
-  const effectiveTP=tkWins.length>=3?tkAvgTP:similarAvgTP;
-  const effectiveSL=tkLosses.length>=3?tkAvgSL:similarAvgSL;
-
-  const pct=livePct||0;
   const isLong=t.pos==='Long';
+  const pct=livePct||0;
+
+  // ── Ticker price movement (Binance 1h/4h/24h) ────────────
+  const has=tc!==null&&tc!==undefined;
+  const c1h=has?tc.change1h:null;
+  const c4h=has?tc.change4h:null;
+  const c24=has?tc.change24h:null;
+  // Direction: positive = ticker going up
+  const trending1h=c1h!==null?(c1h>1?'up':c1h<-1?'down':'flat'):null;
+  const trending4h=c4h!==null?(c4h>2?'up':c4h<-2?'down':'flat'):null;
+  const trending24=c24!==null?(c24>4?'up':c24<-4?'down':'flat'):null;
+  const momentum=  // combined momentum signal
+    trending1h==='up'&&trending4h==='up'?'strong_up':
+    trending1h==='down'&&trending4h==='down'?'strong_down':
+    trending1h==='up'?'weak_up':
+    trending1h==='down'?'weak_down':'neutral';
+  const tkMov=has?` · ${t.ticker} 1h:${c1h>=0?'+':''}${c1h.toFixed(1)}% 4h:${c4h>=0?'+':''}${c4h.toFixed(1)}% 24h:${c24>=0?'+':''}${c24.toFixed(1)}%`:'';
+
+  // ── Historical stats ─────────────────────────────────────
+  const similar=closed.filter(x=>x.estrategia===t.estrategia&&x.pos===t.pos);
+  const tkTrades=closed.filter(x=>x.ticker===t.ticker);
+  const tkPos=tkTrades.filter(x=>x.pos===t.pos);
+  const tkPosWR=tkPos.length?tkPos.filter(x=>x.resultado>0).length/tkPos.length:null;
+  const tkEV=tkTrades.length?tkTrades.reduce((s,x)=>s+x.resultado,0)/tkTrades.length:null;
+  const tkWins=tkTrades.filter(x=>x.resultado>0);
+  const tkLosses=tkTrades.filter(x=>x.resultado<0);
+  const tkAvgTP=tkWins.length>=3?tkWins.reduce((s,x)=>s+x.resultado,0)/tkWins.length:null;
+  const tkAvgSL=tkLosses.length>=3?Math.abs(tkLosses.reduce((s,x)=>s+x.resultado,0)/tkLosses.length):null;
+  const simWins=similar.filter(x=>x.resultado>0);
+  const simLosses=similar.filter(x=>x.resultado<0);
+  const simAvgTP=simWins.length?simWins.reduce((s,x)=>s+x.resultado,0)/simWins.length:null;
+  const simAvgSL=simLosses.length?Math.abs(simLosses.reduce((s,x)=>s+x.resultado,0)/simLosses.length):null;
+  const effectiveTP=tkAvgTP||simAvgTP;
+  const effectiveSL=tkAvgSL||simAvgSL;
+  const durData=closed.filter(x=>x.estrategia===t.estrategia&&x.fechahora&&x.closedHora);
+  const avgDurMins=durData.length?durData.reduce((s,x)=>s+Math.max(0,(new Date(x.closedHora)-new Date(x.fechahora))/60000),0)/durData.length:null;
+
+  // Best exit for this ticker
+  const bySal={};tkPos.forEach(x=>{if(x.salida&&x.salida!=='SL'){if(!bySal[x.salida])bySal[x.salida]=[];bySal[x.salida].push(x.resultado);}});
+  const salidaEntries=Object.entries(bySal).filter(e=>e[1].length>=2).map(([k,v])=>({k,ev:v.reduce((a,x)=>a+x,0)/v.length}));
+  const bestSalida=salidaEntries.length?salidaEntries.sort((a,b)=>b.ev-a.ev)[0].k:null;
+  const salidaHint=bestSalida?` Mejor salida en ${t.ticker}: ${bestSalida}.`:'';
+
   const atTP=effectiveTP&&pct>=effectiveTP*0.85;
   const atSL=effectiveSL&&pct<=-effectiveSL*0.8;
   const overtime=avgDurMins&&totalMins>avgDurMins*1.5;
-  const inProfit=pct>5;
-  const inLoss=pct<-5;
+  const inProfit=pct>3;
+  const inLoss=pct<-3;
 
-  // Ticker context string
-  const tkCtx=byTicker.length>=3?
-    ' | '+t.ticker+': WR '+(tkWR*100).toFixed(0)+'% · EV '+(tkEV>=0?'+':'')+tkEV.toFixed(1)+'%'+
-    (tkPosWR!==null?' ('+t.pos+' '+(tkPosWR*100).toFixed(0)+'%)':''):
-    byTicker.length>0?' | '+t.ticker+': '+byTicker.length+' trade'+(byTicker.length>1?'s':'')+'':'';
-  const salidaHint=tkBestSalida?' Tu mejor salida en '+t.ticker+': '+tkBestSalida+'.':'';
+  // Ticker context
+  const tkCtx=tkTrades.length>=3?` | ${t.ticker}: WR ${(tkPosWR!==null?(tkPosWR*100).toFixed(0):'-')}% EV ${tkEV>=0?'+':''}${tkEV.toFixed(1)}%`
+    :tkTrades.length>0?` | ${t.ticker}: ${tkTrades.length} trade${tkTrades.length>1?'s':''}`:'';
 
-  // ── Decision logic ────────────────────────────────────────
-
-  // 🔴 CERRAR URGENTE — semáforo completamente en contra (único caso donde el semáforo manda)
-  if(semMode==='short'&&semScore&&semScore.short>=3&&isLong)
+  // ── Only extreme semaphore override ──────────────────────
+  let semScore=null,semMode=null;
+  if(_cgCache){
+    const pd=_cgCache.pd,gd=_cgCache.gd,md=_cgCache.md||[];
+    const btc=pd&&pd.bitcoin?pd.bitcoin:{};
+    const eth=pd&&pd.ethereum?pd.ethereum:{};
+    const _b1=btc.usd_1h_change||0,_b24=btc.usd_24h_change||0;
+    const _e1=eth.usd_1h_change||0,_e24=eth.usd_24h_change||0;
+    const _dom=gd?.data?.market_cap_percentage?.btc||50;
+    const _c1=Math.abs(_b1)<1.5&&_b24>-5;
+    const _c2=(_e1>_b1+0.3&&_e24>_b24+1)||(_e1>_b1+0.3&&_dom<55)||(_e24>_b24+1&&_dom<55);
+    const _alts=(md).filter(c=>c.id!=='bitcoin'&&c.id!=='ethereum'&&c.price_change_percentage_24h!=null);
+    const _t50=_alts.slice(0,50),_t100=_alts.slice(50,100);
+    const _t50p=_t50.length?Math.round(_t50.filter(c=>(c.price_change_percentage_24h||0)>0).length/_t50.length*100):0;
+    const _t100p=_t100.length?Math.round(_t100.filter(c=>(c.price_change_percentage_24h||0)>0).length/_t100.length*100):0;
+    const _c4=(_t50p>=65&&_t100p>=65)||(_t100p>=65&&_t50p>=50&&_t50p<65)||(_t50p>=65&&_t100.length<10);
+    const _sC1=_b24<=-2||_b1<=-1.5,_sC2=!_c2,_sC4=_t50p<35;
+    const _ls=[_c1,_c2,_c4].filter(Boolean).length;
+    const _ss=[_sC1,_sC2,_sC4].filter(Boolean).length;
+    semScore={long:_ls,short:_ss};
+    semMode=_ls>=2?'long':_ss>=2?'short':'wait';
+  }
+  if(semMode==='short'&&semScore.short>=3&&isLong)
     return{action:'🔴 Cerrar urgente',color:'#ff3d57',bg:'rgba(255,61,87,.15)',border:'rgba(255,61,87,.5)',
-      reason:'Semáforo SHORT 3/3 con tu Long abierto. Mercado en risk-off total'+tkCtx};
-  if(semMode==='long'&&semScore&&semScore.long>=3&&!isLong)
+      reason:'Semáforo SHORT 3/3 — mercado en risk-off total con tu Long'+tkCtx+tkMov};
+  if(semMode==='long'&&semScore.long>=3&&!isLong)
     return{action:'🔴 Cerrar urgente',color:'#ff3d57',bg:'rgba(255,61,87,.15)',border:'rgba(255,61,87,.5)',
-      reason:'Semáforo LONG 3/3 con tu Short abierto. Las alts están subiendo fuerte'+tkCtx};
+      reason:'Semáforo LONG 3/3 — alts subiendo fuerte con tu Short'+tkCtx+tkMov};
 
-  // 🔴 CERRAR — basado en precio y estadísticas
+  // ── DECISION basada en precio del ticker + estadísticas ──
+
+  // 🔴 CERRAR
   if(atSL)
     return{action:'🔴 Cerrar',color:'#ff3d57',bg:'rgba(255,61,87,.1)',border:'rgba(255,61,87,.35)',
-      reason:'Cerca de tu SL histórico para '+t.estrategia+' ('+(-effectiveSL).toFixed(1)+'%)'+tkCtx};
+      reason:`Cerca de tu SL histórico (${(-effectiveSL).toFixed(1)}%) para ${t.estrategia}`+tkCtx+tkMov};
   if(overtime&&inLoss)
     return{action:'🔴 Cerrar',color:'#ff3d57',bg:'rgba(255,61,87,.1)',border:'rgba(255,61,87,.35)',
-      reason:'Más tiempo del promedio ('+(avgDurMins<60?Math.round(avgDurMins)+'m':Math.floor(avgDurMins/60)+'h')+') y en pérdida'+tkCtx};
-  if(marketDown&&isLong&&pct<2)
+      reason:`Overtime (${avgDurMins<60?Math.round(avgDurMins)+'m':Math.floor(avgDurMins/60)+'h'} promedio) y en pérdida`+tkCtx+tkMov};
+  if(isLong&&momentum==='strong_down'&&inLoss)
     return{action:'🔴 Cerrar',color:'#ff3d57',bg:'rgba(255,61,87,.1)',border:'rgba(255,61,87,.35)',
-      reason:'BTC -'+(Math.abs(btc24)).toFixed(1)+'% en 24h y tu Long no avanza'+tkCtx};
-  if(!isLong&&marketUp&&pct<2)
+      reason:`${t.ticker} cayendo fuerte (1h${c1h.toFixed(1)}% · 4h${c4h.toFixed(1)}%) y tu Long en pérdida`+tkCtx};
+  if(!isLong&&momentum==='strong_up'&&inLoss)
     return{action:'🔴 Cerrar',color:'#ff3d57',bg:'rgba(255,61,87,.1)',border:'rgba(255,61,87,.35)',
-      reason:'BTC +'+(btc24).toFixed(1)+'% en 24h con Short abierto que no avanza'+tkCtx};
+      reason:`${t.ticker} subiendo fuerte (1h+${c1h.toFixed(1)}% · 4h+${c4h.toFixed(1)}%) y tu Short en pérdida`+tkCtx};
 
-  // 🟡 PROTEGER — basado en TP histórico, tiempo y precio
-  if(atTP&&inProfit)
+  // 🟡 PROTEGER / ESPERAR
+  if(atTP&&isLong&&(trending1h==='down'||trending4h==='down'))
     return{action:'🟡 Proteger BE',color:'#ffd100',bg:'rgba(255,209,0,.08)',border:'rgba(255,209,0,.4)',
-      reason:'Llegaste al '+(pct/effectiveTP*100).toFixed(0)+'% de tu TP histórico ('+effectiveTP.toFixed(1)+'%). '+salidaHint+tkCtx};
-  if(inProfit&&marketDown)
+      reason:`TP histórico alcanzado (${effectiveTP.toFixed(1)}%) pero ${t.ticker} perdiendo momentum.${salidaHint}`+tkCtx+tkMov};
+  if(inProfit&&isLong&&momentum==='strong_down')
     return{action:'🟡 Proteger BE',color:'#ffd100',bg:'rgba(255,209,0,.08)',border:'rgba(255,209,0,.4)',
-      reason:'En ganancia con BTC perdiendo fuerza. Mové SL a entrada'+tkCtx};
+      reason:`${t.ticker} girando a la baja (1h${c1h.toFixed(1)}%) con ganancia. Mové SL a entrada`+tkCtx};
+  if(inProfit&&!isLong&&momentum==='strong_up')
+    return{action:'🟡 Proteger BE',color:'#ffd100',bg:'rgba(255,209,0,.08)',border:'rgba(255,209,0,.4)',
+      reason:`${t.ticker} rebotando (1h+${c1h.toFixed(1)}%) con tu Short en ganancia. Asegurá`+tkCtx};
   if(inProfit&&overtime)
     return{action:'🟡 Cierre parcial',color:'#ffd100',bg:'rgba(255,209,0,.08)',border:'rgba(255,209,0,.4)',
-      reason:'Buen resultado pero más tiempo del promedio. '+salidaHint+tkCtx};
-  if(btcLateral&&hasMktData&&inLoss&&isLong)
+      reason:`Buen resultado + más tiempo del promedio.${salidaHint}`+tkCtx+tkMov};
+  if(inProfit&&atTP)
+    return{action:'🟡 Proteger BE',color:'#ffd100',bg:'rgba(255,209,0,.08)',border:'rgba(255,209,0,.4)',
+      reason:`En tu TP histórico (${effectiveTP.toFixed(1)}%). Mové SL a entrada.${salidaHint}`+tkCtx+tkMov};
+  if(!has&&inLoss)
     return{action:'🟡 Esperar',color:'#ffd100',bg:'rgba(255,209,0,.08)',border:'rgba(255,209,0,.4)',
-      reason:'BTC lateral. Sin señal clara — esperá antes de cortar'+tkCtx};
+      reason:'Actualizá precios para ver el momentum del ticker'+tkCtx};
 
-  // 🟢 MANTENER — basado en precio, TP y estadísticas del ticker
-  if(atTP&&marketUp)
+  // 🟢 MANTENER / DEJAR CORRER
+  if(atTP&&isLong&&momentum==='strong_up')
     return{action:'🟢 Dejar correr',color:'#00c853',bg:'rgba(0,200,83,.08)',border:'rgba(0,200,83,.35)',
-      reason:'TP histórico ('+effectiveTP.toFixed(1)+'%) con mercado a favor. Podés estirar. '+salidaHint+tkCtx};
-  if(inProfit&&isLong&&marketUp)
+      reason:`TP histórico (${effectiveTP.toFixed(1)}%) + ${t.ticker} sigue subiendo fuerte.${salidaHint}`+tkCtx+tkMov};
+  if(atTP&&!isLong&&momentum==='strong_down')
+    return{action:'🟢 Dejar correr',color:'#00c853',bg:'rgba(0,200,83,.08)',border:'rgba(0,200,83,.35)',
+      reason:`TP histórico (${effectiveTP.toFixed(1)}%) + ${t.ticker} sigue bajando.${salidaHint}`+tkCtx+tkMov};
+  if(isLong&&momentum==='strong_up'&&inProfit)
     return{action:'🟢 Mantener',color:'#00c853',bg:'rgba(0,200,83,.08)',border:'rgba(0,200,83,.35)',
-      reason:'Long en ganancia con mercado alcista. '+tkCtx};
-  if(inProfit&&!isLong&&marketDown)
+      reason:`${t.ticker} subiendo fuerte (1h+${c1h.toFixed(1)}% · 4h+${c4h.toFixed(1)}%). Long funcionando`+tkCtx};
+  if(!isLong&&momentum==='strong_down'&&inProfit)
     return{action:'🟢 Mantener',color:'#00c853',bg:'rgba(0,200,83,.08)',border:'rgba(0,200,83,.35)',
-      reason:'Short en ganancia con mercado bajando. '+tkCtx};
-  if(inProfit&&tkPosWR!==null&&tkPosWR>=0.6)
+      reason:`${t.ticker} cayendo fuerte (1h${c1h.toFixed(1)}%). Short bien posicionado`+tkCtx};
+  if(isLong&&(momentum==='weak_up'||momentum==='strong_up')&&!inLoss)
     return{action:'🟢 Mantener',color:'#00c853',bg:'rgba(0,200,83,.08)',border:'rgba(0,200,83,.35)',
-      reason:t.ticker+' '+t.pos+' tiene WR '+(tkPosWR*100).toFixed(0)+'% en tu historial. Dejalo correr'+tkCtx};
+      reason:`${t.ticker} con momentum positivo (1h+${c1h!==null?c1h.toFixed(1):'?'}%).`+(tkPosWR!==null?` WR ${(tkPosWR*100).toFixed(0)}% en ${t.ticker} ${t.pos}.`:'')+tkCtx};
+  if(!isLong&&(momentum==='weak_down'||momentum==='strong_down')&&!inLoss)
+    return{action:'🟢 Mantener',color:'#00c853',bg:'rgba(0,200,83,.08)',border:'rgba(0,200,83,.35)',
+      reason:`${t.ticker} con momentum negativo (1h${c1h!==null?c1h.toFixed(1):'?'}%). Short a favor`+tkCtx};
 
   // Default
   return{action:'⚪ Sin señal',color:'var(--text2)',bg:'var(--surface2)',border:'var(--border)',
-    reason:(!semScore?'Actualizá precios para análisis completo':'Sin señal clara aún')+tkCtx};
+    reason:(has?'Sin señal clara por ahora':'Actualizá precios para análisis del ticker')+tkCtx+tkMov};
 }
+
 // what-if replaced by renderKpiProjection
 
 // ── PARTIAL CLOSE MODAL ──
