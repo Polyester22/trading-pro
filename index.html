@@ -2285,9 +2285,11 @@ async function updateDotSilent(){
     const c2=(ethLeads1h2&&ethLeads242)||(ethLeads1h2&&domFav2)||(ethLeads242&&domFav2);
     const c3=c2;
     const alts=md.filter(c=>c.id!=='bitcoin'&&c.id!=='ethereum'&&c.price_change_percentage_1h_in_currency!=null);
-    const altsPct2=alts.length?Math.round(alts.filter(c=>(c.price_change_percentage_24h||0)>0).length/alts.length*100):0;
-    const altsPct2h=alts.length?Math.round(alts.filter(c=>c.price_change_percentage_1h_in_currency>0).length/alts.length*100):0;
-    const c4=(altsPct2>=65)||(altsPct2>=55&&altsPct2h>=55);
+    const top50b=alts.slice(0,48),top100b=alts;
+    const t50p=top50b.length?Math.round(top50b.filter(c=>(c.price_change_percentage_24h||0)>0).length/top50b.length*100):0;
+    const t100p=top100b.length?Math.round(top100b.filter(c=>(c.price_change_percentage_24h||0)>0).length/top100b.length*100):0;
+    const altsPct2=t50p;
+    const c4=(t50p>=65&&t100p>=65)||(t100p>=65&&t50p>=50&&t50p<65);
     const score=[c1,c2,c4].filter(Boolean).length;
     const sC1=btc24<-2||btc1h<-1.5,sC2=!c2,sC4=altsPct2<35;
     const shortScore=[sC1,sC2,sC4].filter(Boolean).length;
@@ -2785,7 +2787,7 @@ async function checkMarketCycle(){
   if(btn){btn.textContent='⟳ Analizando...';btn.disabled=true;}_cgCacheTime=0;// force fresh fetch
   try{
     // Fetch in parallel: prices + global (dominance) + top coins (breadth)
-    const {pd:priceData, gd:globalData, md:marketsData}=await fetchCoinGeckoData();
+    const {pd:priceData, gd:globalData, md:marketsData, md2:marketsData2}=await fetchCoinGeckoData();
 
     const btc=priceData.bitcoin, eth=priceData.ethereum;
     if(!btc||!eth)throw new Error('Sin datos de precio');
@@ -2842,18 +2844,23 @@ async function checkMarketCycle(){
       }catch(e){/* ignore extra fetch errors */}
     }
 
-    // Amplitude: use 24h (stable) as primary. 4h not available in CoinGecko free API.
+    // ── AMPLITUD: Top50 (filtro) + Top100 (anticipación) ────────
+    const alts100=(marketsData2||[]).filter(c=>c.id!=='bitcoin'&&c.id!=='ethereum'&&c.price_change_percentage_24h!==null);
     const altsUp24=alts.filter(c=>(c.price_change_percentage_24h||0)>0).length;
-    const altsUp1h=alts.filter(c=>c.price_change_percentage_1h_in_currency>0).length;
+    const altsUp100=alts100.filter(c=>(c.price_change_percentage_24h||0)>0).length;
     const altsPct24=alts.length?Math.round(altsUp24/alts.length*100):0;
-    const altsPct1h=alts.length?Math.round(altsUp1h/alts.length*100):0;
-    const altsPct=altsPct24; // primary: 24h
-    // c4: 24h ≥65% OR (24h ≥55% AND 1h ≥55%) — requires confirmation in both timeframes
-    const c4=(altsPct24>=65)||(altsPct24>=55&&altsPct1h>=55);
+    const altsPct100=alts100.length?Math.round(altsUp100/alts100.length*100):0;
+    const altsPct=altsPct24;
+    // Señal fuerte: ambos ≥65% | Señal temprana: solo top100 ≥65%
+    const bothGreen=altsPct24>=65&&altsPct100>=65;
+    const earlySignal=altsPct100>=65&&altsPct24<65&&altsPct24>=50;
+    const c4=bothGreen||(altsPct24>=65); // top50 ≥65% es suficiente para verde
     const userAltsInPool=alts.filter(c=>userTickers.includes(c.symbol.toUpperCase()));
     const userAltsUp=userAltsInPool.filter(c=>(c.price_change_percentage_24h||0)>0).length;
-    const userAltsNote=userAltsInPool.length?' · Tus alts: '+userAltsUp+'/'+userAltsInPool.length+' verdes (24h)':'';
-    const c4detail=altsUp24+' de '+alts.length+' alts en verde 24h ('+altsPct24+'%) · 1h: '+altsPct1h+'%'+userAltsNote+(c4?' 🟢':altsPct24>=50?' 🟡':' 🔴');
+    const userAltsNote=userAltsInPool.length?' · Tus alts: '+userAltsUp+'/'+userAltsInPool.length+' verdes':'';
+    const amplitudSignal=bothGreen?'🟢 Fuerte':earlySignal?'🟡 Temprana':c4?'🟢 Top50 ok':'🔴';
+    const c4detail='Top50: '+altsPct24+'% verde'+(alts100.length?' · Top100: '+altsPct100+'% verde':'')
+      +userAltsNote+' · '+amplitudSignal;
 
     // ── TOP MOVERS ───────────────────────────────────────────
     const topMovers=alts
@@ -2871,7 +2878,7 @@ async function checkMarketCycle(){
     // Short score: opposite signals
     const shortC1=btc24<-2||btc1h<-1.5;       // BTC cayendo
     const shortC2=!c2;                          // ETH NO lidera BTC
-    const shortC4=altsPct24<35;                 // Alts mayormente rojas en 24h
+    const shortC4=top50Pct<35&&top100Pct<40;   // Ambos tops mayormente rojos
     const shortScore=[shortC1,shortC2,shortC4].filter(Boolean).length;
 
     let semaphore, semColor, semBg, action, actionColor, mode;
@@ -2889,6 +2896,8 @@ async function checkMarketCycle(){
     // Special override rules
     // ❌ No shortear: BTC lateral + alts verdes
     const noShortOverride=Math.abs(btc1h)<1.5&&altsPct>=50;
+    // Early signal badge if top100 leads top50
+    const earlySignalNote=earlySignal?'<div style="margin-top:6px;padding:6px 8px;background:rgba(255,209,0,.15);border-radius:6px;font-size:11px;font-weight:700;color:#ffd100">⚡ Señal temprana: Top100 liderando. Top50 aún no confirma — esperá.</div>':'';
     // ❌ No longear: BTC cayendo fuerte
     const noLongOverride=btc24<-5||btc1h<-3;
 
@@ -2925,7 +2934,7 @@ async function checkMarketCycle(){
       '<div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;margin-top:2px">3 condiciones</div>'+
       condRow(c1,'BTC lateral',c1detail)+
       condRow(c2,'ETH lidera vs BTC',c2detail)+
-      condRow(c4,'Amplitud alts ≥65%',c4detail);
+      condRow(c4,'Amplitud alts (Top50+100)',c4detail);
 
     // Execution guide
     let execHTML='';
@@ -2940,6 +2949,7 @@ async function checkMarketCycle(){
             '• 💡 Señales extra: velas de impulso + consolidación, volumen acompañando, estructura HH/HL'+
           '</div>'+
           (noLongOverride?'<div style="margin-top:6px;padding:6px 8px;background:rgba(255,61,87,.15);border-radius:6px;font-size:11px;font-weight:800;color:#ff3d57">⚠️ Atención: BTC cayendo fuerte — revisá antes de entrar</div>':'')+
+          earlySignalNote+
         '</div>';
     } else if(mode==='short'){
       execHTML=
