@@ -776,7 +776,13 @@ function getCapital(){
   // Add P&L already realized from partial closes of open trades
   const partialPnl=D.trades
     .filter(t=>t.open&&t.partialCloses&&t.partialCloses.length)
-    .reduce((sum,t)=>sum+t.partialCloses.reduce((s,c)=>s+(c.pnl||0),0),0);
+    .reduce((sum,t)=>{
+      const margenOrig=t.margenOriginal||t.margen;
+      return sum+t.partialCloses.reduce((s,c)=>{
+        const pnl=c.pnl!==undefined?c.pnl:(margenOrig*(c.pctClose/100)*(c.pct||0)/100);
+        return s+pnl;
+      },0);
+    },0);
   const computed=deps-wths+pnl+partialPnl;
   return computed>0?computed:(parseFloat(localStorage.getItem('tpro_capital'))||0);
 }
@@ -785,7 +791,14 @@ function getCapital(){
 function getPartialPnl(){
   return D.trades
     .filter(t=>t.open&&t.partialCloses&&t.partialCloses.length)
-    .reduce((sum,t)=>sum+t.partialCloses.reduce((s,c)=>s+(c.pnl||0),0),0);
+    .reduce((sum,t)=>{
+      const margenOrig=t.margenOriginal||t.margen;
+      return sum+t.partialCloses.reduce((s,c)=>{
+        // Use stored pnl if available, else calculate from pct + pctClose + margenOriginal
+        const pnl=c.pnl!==undefined?c.pnl:(margenOrig*(c.pctClose/100)*(c.pct||0)/100);
+        return s+pnl;
+      },0);
+    },0);
 }
 function getRiskPct(){
   // Read from capital tracker selector (source of truth), fallback to recs selector
