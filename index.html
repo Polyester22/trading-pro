@@ -767,15 +767,25 @@ function switchTab(tab){
 
 // ══ CAPITAL — single source of truth (from Capital Tracker) ══
 function getCapital(){
-  // Compute from tracker: deposits - withdrawals + PnL
+  // Compute from tracker: deposits - withdrawals + PnL cerrados + PnL parciales realizados
   const moves=getCapitalMovements();
   const deps=moves.filter(m=>m.type==='deposit').reduce((a,m)=>a+m.amount,0);
   const wths=moves.filter(m=>m.type==='withdrawal').reduce((a,m)=>a+m.amount,0);
   const s=computeStats(D.trades.filter(t=>!t.open));
   const pnl=s?s.totalPnl:0;
-  const computed=deps-wths+pnl;
-  // Fallback to manual input if no movements registered
+  // Add P&L already realized from partial closes of open trades
+  const partialPnl=D.trades
+    .filter(t=>t.open&&t.partialCloses&&t.partialCloses.length)
+    .reduce((sum,t)=>sum+t.partialCloses.reduce((s,c)=>s+(c.pnl||0),0),0);
+  const computed=deps-wths+pnl+partialPnl;
   return computed>0?computed:(parseFloat(localStorage.getItem('tpro_capital'))||0);
+}
+
+// Get realized partial PnL separately (for display)
+function getPartialPnl(){
+  return D.trades
+    .filter(t=>t.open&&t.partialCloses&&t.partialCloses.length)
+    .reduce((sum,t)=>sum+t.partialCloses.reduce((s,c)=>s+(c.pnl||0),0),0);
 }
 function getRiskPct(){
   // Read from capital tracker selector (source of truth), fallback to recs selector
@@ -847,21 +857,23 @@ function renderCapitalTracker(){
   const moves=getCapitalMovements();
   const s=computeStats(D.trades.filter(t=>!t.open));
   const totalPnl=s?s.totalPnl:0;
+  const partialPnl=getPartialPnl();
   updateCapitalDisplay();
   calcSizing();
   const totalDeposits=moves.filter(m=>m.type==='deposit').reduce((a,m)=>a+m.amount,0);
   const totalWithdrawals=moves.filter(m=>m.type==='withdrawal').reduce((a,m)=>a+m.amount,0);
-  const netCapital=totalDeposits-totalWithdrawals+totalPnl;
-  const roi=totalDeposits>0?(totalPnl/totalDeposits*100):0;
+  const netCapital=totalDeposits-totalWithdrawals+totalPnl+partialPnl;
+  const roi=totalDeposits>0?((totalPnl+partialPnl)/totalDeposits*100):0;
 
   const sumEl=document.getElementById('ct-summary');
   if(sumEl){
     sumEl.innerHTML='<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px">'+
       '<div style="background:var(--surface2);border-radius:8px;padding:8px;text-align:center"><div style="font-size:9px;color:var(--text2);margin-bottom:3px">DEPÓSITOS</div><div style="font-size:15px;font-weight:900;color:#00c853">+$'+totalDeposits.toFixed(0)+'</div></div>'+
       '<div style="background:var(--surface2);border-radius:8px;padding:8px;text-align:center"><div style="font-size:9px;color:var(--text2);margin-bottom:3px">RETIROS</div><div style="font-size:15px;font-weight:900;color:#ff3d57">-$'+totalWithdrawals.toFixed(0)+'</div></div>'+
-      '<div style="background:var(--surface2);border-radius:8px;padding:8px;text-align:center"><div style="font-size:9px;color:var(--text2);margin-bottom:3px">P&L TRADING</div><div style="font-size:15px;font-weight:900;color:'+(totalPnl>=0?'#00c853':'#ff3d57')+'">'+(totalPnl>=0?'+':'')+' $'+totalPnl.toFixed(2)+'</div></div>'+
+      '<div style="background:var(--surface2);border-radius:8px;padding:8px;text-align:center"><div style="font-size:9px;color:var(--text2);margin-bottom:3px">P&L CERRADOS</div><div style="font-size:15px;font-weight:900;color:'+(totalPnl>=0?'#00c853':'#ff3d57')+'">'+(totalPnl>=0?'+':'')+' $'+totalPnl.toFixed(2)+'</div></div>'+
       '<div style="background:var(--surface2);border-radius:8px;padding:8px;text-align:center"><div style="font-size:9px;color:var(--text2);margin-bottom:3px">CAPITAL NETO</div><div style="font-size:15px;font-weight:900;color:#ff6b00">$'+netCapital.toFixed(2)+'</div></div>'+
     '</div>'+
+    (partialPnl!==0?'<div style="text-align:center;font-size:11px;font-weight:700;color:'+(partialPnl>=0?'#00c853':'#ff3d57')+'margin-bottom:6px">+ P&L parciales realizados: '+(partialPnl>=0?'+':'')+' $'+partialPnl.toFixed(2)+'</div>':'')+
     (totalDeposits>0?'<div style="text-align:center;font-size:12px;font-weight:700;color:'+(roi>=0?'#00c853':'#ff3d57')+'">ROI: '+(roi>=0?'+':'')+roi.toFixed(1)+'% sobre capital depositado</div>':'');
   }
   const listEl=document.getElementById('ct-movements');
@@ -3110,29 +3122,37 @@ function saveMCP(){
   const closedHora=mcpFechaVal?(mcpFechaVal+'T'+(mcpHoraVal||'12:00')):`${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
 
   if(mcpFullClose||pctClose===100){
-    // Full close — update existing trade
+    // Full close
+    const remainingMargen=t.margen; // save BEFORE restoring original
     t.open=false;
     t.actual=precio||t.actual;
-    t.resultado=pct||t.resultado;
     if(salida)t.salida=salida;
     if(obs)t.obs=obs;
     if(mcpPatron)t.patron=mcpPatron;
     t.closedHora=closedHora;
     t.fecha=closedHora.slice(0,10);
-    // Restore original margin for historial display
-    if(t.margenOriginal)t.margen=t.margenOriginal;
-    // mark p10 if reached
     if(pct>=10)t.p10=true;
-    // merge partial closes into weighted avg if any exist
+
     if(t.partialCloses&&t.partialCloses.length){
-      t.partialCloses.push({pct,pctClose,pnl:t.margen*(pctClose/100)*pct/100,precio,closedHora});
-      const allCloses=t.partialCloses;
-      const totalPctClosed=allCloses.reduce((s,c)=>s+c.pctClose,0);
-      const avgPct=totalPctClosed>0?allCloses.reduce((s,c)=>s+c.pct*(c.pctClose/100),0)/(totalPctClosed/100):pct;
-      t.resultado=avgPct;
-      // P&L total = suma de todos los cierres sobre margen original
-      const totalPnl=allCloses.reduce((s,c)=>s+c.pnl,0);
-      t.obs=`${allCloses.length} cierres · P&L total: ${totalPnl>=0?'+':''}$${totalPnl.toFixed(2)} · Último: ${obs||salida||'—'}`;
+      // Add final close as a partial with the REMAINING margin
+      const finalPnl=remainingMargen*pct/100;
+      t.partialCloses.push({pct,pctClose:100,pnl:finalPnl,precio,closedHora});
+
+      // Restore original margin for display
+      const margenOrig=t.margenOriginal||remainingMargen;
+      t.margen=margenOrig;
+
+      // Weighted result = totalPnl / margenOriginal * 100
+      const totalPnl=t.partialCloses.reduce((s,c)=>s+c.pnl,0);
+      t.resultado=totalPnl/margenOrig*100;
+
+      const n=t.partialCloses.length;
+      const obsUser=obs||salida||'—';
+      t.obs=`${n} cierres · R% ponderado: ${t.resultado>=0?'+':''}${t.resultado.toFixed(1)}% · P&L total: ${totalPnl>=0?'+':''}$${totalPnl.toFixed(2)} · Última salida: ${obsUser}`;
+    } else {
+      // No partials — simple close
+      t.resultado=pct||t.resultado;
+      if(t.margenOriginal)t.margen=t.margenOriginal;
     }
   } else {
     // Partial close — record it, keep trade open with remaining margin
