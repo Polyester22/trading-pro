@@ -1519,7 +1519,100 @@ function renderRiskExposure(openTrades){
     '</div>';
 }
 
-// ══ TICKER PRICE CHANGES (Binance 1h/4h/24h) ══
+// ══ COMPOSITE EV — weighted across all available stats dimensions ══
+function getCompositeEV(t){
+  const closed=D.trades.filter(x=>!x.open&&x.resultado!==undefined);
+  if(!closed.length)return null;
+
+  function evOf(group){
+    if(!group||group.length<2)return null;
+    const ev=group.reduce((s,x)=>s+x.resultado,0)/group.length;
+    return{ev,n:group.length};
+  }
+
+  const dims=[];
+
+  // 1. Ticker + posición (más específico, mayor peso)
+  const tkPos=closed.filter(x=>x.ticker===t.ticker&&x.pos===t.pos);
+  const tkAny=closed.filter(x=>x.ticker===t.ticker);
+  const d1=evOf(tkPos)||evOf(tkAny);
+  if(d1)dims.push({...d1,w:3,label:'ticker'});
+
+  // 2. Estrategia + posición
+  const stratPos=closed.filter(x=>x.estrategia===t.estrategia&&x.pos===t.pos);
+  const d2=evOf(stratPos);
+  if(d2)dims.push({...d2,w:2,label:'estrategia'});
+
+  // 3. Temporalidad
+  const tempGroup=closed.filter(x=>x.temp===t.temp&&x.pos===t.pos);
+  const d3=evOf(tempGroup)||evOf(closed.filter(x=>x.temp===t.temp));
+  if(d3)dims.push({...d3,w:1.5,label:'temporalidad'});
+
+  // 4. Timing de entrada
+  if(t.timing){
+    const timingGroup=closed.filter(x=>x.timing===t.timing&&x.pos===t.pos);
+    const d4=evOf(timingGroup)||evOf(closed.filter(x=>x.timing===t.timing));
+    if(d4)dims.push({...d4,w:1,label:'timing'});
+  }
+
+  // 5. Sesión horaria
+  if(t.fechahora){
+    const h=new Date(t.fechahora).getHours();
+    const sessKey=h>=21||h<5?'asia':h<10?'europa':h<14?'overlap':h<17?'ny':'tarde';
+    const sessGroup=closed.filter(x=>{
+      if(!x.fechahora)return false;
+      const xh=new Date(x.fechahora).getHours();
+      const xk=xh>=21||xh<5?'asia':xh<10?'europa':xh<14?'overlap':xh<17?'ny':'tarde';
+      return xk===sessKey&&x.pos===t.pos;
+    });
+    const d5=evOf(sessGroup)||evOf(closed.filter(x=>{
+      if(!x.fechahora)return false;
+      const xh=new Date(x.fechahora).getHours();
+      const xk=xh>=21||xh<5?'asia':xh<10?'europa':xh<14?'overlap':xh<17?'ny':'tarde';
+      return xk===sessKey;
+    }));
+    if(d5)dims.push({...d5,w:1,label:'sesión'});
+  }
+
+  // 6. Día de la semana
+  if(t.fecha){
+    const dow=new Date(t.fecha+'T12:00:00').getDay(); // 0=Sun..6=Sat
+    const dowGroup=closed.filter(x=>x.fecha&&new Date(x.fecha+'T12:00:00').getDay()===dow&&x.pos===t.pos);
+    const d6=evOf(dowGroup)||evOf(closed.filter(x=>x.fecha&&new Date(x.fecha+'T12:00:00').getDay()===dow));
+    if(d6)dims.push({...d6,w:1,label:'día'});
+  }
+
+  // 7. Apalancamiento bucket
+  if(t.lev){
+    const levKey=t.lev<=3?'1-3x':t.lev<=5?'4-5x':t.lev<=10?'6-10x':'10x+';
+    const levGroup=closed.filter(x=>{
+      const lk=(x.lev||5)<=3?'1-3x':(x.lev||5)<=5?'4-5x':(x.lev||5)<=10?'6-10x':'10x+';
+      return lk===levKey&&x.pos===t.pos;
+    });
+    const d7=evOf(levGroup);
+    if(d7)dims.push({...d7,w:1,label:'apalancamiento'});
+  }
+
+  // 8. Estrategia × Temporalidad (cross — más específico)
+  if(t.estrategia&&t.temp){
+    const crossGroup=closed.filter(x=>x.estrategia===t.estrategia&&x.temp===t.temp&&x.pos===t.pos);
+    const d8=evOf(crossGroup);
+    if(d8)dims.push({...d8,w:2.5,label:'estrat×temp'}); // high weight: very specific combo
+  }
+
+  // 9. Long/Short general (fallback, menor peso)
+  const posGroup=closed.filter(x=>x.pos===t.pos);
+  const d9=evOf(posGroup);
+  if(d9)dims.push({...d9,w:0.5,label:'posición'});
+
+  if(!dims.length)return null;
+  const totalW=dims.reduce((s,d)=>s+d.w*Math.sqrt(d.n),0);
+  const weightedEV=dims.reduce((s,d)=>s+d.ev*d.w*Math.sqrt(d.n),0)/totalW;
+  const totalN=dims.reduce((s,d)=>s+d.n,0);
+  const usedDims=dims.map(d=>d.label).join('+');
+
+  return{ev:weightedEV,n:totalN,dims:usedDims,sources:dims.length};
+}
 async function fetchTickerChanges(tickers){
   const now=Date.now();
   const toFetch=tickers.filter(tk=>{
@@ -1620,7 +1713,7 @@ function renderOpenTrades(){
         </div>
       </div>
       ${t.obs?`<div style="margin-top:8px;font-size:11px;color:var(--text2);font-style:italic;padding:0 2px">${t.obs}</div>`:''}
-      ${(()=>{const rec=getTradeRecommendation(t,livePct,totalMins,tickerChangeCache[t.ticker]||null);return`<div style="display:flex;align-items:center;gap:8px;background:${rec.bg};border:1px solid ${rec.border};border-radius:8px;padding:8px 10px;margin-top:8px"><div style="flex:1"><div style="font-size:12px;font-weight:900;color:${rec.color}">${rec.action}</div><div style="font-size:10px;color:var(--text2);margin-top:1px">${rec.reason}</div></div></div>`;})()}
+      ${(()=>{const rec=getTradeRecommendation(t,livePct,totalMins,tickerChangeCache[t.ticker]||null);const cev=getCompositeEV(t);return`<div style="display:flex;align-items:center;gap:8px;background:${rec.bg};border:1px solid ${rec.border};border-radius:8px;padding:8px 10px;margin-top:8px"><div style="flex:1"><div style="font-size:12px;font-weight:900;color:${rec.color}">${rec.action}</div><div style="font-size:10px;color:var(--text2);margin-top:1px">${rec.reason}</div></div>${cev?`<div style="text-align:right;flex-shrink:0"><div style="font-size:9px;color:var(--text2);font-weight:700">EV HIST</div><div style="font-size:13px;font-weight:900;color:${cev.ev>=0?'#00c853':'#ff3d57'}">${cev.ev>=0?'+':''}${cev.ev.toFixed(1)}%</div><div style="font-size:8px;color:var(--text2)">${cev.sources} fuentes</div></div>`:''}</div>`;})()}
       <div style="display:flex;gap:6px;margin-top:10px" onclick="event.stopPropagation()">
         <button class="btn btn-dark btn-sm" style="flex:1;font-size:12px" onclick="openMCP('${t.id}',false)">📉 Cierre parcial</button>
         <button class="btn btn-orange btn-sm" style="flex:1;font-size:12px" onclick="openMCP('${t.id}',true)">✅ Cerrar trade</button>
