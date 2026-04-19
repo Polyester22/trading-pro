@@ -1647,6 +1647,73 @@ async function fetchTickerChanges(tickers){
   }));
 }
 
+// ── Semáforo específico para el ticker del trade en curso ──────────────
+function tickerSemaphoreHTML(t, tc){
+  if(!tc) return '';
+  const isLong = t.pos==='Long';
+  const c1h = tc.change1h, c4h = tc.change4h, c24 = tc.change24h;
+  if(c1h===null&&c4h===null&&c24===null) return '';
+
+  // Para cada TF: positivo = precio sube. Para Long → sube = 🟢. Para Short → baja = 🟢
+  function tfSignal(val, th1, th2){
+    // th1 = umbral pequeño, th2 = umbral fuerte
+    if(val===null) return 'na';
+    if(val > th2) return 'strong_up';
+    if(val > th1) return 'up';
+    if(val < -th2) return 'strong_down';
+    if(val < -th1) return 'down';
+    return 'flat';
+  }
+
+  const s1h  = tfSignal(c1h,  0.5, 2);
+  const s4h  = tfSignal(c4h,  1.0, 3);
+  const s24  = tfSignal(c24,  2.0, 5);
+
+  // Alineado con posición: Long quiere UP, Short quiere DOWN
+  function aligned(sig){
+    if(sig==='na' || sig==='flat') return 'neutral';
+    const up = sig==='up'||sig==='strong_up';
+    if(isLong) return up?'yes':'no';
+    return up?'no':'yes';
+  }
+
+  const a1h = aligned(s1h), a4h = aligned(s4h), a24 = aligned(s24);
+
+  function badgeProps(al, val, label){
+    const col = al==='yes'?'#00c853': al==='no'?'#ff3d57':'#9999b8';
+    const bg  = al==='yes'?'rgba(0,200,83,.15)': al==='no'?'rgba(255,61,87,.12)':'rgba(153,153,184,.1)';
+    const sign= val!==null?(val>=0?'+':'')+val.toFixed(1)+'%':'—';
+    return {col, bg, sign, label};
+  }
+
+  const b1h = badgeProps(a1h, c1h, '1H');
+  const b4h = badgeProps(a4h, c4h, '4H');
+  const b24 = badgeProps(a24, c24, '24H');
+
+  // Veredicto global: cuántos TF coinciden con la posición
+  const yesCount = [a1h,a4h,a24].filter(x=>x==='yes').length;
+  const noCount  = [a1h,a4h,a24].filter(x=>x==='no').length;
+
+  let verdict, vCol, vBg;
+  if(yesCount>=2){
+    verdict=isLong?'📈 Con el LONG':'📉 Con el SHORT'; vCol='#00c853'; vBg='rgba(0,200,83,.12)';
+  } else if(noCount>=2){
+    verdict=isLong?'⚠️ Contra el LONG':'⚠️ Contra el SHORT'; vCol='#ff3d57'; vBg='rgba(255,61,87,.1)';
+  } else {
+    verdict='↔ Mixto'; vCol='#ffd100'; vBg='rgba(255,209,0,.1)';
+  }
+
+  function badge(b){
+    return `<span style="background:${b.bg};color:${b.col};border-radius:5px;padding:3px 7px;font-size:10px;font-weight:800;white-space:nowrap">${b.label} ${b.sign}</span>`;
+  }
+
+  return `<div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-top:7px;padding:6px 8px;background:var(--surface2);border-radius:8px" onclick="event.stopPropagation()">
+    <span style="font-size:9px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;flex-shrink:0">${t.ticker}</span>
+    ${badge(b1h)}${badge(b4h)}${badge(b24)}
+    <span style="flex:1;text-align:right;font-size:10px;font-weight:800;color:${vCol};background:${vBg};border-radius:5px;padding:3px 7px">${verdict}</span>
+  </div>`;
+}
+
 function renderOpenTrades(){
   const open=D.trades.filter(t=>t.open).sort((a,b)=>b.fecha.localeCompare(a.fecha));
   // Fetch ticker-specific price changes in background
@@ -1723,6 +1790,7 @@ function renderOpenTrades(){
         </div>
       </div>
       ${t.obs?`<div style="margin-top:8px;font-size:11px;color:var(--text2);font-style:italic;padding:0 2px">${t.obs}</div>`:''}
+      ${tickerSemaphoreHTML(t, tickerChangeCache[t.ticker]||null)}
       ${(()=>{const rec=getTradeRecommendation(t,livePct,totalMins,tickerChangeCache[t.ticker]||null);const cev=getCompositeEV(t);return`<div style="display:flex;align-items:center;gap:8px;background:${rec.bg};border:1px solid ${rec.border};border-radius:8px;padding:8px 10px;margin-top:8px"><div style="flex:1"><div style="font-size:12px;font-weight:900;color:${rec.color}">${rec.action}</div><div style="font-size:10px;color:var(--text2);margin-top:1px">${rec.reason}</div></div>${cev?`<div style="text-align:right;flex-shrink:0"><div style="font-size:9px;color:var(--text2);font-weight:700">EV HIST</div><div style="font-size:13px;font-weight:900;color:${cev.ev>=0?'#00c853':'#ff3d57'}">${cev.ev>=0?'+':''}${cev.ev.toFixed(1)}%</div><div style="font-size:8px;color:var(--text2)">${cev.sources} fuentes</div></div>`:''}</div>`;})()}
       <div style="display:flex;gap:6px;margin-top:10px" onclick="event.stopPropagation()">
         <button class="btn btn-dark btn-sm" style="flex:1;font-size:12px" onclick="openMCP('${t.id}',false)">📉 Cierre parcial</button>
