@@ -233,6 +233,7 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
   </div>
   <div class="header-btns">
     <button class="desktop-btn" onclick="toggleDesktop()" id="desktop-btn">🖥️ PC</button>
+    <button class="desktop-btn" onclick="toggleFullscreen()" id="fs-btn" title="Pantalla completa">⛶</button>
     <button class="theme-btn" onclick="toggleTheme()" id="theme-btn"><span id="theme-icon">☀️</span><span id="theme-text">Claro</span></button>
   </div>
 </div>
@@ -725,6 +726,20 @@ function applyThemeBtn(t){document.getElementById('theme-icon').textContent=t===
 
 let desktopMode=localStorage.getItem('tpro_desktop')==='1';
 function toggleDesktop(){desktopMode=!desktopMode;localStorage.setItem('tpro_desktop',desktopMode?'1':'0');applyDesktop();}
+function toggleFullscreen(){
+  const btn=document.getElementById('fs-btn');
+  if(!document.fullscreenElement){
+    document.documentElement.requestFullscreen().catch(()=>{});
+    if(btn)btn.textContent='✕';
+  } else {
+    document.exitFullscreen().catch(()=>{});
+    if(btn)btn.textContent='⛶';
+  }
+}
+document.addEventListener('fullscreenchange',()=>{
+  const btn=document.getElementById('fs-btn');
+  if(btn)btn.textContent=document.fullscreenElement?'✕':'⛶';
+});
 function applyDesktop(){
   document.body.classList.toggle('desktop-mode',desktopMode);
   document.getElementById('desktop-btn').textContent=desktopMode?'📱 Móvil':'🖥️ PC';
