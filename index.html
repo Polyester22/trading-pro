@@ -260,10 +260,20 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
   <!-- SEMÁFORO ALTCOINS -->
   <div id="market-cycle-panel" style="margin-bottom:10px">
     <button onclick="toggleCyclePanel()" id="cycle-toggle-btn" style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:10px 14px;font-family:'Nunito',sans-serif;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:10px">
-      <div style="display:flex;align-items:center;gap:8px">
-        <span id="cycle-semaphore" style="font-size:20px">⚪</span>
+      <div style="display:flex;align-items:center;gap:10px">
+        <!-- Dos círculos: Capa 1 (dirección) + Capa 2 (timing) -->
+        <div style="display:flex;flex-direction:column;align-items:center;gap:3px;flex-shrink:0">
+          <div style="display:flex;align-items:center;gap:4px">
+            <div id="cycle-dot-dir" style="width:11px;height:11px;border-radius:50%;background:#555;transition:background .4s,box-shadow .4s;flex-shrink:0"></div>
+            <div id="cycle-dot-timing" style="width:11px;height:11px;border-radius:50%;background:#555;transition:background .4s,box-shadow .4s;flex-shrink:0"></div>
+          </div>
+          <div style="font-size:7px;font-weight:700;color:var(--text2);letter-spacing:.3px;line-height:1">4H&nbsp;&nbsp;1H</div>
+        </div>
         <div style="text-align:left">
-          <div style="font-size:12px;font-weight:800;color:var(--text)" id="cycle-title">Semáforo Altcoins</div>
+          <div style="display:flex;align-items:center;gap:6px">
+            <div style="font-size:12px;font-weight:800;color:var(--text)" id="cycle-title">Semáforo Altcoins</div>
+            <span id="cycle-entry-badge" style="display:none;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:.3px"></span>
+          </div>
           <div style="font-size:10px;color:var(--text2)" id="cycle-subtitle">Tocá para analizar el ciclo</div>
         </div>
       </div>
@@ -2690,6 +2700,51 @@ async function fetchWithRetry(url, retries=3, delayMs=1500){
   }
 }
 // ── Silent dot updater (no panel render needed) ──
+// ── Actualiza el header colapsado (dos círculos + badge de entrada) ──
+function updateCollapsedHeader(dirMode, timingMode, action, semColor){
+  const dotDir   = document.getElementById('cycle-dot-dir');
+  const dotTiming= document.getElementById('cycle-dot-timing');
+  const badge    = document.getElementById('cycle-entry-badge');
+  const sub      = document.getElementById('cycle-subtitle');
+  const semEl    = document.getElementById('cycle-semaphore'); // legacy, puede no existir
+
+  const colOf = m => m==='long'?'#00c853' : m==='short'?'#ff3d57' : '#ffd100';
+  const glowOf= m => m==='long'?'0 0 5px #00c853' : m==='short'?'0 0 5px #ff3d57' : '0 0 4px #ffd100';
+  const colDir    = colOf(dirMode);
+  const colTiming = colOf(timingMode);
+
+  if(dotDir)  { dotDir.style.background=colDir;    dotDir.style.boxShadow=glowOf(dirMode);    }
+  if(dotTiming){ dotTiming.style.background=colTiming; dotTiming.style.boxShadow=glowOf(timingMode); }
+  if(semEl)   { semEl.textContent = dirMode==='long'?'🟢':dirMode==='short'?'🔴':'🟡'; } // legacy dot in tab
+
+  // Badge de entrada: solo cuando ambas capas alinean
+  const entryLong  = dirMode==='long'  && timingMode==='long';
+  const entryShort = dirMode==='short' && timingMode==='short';
+  if(badge){
+    if(entryLong){
+      badge.style.display='inline-block';
+      badge.textContent='✅ ENTRÁ LONG';
+      badge.style.background='rgba(0,200,83,.2)';
+      badge.style.color='#00c853';
+      badge.style.border='1px solid rgba(0,200,83,.4)';
+    } else if(entryShort){
+      badge.style.display='inline-block';
+      badge.textContent='✅ ENTRÁ SHORT';
+      badge.style.background='rgba(255,61,87,.2)';
+      badge.style.color='#ff3d57';
+      badge.style.border='1px solid rgba(255,61,87,.4)';
+    } else {
+      badge.style.display='none';
+    }
+  }
+
+  if(sub){ sub.textContent=action; sub.style.color=semColor; }
+
+  // Tab dot (pestaña Cargar)
+  const tabDot = document.getElementById('semaforo-dot');
+  if(tabDot){ tabDot.style.background=colDir; tabDot.style.boxShadow='0 0 5px '+colDir; }
+}
+
 async function updateDotSilent(){
   if(!location.protocol.startsWith('https:')){
     const dot=document.getElementById('semaforo-dot');
@@ -2736,15 +2791,23 @@ async function updateDotSilent(){
     const mode=dirLong>=2?'long':dirShort>=2?'short':'wait';
 
     const col=mode==='long'?'#00c853':mode==='short'?'#ff3d57':'#ffd100';
-    const dot=document.getElementById('semaforo-dot');
-    if(dot){dot.style.background=col;dot.style.boxShadow='0 0 5px '+col;}
-    const sub=document.getElementById('cycle-subtitle');
-    const sem=document.getElementById('cycle-semaphore');
-    if(sem)sem.textContent=mode==='long'?'🟢':mode==='short'?'🔴':'🟡';
-    if(sub){
-      sub.style.color=col;
-      sub.textContent=mode==='long'?'LONG — Dirección 4H ('+dirLong+'/3)':mode==='short'?'SHORT — Risk-off 4H ('+dirShort+'/3)':'NO TRADE — Sin dirección clara';
-    }
+    const actionTxt=mode==='long'?'LONG — Dirección 4H ('+dirLong+'/3)':mode==='short'?'SHORT — Risk-off 4H ('+dirShort+'/3)':'NO TRADE — Sin dirección clara';
+
+    // Timing 1H rápido para el dot
+    const alts1h=md.filter(c=>c.id!=='bitcoin'&&c.id!=='ethereum'&&c.price_change_percentage_1h_in_currency!=null);
+    const a1hUp=alts1h.filter(c=>(c.price_change_percentage_1h_in_currency||0)>0).length;
+    const a1hPct=alts1h.length?Math.round(a1hUp/alts1h.length*100):50;
+    const t1L=btc1h>-1&&Math.abs(btc1h)<3;
+    const t1S=btc1h<-1.5;
+    const eth1hC=eth1h||0, btc1hC=btc1h||0;
+    const ethL1h=eth1hC>btc1hC+0.3, ethLag1h=eth1hC<btc1hC-0.3;
+    const t2L=ethL1h, t2S=ethLag1h;
+    const t3L=a1hPct>=55, t3S=a1hPct<40;
+    const tL=[t1L,t2L,t3L].filter(Boolean).length;
+    const tS=[t1S,t2S,t3S].filter(Boolean).length;
+    const timingMode=tL>=2?'long':tS>=2?'short':'neutral';
+
+    updateCollapsedHeader(mode, timingMode, actionTxt, col);
     if(cycleOpen)checkMarketCycle();
   }catch(_e){}
 }
@@ -3778,14 +3841,9 @@ async function checkMarketCycle(){
     const noShortOverride = btcW > 0 && top50Pct >= 50;
 
     // ── Update collapsed header ────────────────────────────────
-    const semEl=document.getElementById('cycle-semaphore');
     const titleEl=document.getElementById('cycle-title');
-    const subEl=document.getElementById('cycle-subtitle');
-    const dot=document.getElementById('semaforo-dot');
-    if(semEl)semEl.textContent=semaphore;
     if(titleEl)titleEl.textContent='Semáforo Altcoins';
-    if(subEl){subEl.textContent=action;subEl.style.color=semColor;}
-    if(dot){dot.style.background=dirMode==='long'?'#00c853':dirMode==='short'?'#ff3d57':'#ffd100';dot.style.boxShadow='0 0 5px '+(dirMode==='long'?'#00c853':dirMode==='short'?'#ff3d57':'#ffd100');}
+    updateCollapsedHeader(dirMode, timingMode, action, semColor);
 
     if(!cycleOpen)return;
 
