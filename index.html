@@ -3660,26 +3660,36 @@ async function checkMarketCycle(){
     if(!cycleOpen)return;
 
     // ── BUILD DETAILED PANEL ──────────────────────────────────
-    function condRow(ok, label, detail){
-      return '<div style="display:flex;gap:8px;align-items:flex-start;padding:8px 10px;background:var(--surface2);border-radius:8px;margin-bottom:5px">'+
-        '<span style="font-size:15px;flex-shrink:0">'+(ok?'✅':'❌')+'</span>'+
-        '<div><div style="font-size:12px;font-weight:800;color:'+(ok?'#00c853':'#ff3d57')+'">'+label+'</div>'+
+    // condRow: shows condition with context of current mode
+    function condRow(longOk, shortOk, label, detail){
+      // What matters: if mode=long, show longOk. If mode=short, show shortOk. If wait, show both.
+      let icon, color, badge='';
+      if(mode==='long'){
+        icon=longOk?'✅':'❌';
+        color=longOk?'#00c853':'#ff3d57';
+        if(longOk)badge='<span style="font-size:9px;background:rgba(0,200,83,.2);color:#00c853;padding:1px 5px;border-radius:4px;margin-left:4px;font-weight:700">▲ LONG</span>';
+      } else if(mode==='short'){
+        icon=shortOk?'✅':'❌';
+        color=shortOk?'#ff3d57':'var(--text2)';
+        if(shortOk)badge='<span style="font-size:9px;background:rgba(255,61,87,.2);color:#ff3d57;padding:1px 5px;border-radius:4px;margin-left:4px;font-weight:700">▼ SHORT</span>';
+      } else {
+        // wait: show neutral
+        icon=longOk?'🟢':shortOk?'🔴':'⚪';
+        color=longOk?'#00c853':shortOk?'#ff3d57':'var(--text2)';
+      }
+      return '<div style="display:flex;gap:8px;align-items:flex-start;padding:8px 10px;background:var(--surface2);border-radius:8px;margin-bottom:5px;border-left:2px solid '+(mode==='long'&&longOk?'#00c853':mode==='short'&&shortOk?'#ff3d57':'var(--border)')+'">'+
+        '<span style="font-size:15px;flex-shrink:0">'+icon+'</span>'+
+        '<div style="flex:1"><div style="font-size:12px;font-weight:800;color:'+color+'">'+label+badge+'</div>'+
         '<div style="font-size:10px;color:var(--text2);margin-top:2px">'+detail+'</div></div>'+
       '</div>';
     }
 
-    function section(title, color, content){
-      return '<div style="background:rgba('+color+');border-radius:10px;padding:10px 12px;margin-bottom:10px">'+
-        '<div style="font-size:12px;font-weight:900;color:#'+color.split(',')[0].replace('0,','').trim()+';margin-bottom:8px">'+title+'</div>'+
-        content+'</div>';
-    }
-
     // Conditions block
     const conditionsHTML=
-      '<div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;margin-top:2px">3 condiciones</div>'+
-      condRow(c1,'BTC lateral',c1detail)+
-      condRow(c2,'ETH lidera vs BTC',c2detail)+
-      condRow(c4,'Amplitud alts (Top50+100)',c4detail);
+      '<div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;margin-top:2px">3 condiciones — '+(mode==='long'?'señales LONG':'mode'==='short'?'señales SHORT':'sin dirección clara')+'</div>'+
+      condRow(c1,shortC1,'BTC lateral / bajando',c1detail)+
+      condRow(c2,shortC2,'ETH lidera vs BTC / no lidera',c2detail)+
+      condRow(c4,shortC4,'Amplitud alts (Top50+100)',c4detail);
 
     // Execution guide
     let execHTML='';
