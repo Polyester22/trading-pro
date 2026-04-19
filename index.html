@@ -2808,11 +2808,12 @@ async function updateDotSilent(){
     const timingMode=tL>=2?'long':tS>=2?'short':'neutral';
 
     updateCollapsedHeader(mode, timingMode, actionTxt, col);
-    if(cycleOpen)checkMarketCycle();
+    // El updater silencioso solo actualiza los dots/header — nunca re-renderiza el panel
   }catch(_e){}
 }
 let cycleInterval=null;
 let cycleOpen=false;
+let _cycleLoaded=false; // true una vez que el panel cargó exitosamente
 
 function startCycleMonitor(){
   updateDotSilent();
@@ -3692,8 +3693,8 @@ function toggleCyclePanel(){
   cycleOpen=!cycleOpen;
   document.getElementById('cycle-body').style.display=cycleOpen?'block':'none';
   document.getElementById('cycle-arrow').textContent=cycleOpen?'▲':'▼';
-  if(cycleOpen&&document.getElementById('cycle-status').children.length===1)
-    checkMarketCycle();
+  // Solo fetch en el primer despliegue — después muestra lo ya cargado
+  if(cycleOpen&&!_cycleLoaded) checkMarketCycle();
 }
 
 async function checkMarketCycle(){
@@ -4009,6 +4010,7 @@ async function checkMarketCycle(){
     const box=document.getElementById('cycle-status');
     if(box)box.innerHTML='<div style="color:#ff3d57;font-size:11px;text-align:center;padding:8px">❌ Error: '+e.message+'</div>';
   }
+  _cycleLoaded=true; // marcar como cargado (incluso si hubo error — para no loopar)
   if(btn){btn.textContent='⟳ Actualizar análisis';btn.disabled=false;}
 }
 
