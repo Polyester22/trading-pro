@@ -2707,22 +2707,29 @@ async function updateDotSilent(){
     // ── CAPA 1: DIRECCIÓN (4H peso 70% + 24H peso 30%) ────────────────
     const btcW=btc4h!==null?(btc4h*0.7+btc24*0.3):btc24;
     const eth4hVal=eth4h!==null?eth4h:eth24;
-    const btc4hVal=btc4h!==null?btc4h:btc1h*3; // fallback estimate
+    const btc4hVal=btc4h!==null?btc4h:btc1h*3;
 
+    // D1: zona neutral ±0.5%
     const d1Long=btcW>0.5&&btc24>-5;
-    const d1Short=btcW<-1.5||btc24<=-5;
+    const d1Short=btcW<-0.5;
 
+    // D2: ETH debe liderar en 4H Y en otro eje (más estricto)
     const eth4hVsBtc4h=eth4hVal-btc4hVal;
-    const ethLeads24=eth24>btc24+1, domFav=btcDom<55;
-    const d2Long=eth4hVsBtc4h>0.3||(ethLeads24&&domFav);
-    const d2Short=eth4hVsBtc4h<-1&&!ethLeads24;
+    const ethLeads4h=eth4hVsBtc4h>0.3, ethLags4h=eth4hVsBtc4h<-0.3;
+    const ethLeads24=eth24>btc24+1, ethLags24=eth24<btc24-1;
+    const domFav=btcDom<55;
+    const d2Long=ethLeads4h&&(ethLeads24||domFav);
+    const d2Short=(ethLags4h&&ethLags24)||(ethLags4h&&!domFav&&!ethLeads24);
 
+    // D3: amplitud categorizada con promedio ponderado
     const alts=md.filter(c=>c.id!=='bitcoin'&&c.id!=='ethereum'&&c.price_change_percentage_24h!=null);
     const top50b=alts.slice(0,50),top100b=alts.slice(50,100);
     const t50p=top50b.length?Math.round(top50b.filter(c=>(c.price_change_percentage_24h||0)>0).length/top50b.length*100):0;
     const t100p=top100b.length?Math.round(top100b.filter(c=>(c.price_change_percentage_24h||0)>0).length/top100b.length*100):0;
-    const d3Long=(t50p>=65&&t100p>=65)||(t100p>=65&&t50p>=50&&t50p<65)||(t50p>=65&&top100b.length<10);
-    const d3Short=t50p<35&&t100p<40;
+    const ampAvg=top100b.length>=10?Math.round(t50p*0.6+t100p*0.4):t50p;
+    const earlyS=t100p>=65&&t50p>=50&&t50p<65;
+    const d3Long=ampAvg>=65||(t50p>=65&&top100b.length<10)||earlyS;
+    const d3Short=ampAvg<35;
 
     const dirLong=[d1Long,d2Long,d3Long].filter(Boolean).length;
     const dirShort=[d1Short,d2Short,d3Short].filter(Boolean).length;
@@ -3659,26 +3666,38 @@ async function checkMarketCycle(){
     const hasBinance4h = btc4h !== null;
 
     // D1 — BTC dirección 4H+24H ponderado
+    // Zona neutral: -0.5% a +0.5% → ruido, no dirección real
     const btcW = btc4hVal * 0.7 + btc24 * 0.3;
-    const d1Long = btcW > 0.5 && btc24 > -5;
-    const d1Short = btcW < -1.5 || btc24 <= -5;
-    const d1detail = hasBinance4h
+    const d1Long = btcW > 0.5 && btc24 > -5;      // dirección alcista real
+    const d1Short = btcW < -0.5;                   // cualquier sesgo bajista confirmado
+    const d1Neutral = btcW >= -0.5 && btcW <= 0.5; // zona muerta — no cuenta ni para long ni short
+    const d1Status = d1Long ? '🟢 LONG' : d1Short ? '🔴 SHORT' : '⚪ NEUTRAL (zona ±0.5%)';
+    const d1detail = (hasBinance4h
       ? 'BTC 4H: '+fmt(btc4h)+'% (×0.7) + 24H: '+fmtS(btc24)+'% (×0.3) → ponderado: '+fmtS(btcW)+'%'
-      : 'BTC 24H: '+fmtS(btc24)+'% · sin datos 4H (fallback)';
+      : 'BTC 24H: '+fmtS(btc24)+'% · sin datos 4H (fallback)')
+      + ' · ' + d1Status;
 
-    // D2 — ETH/BTC diferencial 4H (rotación hacia alts)
+    // D2 — ETH/BTC diferencial 4H
+    // ETH debe liderar en 4H Y en 24H para señal LONG válida
+    // Si ETH < BTC en ambos → refuerza SHORT (no es neutral)
     const eth4hVsBtc4h = eth4hVal - btc4hVal;
-    const ethLeads4h = eth4hVsBtc4h > 0.3;
+    const ethLeads4h = eth4hVsBtc4h > 0.3;         // ETH más fuerte en 4H
+    const ethLags4h  = eth4hVsBtc4h < -0.3;         // ETH más débil en 4H → bearish for alts
     const ethLeads24 = eth24 > btc24 + 1;
+    const ethLags24  = eth24 < btc24 - 1;
     const domFavorable = btcDom < 55;
-    const d2Long = ethLeads4h || (ethLeads24 && domFavorable);
-    const d2Short = !ethLeads4h && !ethLeads24 && !domFavorable;
+    // LONG: ETH outperforms en 4H Y (24H o DOM favorable) — necesita confirmación doble
+    const d2Long = ethLeads4h && (ethLeads24 || domFavorable);
+    // SHORT: ETH underperforms en 4H Y en 24H — debilidad real en alts
+    const d2Short = (ethLags4h && ethLags24) || (ethLags4h && !domFavorable && !ethLeads24);
+    const d2Status = d2Long ? '🟢 ETH lidera (alts ok)' : d2Short ? '🔴 ETH rezagado (alts débiles)' : '⚪ NEUTRAL';
     const d2detail = (hasBinance4h ? 'ETH 4H: '+fmt(eth4h)+'% vs BTC 4H: '+fmt(btc4h)+'% (dif '+fmtS(eth4hVsBtc4h)+'%)' : '')
       + ' · ETH 24H: '+fmtS(eth24)+'% vs BTC: '+fmtS(btc24)+'%'
-      + (ethLeads24?' ✓':'')
-      + ' · DOM: '+btcDom.toFixed(1)+'%'+(domFavorable?' ✓':'');
+      + ' · DOM: '+btcDom.toFixed(1)+'%'
+      + ' · ' + d2Status;
 
     // D3 — Amplitud altcoins 24H (Top50 + Top51-100)
+    // Categorías claras: ≥65% LONG | 50-65% neutral-bullish | 35-50% neutral-bearish | <35% SHORT
     const allAlts=marketsData.filter(c=>c.id!=='bitcoin'&&c.id!=='ethereum'&&c.price_change_percentage_24h!==null);
     const top50alts=allAlts.slice(0,50);
     const top100alts=allAlts.slice(50,100);
@@ -3686,13 +3705,22 @@ async function checkMarketCycle(){
     const top100Up=top100alts.filter(c=>(c.price_change_percentage_24h||0)>0).length;
     const top50Pct=top50alts.length?Math.round(top50Up/top50alts.length*100):0;
     const top100Pct=top100alts.length?Math.round(top100Up/top100alts.length*100):0;
-    const bothStrong=top50Pct>=65&&top100Pct>=65;
-    const earlySignal=top100Pct>=65&&top50Pct>=50&&top50Pct<65;
+    // Promedio ponderado: Top50 tiene más peso que Top51-100
+    const ampAvg = top100alts.length >= 10 ? Math.round(top50Pct*0.6 + top100Pct*0.4) : top50Pct;
+    const earlySignal=top100Pct>=65&&top50Pct>=50&&top50Pct<65; // mid caps liderando = anticipación
     const top50Only=top50Pct>=65&&top100alts.length<10;
-    const d3Long=bothStrong||earlySignal||top50Only;
-    const d3Short=top50Pct<35&&top100Pct<40;
-    const amplitudSignal=bothStrong?'🟢 Fuerte':earlySignal?'🟡 Temprana':top50Only?'🟢 Top50 sólido':'🔴 Sin señal';
-    const d3detail='Top50: '+top50Pct+'%'+(top100alts.length?' · Top51-100: '+top100Pct+'%':'')+' en verde 24H · '+amplitudSignal;
+    const d3Long = ampAvg >= 65 || top50Only || earlySignal;
+    const d3Short = ampAvg < 35;
+    // Categoría visual
+    const ampCat = ampAvg >= 65 ? '🟢 LONG fuerte (≥65%)' :
+                   ampAvg >= 50 ? '🟡 Neutral-alcista (50–65%)' :
+                   ampAvg >= 35 ? '🟠 Neutral-bajista (35–50%)' :
+                                  '🔴 SHORT claro (<35%)';
+    const ampCatColor = ampAvg >= 65 ? '#00c853' : ampAvg >= 50 ? '#ffd100' : ampAvg >= 35 ? '#ff9500' : '#ff3d57';
+    const amplitudSignal = earlySignal ? '🟡 Señal temprana (mid caps lideran)' : ampCat;
+    const d3detail='Top50: '+top50Pct+'%'+(top100alts.length?' · Top51-100: '+top100Pct+'%':'')+
+      (top100alts.length>=10?' · prom: '+ampAvg+'%':'')+
+      ' en verde 24H · <strong style="color:'+ampCatColor+'">'+amplitudSignal+'</strong>';
 
     // DIRECCIÓN final
     const dirLongScore=[d1Long,d2Long,d3Long].filter(Boolean).length;
