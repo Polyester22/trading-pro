@@ -1940,7 +1940,7 @@ function renderHistorial(){
   tbody.innerHTML=list.map(t=>{
     // For open trades: use live price if available, else stored actual
     let resultado=t.resultado;
-    let margenDisplay=t.margenOriginal||t.margen; // always show original margin
+    let margenDisplay = t.open ? t.margen : (t.margenOriginal||t.margen); // open → margen actual (restante); cerrado → original
     if(t.open&&t.entrada){
       const livePrice=livePrices[t.ticker]||t.actual||0;
       if(livePrice){
