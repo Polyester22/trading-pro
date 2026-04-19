@@ -379,6 +379,22 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
   <button class="btn btn-orange" onclick="saveTrade()" id="btn-save">➕ Agregar Trade</button>
   <button class="btn btn-dark" onclick="cancelEdit()" id="btn-cancel" style="display:none">✕ Cancelar edición</button>
   <div style="height:1px;background:var(--border);margin:4px 0 12px"></div>
+
+  <!-- ANALIZADOR DE TICKER -->
+  <div class="card" id="ticker-analyzer-card">
+    <div class="section-header" style="margin-bottom:10px">
+      <div class="section-title">🔍 Analizar Ticker</div>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:8px">
+      <input type="text" id="ta-input" placeholder="BTC, ETH, ARB..." autocomplete="off" autocapitalize="characters"
+        style="flex:1;text-transform:uppercase;font-size:15px;padding:10px 14px"
+        oninput="this.value=this.value.toUpperCase()"
+        onkeydown="if(event.key==='Enter')analyzeTicker()">
+      <button class="btn btn-orange btn-sm" onclick="analyzeTicker()" id="ta-btn" style="padding:10px 16px;font-size:13px;white-space:nowrap">Analizar</button>
+    </div>
+    <div id="ta-result"></div>
+  </div>
+
   <div class="card">
     <div class="section-header"><div class="section-title">⚙️ Estrategias</div><button class="btn btn-dark btn-sm" onclick="openManage('strat')">Gestionar</button></div>
     <div id="strat-preview" style="color:var(--text2);font-size:13px;font-weight:600"></div>
@@ -1648,6 +1664,93 @@ async function fetchTickerChanges(tickers){
 }
 
 // ── Semáforo específico para el ticker del trade en curso ──────────────
+// ── ANALIZADOR DE TICKER ────────────────────────────────────────────────
+async function analyzeTicker(){
+  const input = document.getElementById('ta-input');
+  const result= document.getElementById('ta-result');
+  const btn   = document.getElementById('ta-btn');
+  const tk    = (input.value||'').trim().toUpperCase();
+  if(!tk){ result.innerHTML='<div style="font-size:11px;color:var(--text2);text-align:center;padding:6px">Ingresá un ticker</div>'; return; }
+
+  btn.textContent='⟳'; btn.disabled=true;
+  result.innerHTML='<div style="font-size:11px;color:var(--text2);text-align:center;padding:10px">Analizando '+tk+'...</div>';
+
+  const sym = tk+'USDT';
+  try{
+    const [stat, k1h, k4h, k1d] = await Promise.all([
+      fetch('https://api.binance.com/api/v3/ticker/24hr?symbol='+sym).then(r=>{ if(!r.ok)throw new Error('Ticker no encontrado'); return r.json(); }),
+      fetch('https://api.binance.com/api/v3/klines?symbol='+sym+'&interval=1h&limit=3').then(r=>r.json()),
+      fetch('https://api.binance.com/api/v3/klines?symbol='+sym+'&interval=4h&limit=3').then(r=>r.json()),
+      fetch('https://api.binance.com/api/v3/klines?symbol='+sym+'&interval=1d&limit=3').then(r=>r.json()),
+    ]);
+
+    function pctCandle(k){ if(!k||k.length<2)return null; const c=k[k.length-2]; return(parseFloat(c[4])-parseFloat(c[1]))/parseFloat(c[1])*100; }
+    const c1hK = pctCandle(k1h);
+    const c4h  = pctCandle(k4h);
+    const c1d  = pctCandle(k1d);
+    const c24h = parseFloat(stat.priceChangePercent)||0;
+    const price= parseFloat(stat.lastPrice)||0;
+    const vol  = parseFloat(stat.quoteVolume)||0;
+
+    function sig(v,t1,t2){ if(v===null)return'na'; if(v>t2)return'strong_up'; if(v>t1)return'up'; if(v<-t2)return'strong_down'; if(v<-t1)return'down'; return'flat'; }
+    const s1h = sig(c1hK,0.5,2);
+    const s4h = sig(c4h,1.0,3);
+    const s1d = sig(c1d,2.0,5);
+
+    function pts(s){ if(s==='strong_up')return 2; if(s==='up')return 1; if(s==='strong_down')return -2; if(s==='down')return -1; return 0; }
+    const score = pts(s4h)*3 + pts(s1d)*2 + pts(s1h)*1;
+
+    let verdict,vColor,vBg,vIcon,advice;
+    if(score>=4){     verdict='LONG';         vColor='#00c853';vBg='rgba(0,200,83,.12)'; vIcon='🟢';advice='Todos los TF alinean alcista. Buscá retest de soporte en 1H.';}
+    else if(score>=2){verdict='LONG (débil)'; vColor='#00c853';vBg='rgba(0,200,83,.08)'; vIcon='🟡';advice='Sesgo alcista sin alineación total. Esperá confirmación 1H.';}
+    else if(score<=-4){verdict='SHORT';        vColor='#ff3d57';vBg='rgba(255,61,87,.12)';vIcon='🔴';advice='Todos los TF alinean bajista. Esperá rebote a resistencia en 1H.';}
+    else if(score<=-2){verdict='SHORT (débil)';vColor='#ff3d57';vBg='rgba(255,61,87,.08)';vIcon='🟡';advice='Sesgo bajista sin confirmación total. No shortear en caída directa.';}
+    else{             verdict='NO TRADE';     vColor='#ffd100';vBg='rgba(255,209,0,.08)'; vIcon='🟡';advice='TF mixtos o laterales. Sin sesgo claro — no forzar entrada.';}
+
+    function tfBadge(label,val,s){
+      const up=s==='up'||s==='strong_up',dn=s==='down'||s==='strong_down';
+      const col=up?'#00c853':dn?'#ff3d57':'#9999b8';
+      const bg=up?'rgba(0,200,83,.15)':dn?'rgba(255,61,87,.12)':'rgba(153,153,184,.1)';
+      const sign=val!==null?(val>=0?'+':'')+val.toFixed(2)+'%':'—';
+      const icon=up?'▲':dn?'▼':'→';
+      return`<div style="background:${bg};border-radius:8px;padding:8px 10px;text-align:center;flex:1">
+        <div style="font-size:9px;font-weight:700;color:var(--text2);letter-spacing:.5px;margin-bottom:3px">${label}</div>
+        <div style="font-size:14px;font-weight:900;color:${col}">${icon} ${sign}</div>
+      </div>`;
+    }
+
+    const volStr=vol>=1e9?(vol/1e9).toFixed(1)+'B':vol>=1e6?(vol/1e6).toFixed(0)+'M':vol>=1e3?(vol/1e3).toFixed(0)+'K':vol.toFixed(0);
+
+    result.innerHTML=
+      `<div style="background:${vBg};border-radius:10px;padding:12px;margin-bottom:10px;display:flex;align-items:center;gap:10px">
+        <div style="font-size:28px;line-height:1">${vIcon}</div>
+        <div style="flex:1">
+          <div style="font-size:16px;font-weight:900;color:${vColor}">${tk} — ${verdict}</div>
+          <div style="font-size:10px;color:var(--text2);margin-top:2px">${advice}</div>
+        </div>
+        <div style="text-align:right;flex-shrink:0">
+          <div style="font-size:15px;font-weight:900;color:${c24h>=0?'#00c853':'#ff3d57'}">${c24h>=0?'+':''}${c24h.toFixed(2)}%</div>
+          <div style="font-size:10px;color:var(--text2)">$${price<1?price.toFixed(4):price<100?price.toFixed(2):price.toFixed(0)}</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:6px;margin-bottom:10px">
+        ${tfBadge('1H',c1hK,s1h)}${tfBadge('4H',c4h,s4h)}${tfBadge('1D',c1d,s1d)}
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;font-size:10px;color:var(--text2)">
+        <span>Score: <strong style="color:${score>=2?'#00c853':score<=-2?'#ff3d57':'#ffd100'}">${score>=0?'+':''}${score}</strong> / ±8</span>
+        <span>Vol 24H: <strong style="color:var(--text)">$${volStr}</strong></span>
+        <span style="opacity:.7">Binance · velas cerradas</span>
+      </div>`;
+
+    const fTicker=document.getElementById('f-ticker');
+    if(fTicker&&!fTicker.value) fTicker.value=tk;
+
+  } catch(e){
+    result.innerHTML=`<div style="color:#ff3d57;font-size:11px;text-align:center;padding:8px">❌ ${e.message||'Error'} — verificá el ticker</div>`;
+  }
+  btn.textContent='Analizar'; btn.disabled=false;
+}
+
 function tickerSemaphoreHTML(t, tc){
   if(!tc) return '';
   const isLong = t.pos==='Long';
