@@ -2656,9 +2656,21 @@ async function fetchCoinGeckoData(){
   await new Promise(r=>setTimeout(r,500));
   const gd=await cgFetchSafe(BASE+'/global');
   await new Promise(r=>setTimeout(r,500));
-  const md=await cgFetchSafe(BASE+'/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=50&page=1&sparkline=false&price_change_percentage=1h,24h');
+  const md=await cgFetchSafe(BASE+'/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=100&page=1&sparkline=false&price_change_percentage=1h,24h');
 
-  _cgCache={pd, gd:gd||{data:{market_cap_percentage:{btc:50}}}, md:md||[]};
+  // Binance 4H candles for BTC and ETH — last CLOSED candle = index -2
+  await new Promise(r=>setTimeout(r,200));
+  const b4hBTC=await cgFetchSafe('https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=4h&limit=3');
+  await new Promise(r=>setTimeout(r,150));
+  const b4hETH=await cgFetchSafe('https://api.binance.com/api/v3/klines?symbol=ETHUSDT&interval=4h&limit=3');
+  function calc4h(k){
+    if(!k||k.length<2)return null;
+    const c=k[k.length-2]; // last closed candle
+    return(parseFloat(c[4])-parseFloat(c[1]))/parseFloat(c[1])*100;
+  }
+  const btc4h=calc4h(b4hBTC), eth4h=calc4h(b4hETH);
+
+  _cgCache={pd, gd:gd||{data:{market_cap_percentage:{btc:50}}}, md:md||[], btc4h, eth4h};
   _cgCacheTime=Date.now();
   _cgFetching=false;
   return _cgCache;
@@ -2685,38 +2697,47 @@ async function updateDotSilent(){
     return;
   }
   try{
-    const {pd,gd,md}=await fetchCoinGeckoData();
+    const {pd,gd,md,btc4h,eth4h}=await fetchCoinGeckoData();
     const btc=pd.bitcoin,eth=pd.ethereum;
     if(!btc||!eth)return;
     const btc1h=btc.usd_1h_change||0,btc24=btc.usd_24h_change||0;
     const eth1h=eth.usd_1h_change||0,eth24=eth.usd_24h_change||0;
     const btcDom=gd?.data?.market_cap_percentage?.btc||0;
-    const c1=Math.abs(btc1h)<1.5&&btc24>-5;
-    const ethLeads1h2=eth1h>btc1h+0.3,ethLeads242=eth24>btc24+1,domFav2=btcDom<55;
-    const c2=(ethLeads1h2&&ethLeads242)||(ethLeads1h2&&domFav2)||(ethLeads242&&domFav2);
-    const c3=c2;
+
+    // ── CAPA 1: DIRECCIÓN (4H peso 70% + 24H peso 30%) ────────────────
+    const btcW=btc4h!==null?(btc4h*0.7+btc24*0.3):btc24;
+    const eth4hVal=eth4h!==null?eth4h:eth24;
+    const btc4hVal=btc4h!==null?btc4h:btc1h*3; // fallback estimate
+
+    const d1Long=btcW>0.5&&btc24>-5;
+    const d1Short=btcW<-1.5||btc24<=-5;
+
+    const eth4hVsBtc4h=eth4hVal-btc4hVal;
+    const ethLeads24=eth24>btc24+1, domFav=btcDom<55;
+    const d2Long=eth4hVsBtc4h>0.3||(ethLeads24&&domFav);
+    const d2Short=eth4hVsBtc4h<-1&&!ethLeads24;
+
     const alts=md.filter(c=>c.id!=='bitcoin'&&c.id!=='ethereum'&&c.price_change_percentage_24h!=null);
-    const top50b=alts.slice(0,50), top100b=alts.slice(50,100);
+    const top50b=alts.slice(0,50),top100b=alts.slice(50,100);
     const t50p=top50b.length?Math.round(top50b.filter(c=>(c.price_change_percentage_24h||0)>0).length/top50b.length*100):0;
     const t100p=top100b.length?Math.round(top100b.filter(c=>(c.price_change_percentage_24h||0)>0).length/top100b.length*100):0;
-    const altsPct2=t50p;
-    const c4=(t50p>=65&&t100p>=65)||(t100p>=65&&t50p>=50&&t50p<65)||(t50p>=65&&top100b.length<10);
-    const score=[c1,c2,c4].filter(Boolean).length;
-    const sC1=btc24<=-2||btc1h<=-1.5,sC2=!c2,sC4=altsPct2<35;
-    const shortScore=[sC1,sC2,sC4].filter(Boolean).length;
-    const mode=score>=2?'long':shortScore>=2?'short':'wait';
+    const d3Long=(t50p>=65&&t100p>=65)||(t100p>=65&&t50p>=50&&t50p<65)||(t50p>=65&&top100b.length<10);
+    const d3Short=t50p<35&&t100p<40;
+
+    const dirLong=[d1Long,d2Long,d3Long].filter(Boolean).length;
+    const dirShort=[d1Short,d2Short,d3Short].filter(Boolean).length;
+    const mode=dirLong>=2?'long':dirShort>=2?'short':'wait';
+
     const col=mode==='long'?'#00c853':mode==='short'?'#ff3d57':'#ffd100';
     const dot=document.getElementById('semaforo-dot');
     if(dot){dot.style.background=col;dot.style.boxShadow='0 0 5px '+col;}
-    // Also update the collapsed button subtitle
     const sub=document.getElementById('cycle-subtitle');
     const sem=document.getElementById('cycle-semaphore');
     if(sem)sem.textContent=mode==='long'?'🟢':mode==='short'?'🔴':'🟡';
     if(sub){
       sub.style.color=col;
-      sub.textContent=mode==='long'?'LONG — Modo altcoins ('+score+'/3)':mode==='short'?'SHORT — Modo risk-off ('+shortScore+'/3)':'NO TRADE — Sin señal clara';
+      sub.textContent=mode==='long'?'LONG — Dirección 4H ('+dirLong+'/3)':mode==='short'?'SHORT — Risk-off 4H ('+dirShort+'/3)':'NO TRADE — Sin dirección clara';
     }
-    // If panel is open, do full render too
     if(cycleOpen)checkMarketCycle();
   }catch(_e){}
 }
@@ -3613,10 +3634,9 @@ async function checkMarketCycle(){
     box.innerHTML='<div style="font-size:11px;color:#ff6b00;padding:8px;text-align:center">⚠️ Requiere GitHub Pages (HTTPS) para datos en vivo.</div>';
     return;
   }
-  if(btn){btn.textContent='⟳ Analizando...';btn.disabled=true;}_cgCacheTime=0;// force fresh fetch
+  if(btn){btn.textContent='⟳ Analizando...';btn.disabled=true;}_cgCacheTime=0;
   try{
-    // Fetch in parallel: prices + global (dominance) + top coins (breadth)
-    const {pd:priceData, gd:globalData, md:marketsData, md2:marketsData2}=await fetchCoinGeckoData();
+    const {pd:priceData, gd:globalData, md:marketsData, btc4h, eth4h}=await fetchCoinGeckoData();
 
     const btc=priceData.bitcoin, eth=priceData.ethereum;
     if(!btc||!eth)throw new Error('Sin datos de precio');
@@ -3627,119 +3647,109 @@ async function checkMarketCycle(){
     const eth24=eth.usd_24h_change||0;
     const btcDom=globalData?.data?.market_cap_percentage?.btc||0;
 
-    // ── CONDICIÓN 1: BTC lateral ──────────────────────────────
-    // BTC sin movimiento fuerte en 1h, no cayendo fuerte en 24h
-    const c1=Math.abs(btc1h)<1.5&&btc24>-5;
-    const c1detail='BTC 1h: '+(btc1h>=0?'+':'')+btc1h.toFixed(2)+'% · 24h: '+(btc24>=0?'+':'')+btc24.toFixed(1)+'%';
+    const fmt=v=>v!=null?(v>=0?'+':'')+v.toFixed(2):'N/D';
+    const fmtS=v=>v!=null?(v>=0?'+':'')+v.toFixed(1):'N/D';
 
-    // ── CONDICIÓN 2: ETH lidera vs BTC (fusiona Dominancia + ETH/BTC) ──
-    // ETH outperforms BTC en 1h Y/O en 24h — señal de rotación hacia alts
-    const ethLeads1h=eth1h>btc1h+0.3;   // ETH más fuerte en última hora
-    const ethLeads24=eth24>btc24+1;      // ETH más fuerte en 24h
-    const domFavorable=btcDom<55;        // Dominancia baja = capital saliendo de BTC
-    const ethOutperforms24=ethLeads24;
-    const c2=(ethLeads1h&&ethLeads24)||(ethLeads1h&&domFavorable)||(ethLeads24&&domFavorable);
-    const c2detail=
-      'ETH 1h: '+(eth1h>=0?'+':'')+eth1h.toFixed(2)+'% vs BTC 1h: '+(btc1h>=0?'+':'')+btc1h.toFixed(2)+'%'+
-      (ethLeads1h?' ✓':'')+
-      ' · ETH 24h: '+(eth24>=0?'+':'')+eth24.toFixed(1)+'% vs BTC 24h: '+(btc24>=0?'+':'')+btc24.toFixed(1)+'%'+
-      (ethLeads24?' ✓':'')+
-      ' · DOM: '+btcDom.toFixed(1)+'%'+(domFavorable?' ✓':'');
-    // Keep c3 as alias for short score compatibility
-    const ethBtcRising=ethLeads1h;
-    const c3=ethLeads1h; // used in short score
+    // ══════════════════════════════════════════════════════════
+    // 🧭 CAPA 1 — DIRECCIÓN (4H + 24H, ponderado 70% / 30%)
+    //   Cambia 1–3 veces por semana. Esta es la que respetás.
+    // ══════════════════════════════════════════════════════════
+    const btc4hVal = btc4h !== null ? btc4h : btc1h * 2.5; // estimación si Binance falla
+    const eth4hVal = eth4h !== null ? eth4h : eth1h * 2.5;
+    const hasBinance4h = btc4h !== null;
 
-    // ── CONDICIÓN 3: Amplitud de altcoins ≥65% (era c4) ─────
-    // Umbral más alto para reducir ruido de 1h — 65% es señal más confiable
-    // Top 50 alts (excluding BTC+ETH)
-    const alts=marketsData.filter(c=>c.id!=='bitcoin'&&c.id!=='ethereum'&&c.price_change_percentage_1h_in_currency!==null);
+    // D1 — BTC dirección 4H+24H ponderado
+    const btcW = btc4hVal * 0.7 + btc24 * 0.3;
+    const d1Long = btcW > 0.5 && btc24 > -5;
+    const d1Short = btcW < -1.5 || btc24 <= -5;
+    const d1detail = hasBinance4h
+      ? 'BTC 4H: '+fmt(btc4h)+'% (×0.7) + 24H: '+fmtS(btc24)+'% (×0.3) → ponderado: '+fmtS(btcW)+'%'
+      : 'BTC 24H: '+fmtS(btc24)+'% · sin datos 4H (fallback)';
 
-    // Add user's most-traded tickers if not already in top 50
-    const userTickers=[...new Set(D.trades.map(t=>t.ticker).filter(Boolean))];
-    const top50ids=new Set(marketsData.map(c=>c.symbol.toUpperCase()));
-    const missingTickers=userTickers.filter(tk=>!top50ids.has(tk)&&TICKER_MAP[tk]);
-    if(missingTickers.length){
-      try{
-        const extraIds=missingTickers.map(tk=>TICKER_MAP[tk]).join(',');
-        const extraRes=await fetch('https://api.coingecko.com/api/v3/simple/price?ids='+extraIds+'&vs_currencies=usd&include_1h_change=true&include_24hr_change=true');
-        const extraData=await extraRes.json();
-        missingTickers.forEach(tk=>{
-          const id=TICKER_MAP[tk];
-          const d=extraData[id];
-          if(d&&d.usd_1h_change!=null){
-            alts.push({id,symbol:tk.toLowerCase(),price_change_percentage_1h_in_currency:d.usd_1h_change,price_change_percentage_24h:d.usd_24h_change,_userTicker:true});
-          }
-        });
-      }catch(e){/* ignore extra fetch errors */}
-    }
+    // D2 — ETH/BTC diferencial 4H (rotación hacia alts)
+    const eth4hVsBtc4h = eth4hVal - btc4hVal;
+    const ethLeads4h = eth4hVsBtc4h > 0.3;
+    const ethLeads24 = eth24 > btc24 + 1;
+    const domFavorable = btcDom < 55;
+    const d2Long = ethLeads4h || (ethLeads24 && domFavorable);
+    const d2Short = !ethLeads4h && !ethLeads24 && !domFavorable;
+    const d2detail = (hasBinance4h ? 'ETH 4H: '+fmt(eth4h)+'% vs BTC 4H: '+fmt(btc4h)+'% (dif '+fmtS(eth4hVsBtc4h)+'%)' : '')
+      + ' · ETH 24H: '+fmtS(eth24)+'% vs BTC: '+fmtS(btc24)+'%'
+      + (ethLeads24?' ✓':'')
+      + ' · DOM: '+btcDom.toFixed(1)+'%'+(domFavorable?' ✓':'');
 
-    // ── AMPLITUD: Top50 (seguridad) + Top51-100 (anticipación) ──
-    // marketsData already has 100 results (fetched above)
-    // Split: first 50 non-BTC/ETH = Top50, next 50 = Top51-100
+    // D3 — Amplitud altcoins 24H (Top50 + Top51-100)
     const allAlts=marketsData.filter(c=>c.id!=='bitcoin'&&c.id!=='ethereum'&&c.price_change_percentage_24h!==null);
     const top50alts=allAlts.slice(0,50);
-    const top100alts=allAlts.slice(50,100); // positions 51-100
-
+    const top100alts=allAlts.slice(50,100);
     const top50Up=top50alts.filter(c=>(c.price_change_percentage_24h||0)>0).length;
     const top100Up=top100alts.filter(c=>(c.price_change_percentage_24h||0)>0).length;
     const top50Pct=top50alts.length?Math.round(top50Up/top50alts.length*100):0;
     const top100Pct=top100alts.length?Math.round(top100Up/top100alts.length*100):0;
-    const altsPct=top50Pct; // alias for short score
-    const altsPct24=top50Pct;
-    const altsPct100=top100Pct;
-
-    // 🟢 Fuerte: ambos ≥65% | 🟡 Temprana: top51-100 ≥65% y top50 50-64% | fallback: top50 solo ≥65%
     const bothStrong=top50Pct>=65&&top100Pct>=65;
     const earlySignal=top100Pct>=65&&top50Pct>=50&&top50Pct<65;
-    const top50Only=top50Pct>=65&&top100alts.length<10; // no hay datos del segundo grupo
-    const c4=bothStrong||earlySignal||top50Only;
+    const top50Only=top50Pct>=65&&top100alts.length<10;
+    const d3Long=bothStrong||earlySignal||top50Only;
+    const d3Short=top50Pct<35&&top100Pct<40;
+    const amplitudSignal=bothStrong?'🟢 Fuerte':earlySignal?'🟡 Temprana':top50Only?'🟢 Top50 sólido':'🔴 Sin señal';
+    const d3detail='Top50: '+top50Pct+'%'+(top100alts.length?' · Top51-100: '+top100Pct+'%':'')+' en verde 24H · '+amplitudSignal;
 
-    const amplitudSignal=bothStrong?'🟢 Señal fuerte':earlySignal?'🟡 Señal temprana (mid caps liderando)':top50Only?'🟢 Top50 sólido (sin datos Top100)':top100Pct>=50?'🔴 Señal débil':'🔴 Sin señal';
-    const userAltsInPool=alts.filter(c=>userTickers.includes(c.symbol.toUpperCase()));
-    const userAltsUp=userAltsInPool.filter(c=>(c.price_change_percentage_24h||0)>0).length;
-    const userAltsNote=userAltsInPool.length?' · Tus alts: '+userAltsUp+'/'+userAltsInPool.length+' verdes':'';
-    const c4detail='Top50: '+top50Pct+'%'+(top100alts.length?' · Top51-100: '+top100Pct+'%':'')+' en verde 24h'+userAltsNote+' · '+amplitudSignal;
+    // DIRECCIÓN final
+    const dirLongScore=[d1Long,d2Long,d3Long].filter(Boolean).length;
+    const dirShortScore=[d1Short,d2Short,d3Short].filter(Boolean).length;
+    let dirMode=dirLongScore>=2?'long':dirShortScore>=2?'short':'wait';
 
-    // ── TOP MOVERS ───────────────────────────────────────────
-    const topMovers=alts
-      .filter(c=>c.price_change_percentage_1h_in_currency>0)
-      .sort((a,b)=>b.price_change_percentage_1h_in_currency-a.price_change_percentage_1h_in_currency)
-      .slice(0,6);
-    const topMovers24=alts
-      .filter(c=>(c.price_change_percentage_24h||0)>0)
-      .sort((a,b)=>(b.price_change_percentage_24h||0)-(a.price_change_percentage_24h||0))
-      .slice(0,6);
+    // ══════════════════════════════════════════════════════════
+    // ⚡ CAPA 2 — TIMING 1H (confirmación de entrada solamente)
+    //   Esta SÍ puede cambiar todo el día — y está bien.
+    // ══════════════════════════════════════════════════════════
 
-    // ── SEMÁFORO FINAL — 3 condiciones ───────────────────────
-    const score=[c1,c2,c4].filter(Boolean).length; // 3 conditions
+    // T1 — BTC 1H momentum
+    const t1Long=btc1h>-1&&Math.abs(btc1h)<3;
+    const t1Short=btc1h<-1.5;
+    const t1detail='BTC 1H: '+fmt(btc1h)+'%';
 
-    // Short score: opposite signals
-    const shortC1=btc24<=-2||btc1h<=-1.5;       // BTC cayendo
-    const shortC2=!c2;                          // ETH NO lidera BTC
-    const shortC4=(altsPct24<35)&&(altsPct100<40);   // Ambos tops mayormente rojos
-    const shortScore=[shortC1,shortC2,shortC4].filter(Boolean).length;
+    // T2 — ETH 1H vs BTC 1H
+    const ethLeads1h=eth1h>btc1h+0.3;
+    const t2Long=ethLeads1h;
+    const t2Short=!ethLeads1h&&eth1h<btc1h-0.3;
+    const t2detail='ETH 1H: '+fmt(eth1h)+'% vs BTC 1H: '+fmt(btc1h)+'%'+(ethLeads1h?' ✓':'');
 
-    let semaphore, semColor, semBg, action, actionColor, mode;
-    if(score>=2){
+    // T3 — Alts 1H breadth
+    const altsFor1h=marketsData.filter(c=>c.id!=='bitcoin'&&c.id!=='ethereum'&&c.price_change_percentage_1h_in_currency!=null);
+    const alts1hUp=altsFor1h.filter(c=>(c.price_change_percentage_1h_in_currency||0)>0).length;
+    const alts1hPct=altsFor1h.length?Math.round(alts1hUp/altsFor1h.length*100):50;
+    const t3Long=alts1hPct>=55;
+    const t3Short=alts1hPct<40;
+    const t3detail='Top50 alts: '+alts1hPct+'% en verde 1H';
+
+    const timingLong=[t1Long,t2Long,t3Long].filter(Boolean).length;
+    const timingShort=[t1Short,t2Short,t3Short].filter(Boolean).length;
+    const timingMode=timingLong>=2?'long':timingShort>=2?'short':'neutral';
+
+    // ══ Semáforo final = CAPA 1 (Dirección) ═══════════════════
+    let semaphore, semColor, semBg, action, actionColor;
+    if(dirMode==='long'){
       semaphore='🟢'; semColor='#00c853'; semBg='rgba(0,200,83,.08)';
-      action='LONG — Modo altcoins activado ('+score+'/3)'; actionColor='#00c853'; mode='long';
-    } else if(shortScore>=2){
+      action='LONG — Dirección 4H activa ('+dirLongScore+'/3)'; actionColor='#00c853';
+    } else if(dirMode==='short'){
       semaphore='🔴'; semColor='#ff3d57'; semBg='rgba(255,61,87,.08)';
-      action='SHORT — Modo risk-off ('+shortScore+'/3)'; actionColor='#ff3d57'; mode='short';
+      action='SHORT — Risk-off 4H ('+dirShortScore+'/3)'; actionColor='#ff3d57';
     } else {
       semaphore='🟡'; semColor='#ffd100'; semBg='rgba(255,209,0,.08)';
-      action='NO TRADE — Sin señal clara, esperá'; actionColor='#ffd100'; mode='wait';
+      action='NO TRADE — Sin dirección 4H clara'; actionColor='#ffd100';
     }
 
-    // Special override rules
-    // ❌ No shortear: BTC lateral + alts verdes
-    const noShortOverride=Math.abs(btc1h)<1.5&&altsPct>=50;
-    // Early signal badge if top100 leads top50
-    const earlySignalNote=earlySignal?'<div style="margin-top:6px;padding:6px 8px;background:rgba(255,209,0,.15);border-radius:6px;font-size:11px;font-weight:700;color:#ffd100">⚡ Señal temprana: Top100 liderando. Top50 aún no confirma — esperá.</div>':'';
-    // ❌ No longear: BTC cayendo fuerte
-    const noLongOverride=btc24<-5||btc1h<-3;
+    // Regla de conflicto 4H vs 1H
+    const conflictLong = dirMode==='long' && timingMode==='short';
+    const conflictShort = dirMode==='short' && timingMode==='long';
+    const timingAligned = dirMode===timingMode;
 
-    // Always update dot color
+    // Override warnings
+    const noLongOverride = btc24 < -5 || btc4hVal < -4;
+    const noShortOverride = btcW > 0 && top50Pct >= 50;
+
+    // ── Update collapsed header ────────────────────────────────
     const semEl=document.getElementById('cycle-semaphore');
     const titleEl=document.getElementById('cycle-title');
     const subEl=document.getElementById('cycle-subtitle');
@@ -3747,125 +3757,167 @@ async function checkMarketCycle(){
     if(semEl)semEl.textContent=semaphore;
     if(titleEl)titleEl.textContent='Semáforo Altcoins';
     if(subEl){subEl.textContent=action;subEl.style.color=semColor;}
-    if(dot){dot.style.background=mode==='long'?'#00c853':mode==='short'?'#ff3d57':'#ffd100';dot.style.boxShadow='0 0 5px '+(mode==='long'?'#00c853':mode==='short'?'#ff3d57':'#ffd100');}
+    if(dot){dot.style.background=dirMode==='long'?'#00c853':dirMode==='short'?'#ff3d57':'#ffd100';dot.style.boxShadow='0 0 5px '+(dirMode==='long'?'#00c853':dirMode==='short'?'#ff3d57':'#ffd100');}
 
-    // Only render detailed panel when expanded
     if(!cycleOpen)return;
 
-    // ── BUILD DETAILED PANEL ──────────────────────────────────
-    // condRow: shows condition with context of current mode
-    function condRow(longOk, shortOk, label, detail){
-      // What matters: if mode=long, show longOk. If mode=short, show shortOk. If wait, show both.
-      let icon, color, badge='';
-      if(mode==='long'){
-        icon=longOk?'✅':'❌';
-        color=longOk?'#00c853':'#ff3d57';
-        if(longOk)badge='<span style="font-size:9px;background:rgba(0,200,83,.2);color:#00c853;padding:1px 5px;border-radius:4px;margin-left:4px;font-weight:700">▲ LONG</span>';
-      } else if(mode==='short'){
-        icon=shortOk?'✅':'❌';
-        color=shortOk?'#ff3d57':'var(--text2)';
-        if(shortOk)badge='<span style="font-size:9px;background:rgba(255,61,87,.2);color:#ff3d57;padding:1px 5px;border-radius:4px;margin-left:4px;font-weight:700">▼ SHORT</span>';
-      } else {
-        // wait: show neutral
-        icon=longOk?'🟢':shortOk?'🔴':'⚪';
-        color=longOk?'#00c853':shortOk?'#ff3d57':'var(--text2)';
-      }
-      return '<div style="display:flex;gap:8px;align-items:flex-start;padding:8px 10px;background:var(--surface2);border-radius:8px;margin-bottom:5px;border-left:2px solid '+(mode==='long'&&longOk?'#00c853':mode==='short'&&shortOk?'#ff3d57':'var(--border)')+'">'+
+    // ── BUILD PANEL ───────────────────────────────────────────
+
+    // CAPA 1 condRow
+    function dirRow(longOk, shortOk, label, detail){
+      let icon, color;
+      if(dirMode==='long'){icon=longOk?'✅':'❌';color=longOk?'#00c853':'#ff3d57';}
+      else if(dirMode==='short'){icon=shortOk?'✅':'❌';color=shortOk?'#ff3d57':'var(--text2)';}
+      else{icon=longOk?'🟢':shortOk?'🔴':'⚪';color=longOk?'#00c853':shortOk?'#ff3d57':'var(--text2)';}
+      return '<div style="display:flex;gap:8px;align-items:flex-start;padding:8px 10px;background:var(--surface2);border-radius:8px;margin-bottom:5px;border-left:2px solid '+(dirMode==='long'&&longOk?'#00c853':dirMode==='short'&&shortOk?'#ff3d57':'var(--border)')+'">'+
         '<span style="font-size:15px;flex-shrink:0">'+icon+'</span>'+
-        '<div style="flex:1"><div style="font-size:12px;font-weight:800;color:'+color+'">'+label+badge+'</div>'+
+        '<div style="flex:1"><div style="font-size:12px;font-weight:800;color:'+color+'">'+label+'</div>'+
         '<div style="font-size:10px;color:var(--text2);margin-top:2px">'+detail+'</div></div>'+
       '</div>';
     }
 
-    // Conditions block
-    const conditionsHTML=
-      '<div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;margin-top:2px">3 condiciones — '+(mode==='long'?'señales LONG':'mode'==='short'?'señales SHORT':'sin dirección clara')+'</div>'+
-      condRow(c1,shortC1,'BTC lateral / bajando',c1detail)+
-      condRow(c2,shortC2,'ETH lidera vs BTC / no lidera',c2detail)+
-      condRow(c4,shortC4,'Amplitud alts (Top50+100)',c4detail);
+    // CAPA 2 timingRow
+    function timingRow(longOk, shortOk, label, detail){
+      // In timing context, we show relative to DIRECCIÓN
+      let icon, color;
+      if(dirMode==='long'){icon=longOk?'🟢':'🟡';color=longOk?'#00c853':'#ffd100';}
+      else if(dirMode==='short'){icon=shortOk?'🟢':'🟡';color=shortOk?'#ff3d57':'#ffd100';}
+      else{icon=longOk?'🟢':shortOk?'🔴':'⚪';color=longOk?'#00c853':shortOk?'#ff3d57':'var(--text2)';}
+      return '<div style="display:flex;gap:8px;align-items:flex-start;padding:6px 10px;background:var(--surface2);border-radius:8px;margin-bottom:4px;border-left:2px solid var(--border)">'+
+        '<span style="font-size:13px;flex-shrink:0">'+icon+'</span>'+
+        '<div style="flex:1"><div style="font-size:11px;font-weight:800;color:'+color+'">'+label+'</div>'+
+        '<div style="font-size:10px;color:var(--text2);margin-top:1px">'+detail+'</div></div>'+
+      '</div>';
+    }
+
+    // Timing status chip
+    const timingChipColor=timingMode==='long'?'#00c853':timingMode==='short'?'#ff3d57':'#ffd100';
+    const timingChipBg=timingMode==='long'?'rgba(0,200,83,.15)':timingMode==='short'?'rgba(255,61,87,.15)':'rgba(255,209,0,.15)';
+    const timingLabel=timingMode==='long'?'⚡ 1H acompaña LONG ('+timingLong+'/3)':timingMode==='short'?'⚡ 1H acompaña SHORT ('+timingShort+'/3)':'⚡ 1H neutral — esperá entrada ('+Math.max(timingLong,timingShort)+'/3)';
+
+    // Conflict alert
+    let conflictHTML='';
+    if(conflictLong){
+      conflictHTML='<div style="background:rgba(255,209,0,.12);border:1px solid rgba(255,209,0,.4);border-radius:8px;padding:8px 10px;margin-bottom:8px;font-size:11px;font-weight:800;color:#ffd100">'+
+        '⚠️ 4H dice LONG pero 1H muestra bajada — <strong>NO shortear</strong><br>'+
+        '<span style="font-weight:600;opacity:.85">Esperá pullback para entrar LONG</span></div>';
+    } else if(conflictShort){
+      conflictHTML='<div style="background:rgba(255,209,0,.12);border:1px solid rgba(255,209,0,.4);border-radius:8px;padding:8px 10px;margin-bottom:8px;font-size:11px;font-weight:800;color:#ffd100">'+
+        '⚠️ 4H dice SHORT pero 1H rebota — <strong>NO longear</strong><br>'+
+        '<span style="font-weight:600;opacity:.85">Esperá rebote a resistencia para SHORT</span></div>';
+    }
 
     // Execution guide
     let execHTML='';
-    if(mode==='long'){
-      execHTML=
-        '<div style="background:rgba(0,200,83,.08);border-radius:10px;padding:10px 12px;margin-bottom:10px">'+
-          '<div style="font-size:12px;font-weight:900;color:#00c853;margin-bottom:6px">🎯 Cómo ejecutar el LONG</div>'+
-          '<div style="font-size:11px;color:var(--text);line-height:1.7">'+
-            '• Buscá <strong>retest de soporte</strong> (no comprar arriba)<br>'+
-            '• Entrá en pullback, <strong>no en FOMO</strong><br>'+
-            '• TP típico: <strong style="color:#00c853">8–15%</strong> · SL: debajo del último soporte<br>'+
-            '• 💡 Señales extra: velas de impulso + consolidación, volumen acompañando, estructura HH/HL'+
-          '</div>'+
-          (noLongOverride?'<div style="margin-top:6px;padding:6px 8px;background:rgba(255,61,87,.15);border-radius:6px;font-size:11px;font-weight:800;color:#ff3d57">⚠️ Atención: BTC cayendo fuerte — revisá antes de entrar</div>':'')+
-          earlySignalNote+
-        '</div>';
-    } else if(mode==='short'){
-      execHTML=
-        '<div style="background:rgba(255,61,87,.08);border-radius:10px;padding:10px 12px;margin-bottom:10px">'+
-          '<div style="font-size:12px;font-weight:900;color:#ff3d57;margin-bottom:6px">🎯 Cómo ejecutar el SHORT</div>'+
-          '<div style="font-size:11px;color:var(--text);line-height:1.7">'+
-            '• Esperá <strong>rebote a resistencia</strong> (no shortear en caída)<br>'+
-            '• Buscá <strong>rechazo claro</strong> con velas de reversión<br>'+
-            '• TP típico: <strong style="color:#ff3d57">5–12%</strong> · SL: arriba del último máximo<br>'+
-            '• 💡 Señales extra: estructura bajista LH/LL, velas de rechazo arriba, volumen vendedor'+
-          '</div>'+
-          (noShortOverride?'<div style="margin-top:6px;padding:6px 8px;background:rgba(255,209,0,.15);border-radius:6px;font-size:11px;font-weight:800;color:#ffd100">⚠️ BTC lateral + alts verdes — cuidado con shorts</div>':'')+
-        '</div>';
+    if(dirMode==='long'){
+      const readyToEnter=timingAligned||timingMode==='neutral';
+      execHTML='<div style="background:rgba(0,200,83,.08);border-radius:10px;padding:10px 12px;margin-bottom:10px">'+
+        '<div style="font-size:12px;font-weight:900;color:#00c853;margin-bottom:6px">🎯 Cómo ejecutar el LONG</div>'+
+        '<div style="font-size:11px;color:var(--text);line-height:1.7">'+
+          '• Buscá <strong>retest de soporte</strong> en 1H — no comprar arriba<br>'+
+          '• Entrá cuando 1H confirme ≥ 2/3 señales de timing<br>'+
+          '• TP típico: <strong style="color:#00c853">8–15%</strong> · SL: debajo del soporte<br>'+
+          '• 💡 4H te dice el lado, 1H te dice cuándo'+
+        '</div>'+
+        (noLongOverride?'<div style="margin-top:6px;padding:6px 8px;background:rgba(255,61,87,.15);border-radius:6px;font-size:11px;font-weight:800;color:#ff3d57">⚠️ BTC cayendo fuerte en 4H — revisá antes de entrar</div>':'')+
+        (earlySignal?'<div style="margin-top:6px;padding:6px 8px;background:rgba(255,209,0,.12);border-radius:6px;font-size:11px;font-weight:700;color:#ffd100">🟡 Señal temprana: mid caps liderando, esperá confirmación Top50</div>':'')+
+      '</div>';
+    } else if(dirMode==='short'){
+      execHTML='<div style="background:rgba(255,61,87,.08);border-radius:10px;padding:10px 12px;margin-bottom:10px">'+
+        '<div style="font-size:12px;font-weight:900;color:#ff3d57;margin-bottom:6px">🎯 Cómo ejecutar el SHORT</div>'+
+        '<div style="font-size:11px;color:var(--text);line-height:1.7">'+
+          '• Esperá <strong>rebote a resistencia</strong> en 1H — no shortear en caída<br>'+
+          '• Buscá rechazo claro con velas de reversión<br>'+
+          '• TP típico: <strong style="color:#ff3d57">5–12%</strong> · SL: arriba del máximo local<br>'+
+          '• 💡 4H te dice el lado, 1H te dice cuándo'+
+        '</div>'+
+        (noShortOverride?'<div style="margin-top:6px;padding:6px 8px;background:rgba(255,209,0,.15);border-radius:6px;font-size:11px;font-weight:800;color:#ffd100">⚠️ BTC 4H aún positivo + alts verdes — cuidado con shorts</div>':'')+
+      '</div>';
     } else {
-      execHTML=
-        '<div style="background:rgba(255,209,0,.08);border-radius:10px;padding:10px 12px;margin-bottom:10px">'+
-          '<div style="font-size:12px;font-weight:900;color:#ffd100;margin-bottom:6px">⏳ Qué hacer ahora</div>'+
-          '<div style="font-size:11px;color:var(--text);line-height:1.7">'+
-            '❌ <strong>No forzar trade</strong><br>'+
-            '❌ <strong>No adivinar techo/piso</strong><br>'+
-            '✔️ Esperar, mirar, paciencia<br>'+
-            '✔️ Esperá que se cumplan 2/3 condiciones en un sentido claro'+
-          '</div>'+
-        '</div>';
+      execHTML='<div style="background:rgba(255,209,0,.08);border-radius:10px;padding:10px 12px;margin-bottom:10px">'+
+        '<div style="font-size:12px;font-weight:900;color:#ffd100;margin-bottom:6px">⏳ Qué hacer ahora</div>'+
+        '<div style="font-size:11px;color:var(--text);line-height:1.7">'+
+          '❌ <strong>No forzar trade</strong><br>'+
+          '❌ <strong>No adivinar techo/piso</strong><br>'+
+          '✔️ Esperá que Capa 1 llegue a 2/3 condiciones en un sentido claro'+
+        '</div>'+
+      '</div>';
     }
 
     // Top movers
+    const alts=marketsData.filter(c=>c.id!=='bitcoin'&&c.id!=='ethereum'&&c.price_change_percentage_1h_in_currency!=null);
+    const userTickers=[...new Set(D.trades.map(t=>t.ticker).filter(Boolean))];
+    const topMovers=alts.filter(c=>c.price_change_percentage_1h_in_currency>0).sort((a,b)=>b.price_change_percentage_1h_in_currency-a.price_change_percentage_1h_in_currency).slice(0,6);
+    const topMovers24=allAlts.filter(c=>(c.price_change_percentage_24h||0)>0).sort((a,b)=>(b.price_change_percentage_24h||0)-(a.price_change_percentage_24h||0)).slice(0,6);
     function moversRow(list, field, label){
       if(!list.length)return '';
       return '<div style="margin-bottom:8px">'+
         '<div style="font-size:11px;font-weight:700;color:var(--text2);margin-bottom:5px;text-transform:uppercase;letter-spacing:.5px">'+label+'</div>'+
         '<div style="display:flex;flex-wrap:wrap;gap:5px">'+
-        list.map(c=>{
-          const isMine=userTickers.includes(c.symbol.toUpperCase());
-          const val=(c[field]||0).toFixed(1);
+        list.map(c=>{const isMine=userTickers.includes(c.symbol.toUpperCase());const val=(c[field]||0).toFixed(1);
           return '<span style="background:'+(isMine?'rgba(255,107,0,.2)':'rgba(0,200,83,.12)')+';color:'+(isMine?'#ff6b00':'#00c853')+';border-radius:6px;padding:3px 8px;font-size:11px;font-weight:800">'+(isMine?'★ ':'')+c.symbol.toUpperCase()+' +'+val+'%</span>';
         }).join('')+
         '</div></div>';
     }
     const topMoversHTML=(topMovers.length||topMovers24.length)?
       '<div style="margin-bottom:10px">'+
-      moversRow(topMovers,'price_change_percentage_1h_in_currency','🚀 Líderes 1h')+
-      moversRow(topMovers24,'price_change_percentage_24h','📈 Líderes 24h')+
+      moversRow(topMovers,'price_change_percentage_1h_in_currency','🚀 Líderes 1H')+
+      moversRow(topMovers24,'price_change_percentage_24h','📈 Líderes 24H')+
       '<div style="font-size:9px;color:var(--text2);margin-top:2px">★ = tickers que operás</div>'+
       '</div>':'';
 
-    // Warning rules
-    const warningsHTML=
-      '<div style="font-size:11px;color:var(--text2);border-top:1px solid var(--border);padding-top:8px;margin-top:4px">'+
-        (noLongOverride&&mode!=='long'?'<div style="color:#ff3d57;font-weight:700;margin-bottom:3px">❌ No longear: BTC cayendo fuerte — aunque veas una alt "barata"</div>':'')+
-        (noShortOverride&&mode!=='short'?'<div style="color:#ffd100;font-weight:700;margin-bottom:3px">❌ No shortear: BTC lateral + alts verdes</div>':'')+
-        '<div style="opacity:.6;margin-top:4px">Actualizado: '+new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})+'</div>'+
-      '</div>';
-
     box.style.background=semBg;
     box.innerHTML=
-      // Big verdict
-      '<div style="background:'+(mode==='long'?'rgba(0,200,83,.15)':mode==='short'?'rgba(255,61,87,.12)':'rgba(255,209,0,.12)')+';border-radius:10px;padding:12px;margin-bottom:12px;text-align:center">'+
+      // Veredicto principal
+      '<div style="background:'+(dirMode==='long'?'rgba(0,200,83,.15)':dirMode==='short'?'rgba(255,61,87,.12)':'rgba(255,209,0,.12)')+';border-radius:10px;padding:12px;margin-bottom:10px;text-align:center">'+
         '<div style="font-size:28px;margin-bottom:4px">'+semaphore+'</div>'+
         '<div style="font-size:15px;font-weight:900;color:'+actionColor+'">'+action+'</div>'+
-        (mode==='long'?'<div style="font-size:11px;color:#00c853;margin-top:3px;opacity:.8">Buscar LONG en retest de soporte</div>':
-         mode==='short'?'<div style="font-size:11px;color:#ff3d57;margin-top:3px;opacity:.8">Buscar SHORT en rebote a resistencia</div>':
-         '<div style="font-size:11px;color:#ffd100;margin-top:3px;opacity:.8">Esperá confirmación clara</div>')+
+        (dirMode==='long'?'<div style="font-size:11px;color:#00c853;margin-top:3px;opacity:.8">4H dice LONG — esperá 1H para entrar</div>':
+         dirMode==='short'?'<div style="font-size:11px;color:#ff3d57;margin-top:3px;opacity:.8">4H dice SHORT — esperá rebote 1H para entrar</div>':
+         '<div style="font-size:11px;color:#ffd100;margin-top:3px;opacity:.8">Esperá confirmación 4H clara</div>')+
       '</div>'+
-      conditionsHTML+
+
+      // Regla de oro
+      '<div style="background:var(--surface2);border-radius:8px;padding:8px 12px;margin-bottom:10px;text-align:center;font-size:11px;font-weight:700;color:var(--text2)">'+
+        '🔥 <em>"La 4H te dice hacia dónde, la 1H te hace entrar"</em>'+
+      '</div>'+
+
+      // CAPA 1 — Dirección
+      '<div style="font-size:11px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.6px;margin-bottom:6px">'+
+        '🧭 Capa 1 — Dirección (4H + 24H)&nbsp;<span style="font-size:10px;font-weight:700;background:rgba(255,107,0,.15);color:#ff6b00;padding:1px 6px;border-radius:4px">respetá esta</span>'+
+      '</div>'+
+      dirRow(d1Long,d1Short,'BTC Dirección 4H · 24H (70/30)',d1detail)+
+      dirRow(d2Long,d2Short,'ETH/BTC diferencial 4H',d2detail)+
+      dirRow(d3Long,d3Short,'Amplitud altcoins 24H (Top50+100)',d3detail)+
+
+      conflictHTML+
       execHTML+
-      topMoversHTML+
-      warningsHTML;
+
+      // CAPA 2 — Timing 1H
+      '<div style="font-size:11px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.6px;margin-bottom:6px;margin-top:4px">'+
+        '⚡ Capa 2 — Timing 1H (entrada)&nbsp;<span style="font-size:10px;font-weight:700;background:'+(timingChipBg)+';color:'+timingChipColor+';padding:1px 6px;border-radius:4px">'+timingLabel+'</span>'+
+      '</div>'+
+      timingRow(t1Long,t1Short,'BTC 1H momentum',t1detail)+
+      timingRow(t2Long,t2Short,'ETH 1H lidera vs BTC',t2detail)+
+      timingRow(t3Long,t3Short,'Alts 1H breadth',t3detail)+
+
+      '<div style="margin-top:6px;padding:6px 10px;background:var(--surface2);border-radius:8px;font-size:10px;font-weight:700;color:var(--text2)">'+
+        (dirMode==='long'&&timingMode==='long'?'✅ 4H + 1H alineados → <strong style="color:#00c853">entrada válida LONG</strong>':
+         dirMode==='long'&&timingMode==='short'?'🕐 4H LONG pero 1H bajando → <strong style="color:#ffd100">esperá pullback para entrar LONG</strong>':
+         dirMode==='short'&&timingMode==='short'?'✅ 4H + 1H alineados → <strong style="color:#ff3d57">entrada válida SHORT</strong>':
+         dirMode==='short'&&timingMode==='long'?'🕐 4H SHORT pero 1H rebota → <strong style="color:#ffd100">esperá rebote para entrar SHORT</strong>':
+         '⏳ Esperá alineación 4H + 1H en el mismo sentido')+
+      '</div>'+
+
+      // Top movers
+      (topMoversHTML?'<div style="margin-top:10px">'+topMoversHTML+'</div>':'')+
+
+      // Footer
+      '<div style="font-size:10px;color:var(--text2);border-top:1px solid var(--border);padding-top:8px;margin-top:8px;opacity:.7">'+
+        (hasBinance4h?'📊 Datos 4H: Binance · ':'⚠️ Sin datos 4H (Binance) · ')+
+        'CoinGecko 1H/24H · '+
+        'Actualizado: '+new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})+
+      '</div>';
 
   } catch(e){
     const box=document.getElementById('cycle-status');
