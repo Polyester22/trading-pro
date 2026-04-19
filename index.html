@@ -2034,7 +2034,8 @@ function renderOpenTrades(){
       ${(()=>{const rec=getTradeRecommendation(t,livePct,totalMins,tickerChangeCache[t.ticker]||null);const cev=getCompositeEV(t);return`<div style="display:flex;align-items:center;gap:8px;background:${rec.bg};border:1px solid ${rec.border};border-radius:8px;padding:8px 10px;margin-top:8px"><div style="flex:1"><div style="font-size:12px;font-weight:900;color:${rec.color}">${rec.action}</div><div style="font-size:10px;color:var(--text2);margin-top:1px">${rec.reason}</div></div>${cev?`<div style="text-align:right;flex-shrink:0"><div style="font-size:9px;color:var(--text2);font-weight:700">EV HIST</div><div style="font-size:13px;font-weight:900;color:${cev.ev>=0?'#00c853':'#ff3d57'}">${cev.ev>=0?'+':''}${cev.ev.toFixed(1)}%</div><div style="font-size:8px;color:var(--text2)">${cev.sources} fuentes</div></div>`:''}</div>`;})()}
       <div style="display:flex;gap:6px;margin-top:10px" onclick="event.stopPropagation()">
         <button class="btn btn-dark btn-sm" style="flex:1;font-size:12px" onclick="openMCP('${t.id}',false)">📉 Cierre parcial</button>
-        <button class="btn btn-orange btn-sm" style="flex:1;font-size:12px" onclick="openMCP('${t.id}',true)">✅ Cerrar trade</button>
+        <button class="btn btn-dark btn-sm" style="flex:1;font-size:12px" onclick="openPromedio('${t.id}')">➕ Promediar</button>
+        <button class="btn btn-orange btn-sm" style="flex:1;font-size:12px" onclick="openMCP('${t.id}',true)">✅ Cerrar</button>
       </div>
     </div>`;
   }).join('');
@@ -4408,6 +4409,166 @@ function renderPikachuStatsBlock(T){
     '</div>';
 }
 
+// ── PROMEDIAR POSICIÓN ─────────────────────────────────────────────────
+let _promTradeId = null;
+
+function openPromedio(id){
+  const t = D.trades.find(x=>x.id===id);
+  if(!t) return;
+  _promTradeId = id;
+
+  const margenOrig = t.margen; // restante actual (post-parciales)
+  const entradaOrig = t.entrada || 0;
+  const livePrice = livePrices[t.ticker] || t.actual || 0;
+  const pctNow = (entradaOrig && livePrice) ? calcPct(entradaOrig, livePrice, t.pos, t.lev) : null;
+  const tuvoParcial = t.margenOriginal && t.margenOriginal > t.margen;
+
+  document.getElementById('prom-precio').value = '';
+  document.getElementById('prom-margen').value = '';
+  document.getElementById('prom-obs').value = '';
+  document.getElementById('prom-result').innerHTML = 'Ingresá precio y margen para ver el promedio';
+  document.getElementById('prom-result').style.borderColor = 'var(--border)';
+
+  const posColor = t.pos==='Long'?'#00c853':'#ff3d57';
+  document.getElementById('prom-summary').innerHTML =
+    `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+      <span style="font-size:18px;font-weight:900">${t.ticker}</span>
+      <span class="badge badge-${t.pos.toLowerCase()}">${t.pos}</span>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;font-size:11px">
+      <div style="background:var(--input-bg);border-radius:7px;padding:7px;text-align:center">
+        <div style="color:var(--text2);font-size:9px;font-weight:700;margin-bottom:2px">ENTRADA ACTUAL</div>
+        <div style="font-weight:900;color:#ff6b00">$${entradaOrig||'—'}</div>
+      </div>
+      <div style="background:var(--input-bg);border-radius:7px;padding:7px;text-align:center">
+        <div style="color:var(--text2);font-size:9px;font-weight:700;margin-bottom:2px">MARGEN RESTANTE</div>
+        <div style="font-weight:900">$${margenOrig}${tuvoParcial?'<div style="font-size:8px;color:#ffd100;margin-top:1px">de $'+t.margenOriginal+' orig</div>':''}</div>
+      </div>
+      <div style="background:var(--input-bg);border-radius:7px;padding:7px;text-align:center">
+        <div style="color:var(--text2);font-size:9px;font-weight:700;margin-bottom:2px">P&L LIVE</div>
+        <div style="font-weight:900;color:${pctNow===null?'var(--text2)':pctNow>=0?'#00c853':'#ff3d57'}">${pctNow!==null?(pctNow>=0?'+':'')+pctNow.toFixed(2)+'%':'—'}</div>
+      </div>
+    </div>`+
+    (tuvoParcial?`<div style="margin-top:8px;font-size:10px;font-weight:700;color:#ffd100;background:rgba(255,209,0,.08);border-radius:6px;padding:5px 8px">
+      ⚠️ Promedio calculado sobre el margen restante ($${margenOrig}), no el original ($${t.margenOriginal})
+    </div>`:'');
+
+  document.getElementById('modal-promedio').classList.add('open');
+}
+
+function promCalc(){
+  const t = D.trades.find(x=>x.id===_promTradeId);
+  if(!t) return;
+  const newPrecio = parseFloat(document.getElementById('prom-precio').value);
+  const newMargen = parseFloat(document.getElementById('prom-margen').value);
+  const el = document.getElementById('prom-result');
+
+  if(!newPrecio || !newMargen || newPrecio<=0 || newMargen<=0){
+    el.innerHTML = 'Ingresá precio y margen para ver el promedio';
+    el.style.borderColor = 'var(--border)';
+    return;
+  }
+
+  const entradaOrig = t.entrada || 0;
+  const margenOrig = t.margen; // margen RESTANTE (post-cierres parciales), no el original
+
+  if(!entradaOrig){
+    el.innerHTML = '<span style="color:#ffd100">⚠️ El trade no tiene precio de entrada guardado</span>';
+    return;
+  }
+
+  // Precio promedio ponderado: (entrada1×margen1 + entrada2×margen2) / (margen1+margen2)
+  const margenTotal = margenOrig + newMargen;
+  const entradaPromedio = (entradaOrig * margenOrig + newPrecio * newMargen) / margenTotal;
+
+  // P&L actual con precio nuevo promediado (usando precio live si hay)
+  const livePrice = livePrices[t.ticker] || t.actual || 0;
+  const pctNew = livePrice ? calcPct(entradaPromedio, livePrice, t.pos, t.lev) : null;
+  const pctOld = livePrice ? calcPct(entradaOrig, livePrice, t.pos, t.lev) : null;
+
+  const mejora = (pctNew !== null && pctOld !== null) ? pctNew - pctOld : null;
+  const mejoraColor = mejora === null ? 'var(--text2)' : mejora > 0 ? '#00c853' : mejora < 0 ? '#ff3d57' : 'var(--text2)';
+
+  el.style.borderColor = '#ff6b00';
+  el.innerHTML =
+    `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;text-align:center">
+      <div>
+        <div style="font-size:9px;color:var(--text2);font-weight:700;margin-bottom:3px">ENTRADA PROMEDIO</div>
+        <div style="font-size:20px;font-weight:900;color:#ff6b00">$${entradaPromedio<1?entradaPromedio.toFixed(5):entradaPromedio<100?entradaPromedio.toFixed(3):entradaPromedio.toFixed(2)}</div>
+      </div>
+      <div>
+        <div style="font-size:9px;color:var(--text2);font-weight:700;margin-bottom:3px">MARGEN TOTAL</div>
+        <div style="font-size:20px;font-weight:900">$${margenTotal.toFixed(0)}</div>
+      </div>
+    </div>`+
+    (pctNew !== null ?
+      `<div style="border-top:1px solid var(--border);margin-top:10px;padding-top:8px;display:flex;justify-content:space-around">
+        <div style="text-align:center">
+          <div style="font-size:9px;color:var(--text2);font-weight:700;margin-bottom:2px">P&L ANTES</div>
+          <div style="font-size:14px;font-weight:900;color:${pctOld>=0?'#00c853':'#ff3d57'}">${pctOld>=0?'+':''}${pctOld.toFixed(2)}%</div>
+        </div>
+        <div style="text-align:center">
+          <div style="font-size:9px;color:var(--text2);font-weight:700;margin-bottom:2px">P&L DESPUÉS</div>
+          <div style="font-size:14px;font-weight:900;color:${pctNew>=0?'#00c853':'#ff3d57'}">${pctNew>=0?'+':''}${pctNew.toFixed(2)}%</div>
+        </div>
+        <div style="text-align:center">
+          <div style="font-size:9px;color:var(--text2);font-weight:700;margin-bottom:2px">CAMBIO</div>
+          <div style="font-size:14px;font-weight:900;color:${mejoraColor}">${mejora>=0?'+':''}${mejora.toFixed(2)}%</div>
+        </div>
+      </div>` : '');
+}
+
+function savePromedio(){
+  const t = D.trades.find(x=>x.id===_promTradeId);
+  if(!t) return;
+  const newPrecio = parseFloat(document.getElementById('prom-precio').value);
+  const newMargen = parseFloat(document.getElementById('prom-margen').value);
+  if(!newPrecio || !newMargen || newPrecio<=0 || newMargen<=0){
+    alert('Ingresá precio y margen válidos'); return;
+  }
+  const entradaOrig = t.entrada || 0;
+  if(!entradaOrig){ alert('El trade no tiene precio de entrada guardado'); return; }
+
+  const margenOrig = t.margen; // restante actual (post-parciales) — es lo que pesa en el promedio
+  const margenTotal = margenOrig + newMargen;
+  const entradaPromedio = (entradaOrig * margenOrig + newPrecio * newMargen) / margenTotal;
+
+  // margenOriginal = todo el capital desplegado acumulado (aperturas + promedios)
+  // Se suma el nuevo margen al capital total previo (no al restante)
+  const capitalPrevio = t.margenOriginal || t.margen; // total antes de este promedio
+  t.margenOriginal = capitalPrevio + newMargen;
+
+  // Registrar historial de promedios
+  if(!t.promedios) t.promedios = [];
+  t.promedios.push({
+    fecha: new Date().toISOString(),
+    entradaAnterior: entradaOrig,
+    margenAnterior: t.margen,
+    nuevaEntrada: newPrecio,
+    nuevoMargen: newMargen,
+    entradaResultante: parseFloat(entradaPromedio.toFixed(8)),
+    margenResultante: margenTotal,
+    obs: document.getElementById('prom-obs').value.trim()
+  });
+
+  // Actualizar el trade
+  t.entrada = parseFloat(entradaPromedio.toFixed(8));
+  t.margen = margenTotal;
+
+  const obs = document.getElementById('prom-obs').value.trim();
+  if(obs) t.obs = (t.obs ? t.obs + ' · ' : '') + 'Promedio: ' + obs;
+
+  persist(D);
+  closePromedio();
+  updateKPIs();
+  renderOpenTrades();
+}
+
+function closePromedio(){
+  document.getElementById('modal-promedio').classList.remove('open');
+  _promTradeId = null;
+}
+
 </script>
 
 <!-- MODAL RESUMEN SEMANAL -->
@@ -4471,12 +4632,35 @@ function renderPikachuStatsBlock(T){
     </div>
   </div>
 </div>
+<!-- MODAL PROMEDIO -->
+<div class="modal-overlay" id="modal-promedio" onclick="if(event.target===this)closePromedio()">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title">➕ Promediar posición</div>
+    <div id="prom-summary" style="background:var(--surface2);border-radius:10px;padding:12px 14px;margin-bottom:14px"></div>
+    <div class="row2" style="margin-bottom:8px">
+      <div class="field">
+        <label>Nuevo precio de entrada</label>
+        <input type="text" inputmode="decimal" id="prom-precio" placeholder="ej: 0.1100" autocomplete="off" oninput="promCalc()">
+      </div>
+      <div class="field">
+        <label>Margen adicional ($)</label>
+        <input type="text" inputmode="decimal" id="prom-margen" placeholder="ej: 50" autocomplete="off" oninput="promCalc()">
+      </div>
+    </div>
+    <!-- Preview resultado -->
+    <div id="prom-result" style="background:var(--input-bg);border:1.5px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:13px;color:var(--text2);text-align:center">
+      Ingresá precio y margen para ver el promedio
+    </div>
+    <div class="field">
+      <label>Observaciones (opcional)</label>
+      <input type="text" id="prom-obs" placeholder="ej: Promedio en soporte...">
+    </div>
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <button class="btn btn-dark" onclick="closePromedio()" style="flex:1;margin:0">Cancelar</button>
+      <button class="btn btn-orange" onclick="savePromedio()" style="flex:1;margin:0">✅ Confirmar promedio</button>
+    </div>
+  </div>
+</div>
 </body>
 </html>
-<script>
-// Injected patch — partial close + what-if
-// These override/extend functions defined above
-
-
-// renderRiskExposure is called directly inside renderOpenTrades above
-
