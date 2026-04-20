@@ -2017,6 +2017,7 @@ function renderOpenTrades(){
           ${tp.trailingNote}
         </div>`;
       })()}
+      ${renderTPProbBlock(t, livePct)}
       ${(()=>{const rec=getTradeRecommendation(t,livePct,totalMins,tickerChangeCache[t.ticker]||null);const cev=getCompositeEV(t);return`<div style="display:flex;align-items:center;gap:8px;background:${rec.bg};border:1px solid ${rec.border};border-radius:8px;padding:8px 10px;margin-top:8px"><div style="flex:1"><div style="font-size:12px;font-weight:900;color:${rec.color}">${rec.action}</div><div style="font-size:10px;color:var(--text2);margin-top:1px">${rec.reason}</div></div>${cev?`<div style="text-align:right;flex-shrink:0"><div style="font-size:9px;color:var(--text2);font-weight:700">EV HIST</div><div style="font-size:13px;font-weight:900;color:${cev.ev>=0?'#00c853':'#ff3d57'}">${cev.ev>=0?'+':''}${cev.ev.toFixed(1)}%</div><div style="font-size:8px;color:var(--text2)">${cev.sources} fuentes</div></div>`:''}</div>`;})()}
       <div style="display:flex;gap:6px;margin-top:10px" onclick="event.stopPropagation()">
         <button class="btn btn-dark btn-sm" style="flex:1;font-size:12px" onclick="openMCP('${t.id}',false)">📉 Cierre parcial</button>
@@ -3764,6 +3765,12 @@ function init(){
   loadCapital();migratePatronFromObs();setTimeout(updateCapitalDisplay,100);populateSelects();updateTickerDropdown();updatePreviews();updateKPIs();updateOpenCount();updateSyncLastTime();setTimeout(startCycleMonitor,2000);
   // Auto-switch to En Curso if there are open trades
   if(D.trades.some(t=>t.open))switchTab('abiertos');
+  // Bootstrap momentum stats from existing closed trades (only if no data yet)
+  const existingStats = loadMomentumStats();
+  const hasData = Object.values(['fuerte','medio','debil']).some(k=>existingStats[k]&&existingStats[k].count>0);
+  if(!hasData){
+    D.trades.filter(t=>!t.open&&t.resultado!==undefined&&t.entryContextScore!==undefined).forEach(t=>updateMomentumStats(t));
+  }
 }
 
 init();
@@ -4026,7 +4033,10 @@ function saveTrade(){
     p10:document.getElementById('f-10p').checked,obs:document.getElementById('f-obs').value,estado:document.getElementById('f-estado').value||null,semaforo:document.getElementById('f-semaforo').value||null,resultado,
     ...(closedHoraFinal?{closedHora:closedHoraFinal}:{})};
   if(editingId){const i=D.trades.findIndex(x=>x.id===editingId);D.trades[i]=t;}else{D.trades.push(t);}
-  persist(D);const wasEditing=!!editingId;const wasOpen=t.open;resetForm();updateKPIs();updateTickerDropdown();updateOpenCount();
+  persist(D);
+  // Auto-learning: update stats when trade is saved as closed
+  if(!t.open && t.resultado !== undefined) updateMomentumStats(t);
+  const wasEditing=!!editingId;const wasOpen=t.open;resetForm();updateKPIs();updateTickerDropdown();updateOpenCount();
   if(wasEditing) switchTab(wasOpen?'abiertos':'historial');
   else if(wasOpen) switchTab('abiertos'); // nuevo trade abierto → ir directo a En curso
 }
@@ -4234,6 +4244,227 @@ function getTradeRecommendation(t, livePct, totalMins, tc){
     reason:(has?'Sin señal clara por ahora':'Actualizá precios para análisis del ticker')+tkCtx+tkMov};
 }
 
+// ══ AUTO-LEARNING: PROBABILIDAD DE TP ══════════════════════════════════════
+
+// Storage helpers for momentum stats
+const MSTATS_KEY = 'tpro_momentum_stats';
+
+function loadMomentumStats(){
+  try{
+    const raw = localStorage.getItem(MSTATS_KEY);
+    if(raw) return JSON.parse(raw);
+  }catch(e){}
+  // Priors calibrados si no hay datos propios aún
+  return {
+    fuerte: {count:0, hit3:0, hit5:0, hit8:0, hit12:0, avgMax:7.5},
+    medio:  {count:0, hit3:0, hit5:0, hit8:0, hit12:0, avgMax:4.5},
+    debil:  {count:0, hit3:0, hit5:0, hit8:0, hit12:0, avgMax:2.5},
+    _priors: {
+      fuerte: {p3:0.72, p5:0.48, p8:0.22, p12:0.10, avgMax:7.5},
+      medio:  {p3:0.55, p5:0.30, p8:0.10, p12:0.04, avgMax:4.5},
+      debil:  {p3:0.35, p5:0.15, p8:0.05, p12:0.01, avgMax:2.5}
+    }
+  };
+}
+
+function saveMomentumStats(stats){
+  try{ localStorage.setItem(MSTATS_KEY, JSON.stringify(stats)); }catch(e){}
+}
+
+function getTier(score){
+  if(score >= 7) return 'fuerte';
+  if(score >= 4) return 'medio';
+  return 'debil';
+}
+
+// Calcular el context score de un trade al momento del cierre/apertura
+function calcContextScore(tc, pos){
+  if(!tc) return null;
+  const isLong = pos === 'Long';
+  const c1h  = tc.change1h  || 0;
+  const c4h  = tc.change4h  || 0;
+  const c24  = tc.change24h || 0;
+  const btc1h = _cgCache?.pd?.bitcoin?.usd_1h_change || 0;
+  const rs    = c1h - btc1h;
+  const accel = c1h - (c24 / 24);
+  const md    = _cgCache?.md || [];
+  const alts  = md.filter(c=>c.id!=='bitcoin'&&c.id!=='ethereum'&&c.price_change_percentage_24h!=null);
+  const amp   = alts.length ? Math.round(alts.filter(c=>(c.price_change_percentage_24h||0)>0).length/alts.length*100) : 50;
+
+  let score = 0;
+  if(isLong){
+    if(Math.abs(c1h) > 1)  score += 2;   // 1H significativo
+    if(Math.abs(c4h) > 3)  score += 2;   // 4H fuerte
+    if(isLong ? rs > 0 : rs < 0) score += 2; // RS a favor
+    if(amp > 60 && isLong) score += 2;   // amplitud alcista
+    if(isLong ? accel > 0.05 : accel < -0.05) score += 2; // acelerando
+  } else {
+    if(c1h < -1)  score += 2;
+    if(c4h < -3)  score += 2;
+    if(rs   < 0)  score += 2;
+    if(amp  < 40) score += 2;
+    if(accel < -0.05) score += 2;
+  }
+  return Math.min(10, score); // 0–10
+}
+
+// Llamar esto al cerrar un trade (saveMCP lo invoca)
+function updateMomentumStats(trade){
+  if(!trade || trade.open) return; // solo cerrados
+  if(trade.resultado === undefined || trade.resultado === null) return;
+  const entryScore = trade.entryContextScore;
+  if(entryScore === undefined || entryScore === null) return;
+
+  const stats = loadMomentumStats();
+  const tier  = getTier(entryScore);
+  const s     = stats[tier];
+
+  // maxMovePct: usamos resultado si no tenemos el máximo real
+  const maxMove = trade.maxMovePct !== undefined ? Math.abs(trade.maxMovePct) : Math.abs(trade.resultado);
+
+  s.count  = (s.count  || 0) + 1;
+  s.hit3   = (s.hit3   || 0) + (maxMove >= 3  ? 1 : 0);
+  s.hit5   = (s.hit5   || 0) + (maxMove >= 5  ? 1 : 0);
+  s.hit8   = (s.hit8   || 0) + (maxMove >= 8  ? 1 : 0);
+  s.hit12  = (s.hit12  || 0) + (maxMove >= 12 ? 1 : 0);
+  s.avgMax = ((s.avgMax || 0) * (s.count - 1) + maxMove) / s.count;
+
+  saveMomentumStats(stats);
+}
+
+// Obtener probabilidades para un tier, mezclando priors con datos propios
+function getTPProbs(tier, stats){
+  const s = stats[tier];
+  const p = stats._priors[tier];
+  const n = s.count || 0;
+
+  // Blending: datos propios ganan peso a medida que crecen (>10 trades = 100% propios)
+  const w = Math.min(1, n / 10);
+  const blend = (own, prior) => w * own + (1 - w) * prior;
+
+  if(n === 0) return { p3: p.p3, p5: p.p5, p8: p.p8, p12: p.p12, avgMax: p.avgMax, n: 0, source: 'prior' };
+
+  return {
+    p3:     blend(s.hit3  / n, p.p3),
+    p5:     blend(s.hit5  / n, p.p5),
+    p8:     blend(s.hit8  / n, p.p8),
+    p12:    blend(s.hit12 / n, p.p12),
+    avgMax: blend(s.avgMax,    p.avgMax),
+    n,
+    source: n >= 10 ? 'tuya' : `${n} trades tuyos + prior`
+  };
+}
+
+// Ajustar probs si el trade ya se movió
+function adjustProbs(probs, currentMovePct){
+  const cm = Math.abs(currentMovePct || 0);
+  const adj = { ...probs };
+  if(cm > 6){  adj.p12 *= 0.4; adj.p8  *= 0.5; }
+  else if(cm > 4){ adj.p8  *= 0.6; adj.p12 *= 0.5; }
+  else if(cm > 2){ adj.p8  *= 0.8; }
+  return adj;
+}
+
+// % del potencial ya consumido
+function potentialUsed(currentMovePct, avgMax){
+  if(!avgMax || avgMax === 0) return 0;
+  return Math.min(100, Math.round(Math.abs(currentMovePct) / avgMax * 100));
+}
+
+// Señal automática de decisión
+function autoSignal(potUsed, probs, currentMovePct){
+  const cm = Math.abs(currentMovePct || 0);
+  if(potUsed > 85 && probs.p8 < 0.20)
+    return { text: '⚠️ Cerrar parcial o todo — gran parte del potencial consumido', col: '#ffd100' };
+  if(potUsed > 70 && probs.p12 < 0.10)
+    return { text: '🟡 Asegurar — quedan pocas chances de extensión', col: '#ffd100' };
+  if(probs.p5 > 0.45 && potUsed < 40)
+    return { text: '🟢 Dejar correr — buen potencial sin consumir', col: '#00c853' };
+  if(cm < 1 && probs.p3 > 0.60)
+    return { text: '🟢 Mantener — alta probabilidad de avance', col: '#00c853' };
+  return null;
+}
+
+// Renderizar el bloque de probabilidades en el trade card
+function renderTPProbBlock(trade, livePct){
+  const tc = tickerChangeCache[trade.ticker] || null;
+  const contextScore = calcContextScore(tc, trade.pos);
+  if(contextScore === null) return ''; // sin datos de mercado
+
+  // Guardar el context score en el trade si no estaba
+  if(trade.entryContextScore === undefined){
+    trade.entryContextScore = contextScore;
+    persist(D);
+  }
+
+  const tier   = getTier(contextScore);
+  const stats  = loadMomentumStats();
+  const rawP   = getTPProbs(tier, stats);
+  const cm     = livePct !== null ? Math.abs(livePct) : 0;
+  const adjP   = adjustProbs(rawP, cm);
+  const potU   = potentialUsed(cm, rawP.avgMax);
+  const signal = autoSignal(potU, adjP, cm);
+
+  const tierLabel = tier==='fuerte'?'🔥 Momentum fuerte':tier==='medio'?'🟡 Momentum medio':'⚠️ Momentum débil';
+  const tierColor = tier==='fuerte'?'#00c853':tier==='medio'?'#ffd100':'#ff6b00';
+
+  // Barra de potencial usado
+  const potColor = potU > 80 ? '#ff3d57' : potU > 55 ? '#ffd100' : '#00c853';
+
+  // Prob bar helper
+  const probBar = (pct, col) => {
+    const w = Math.round(pct * 100);
+    return `<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+      <div style="flex:1;height:5px;background:var(--border);border-radius:3px;overflow:hidden">
+        <div style="height:100%;width:${w}%;background:${col};border-radius:3px;transition:width .4s"></div>
+      </div>
+      <span style="font-size:10px;font-weight:800;color:${col};min-width:30px;text-align:right">${w}%</span>
+    </div>`;
+  };
+
+  return `<div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-top:8px" onclick="event.stopPropagation()">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <div style="font-size:11px;font-weight:900;color:var(--text)">📊 Probabilidad de continuación</div>
+      <div style="font-size:9px;font-weight:700;color:${tierColor}">${tierLabel}</div>
+    </div>
+
+    <div style="margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;margin-bottom:3px">
+        <span style="font-size:10px;color:var(--text2)">🎯 TP1 alcanza 3%</span>
+      </div>
+      ${probBar(adjP.p3, '#00c853')}
+      <div style="display:flex;justify-content:space-between;margin-bottom:3px;margin-top:5px">
+        <span style="font-size:10px;color:var(--text2)">🚀 TP2 alcanza 5%</span>
+      </div>
+      ${probBar(adjP.p5, '#ff6b00')}
+      <div style="display:flex;justify-content:space-between;margin-bottom:3px;margin-top:5px">
+        <span style="font-size:10px;color:var(--text2)">💣 Runner alcanza 8%</span>
+      </div>
+      ${probBar(adjP.p8, '#ff3d57')}
+      <div style="display:flex;justify-content:space-between;margin-bottom:3px;margin-top:5px">
+        <span style="font-size:10px;color:var(--text2)">⚡ Extensión 12%+</span>
+      </div>
+      ${probBar(adjP.p12, '#9999b8')}
+    </div>
+
+    <!-- Potencial consumido -->
+    <div style="margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
+        <span style="font-size:10px;color:var(--text2)">Potencial consumido</span>
+        <span style="font-size:11px;font-weight:900;color:${potColor}">${potU}%</span>
+      </div>
+      <div style="height:6px;background:var(--border);border-radius:3px;overflow:hidden">
+        <div style="height:100%;width:${potU}%;background:${potColor};border-radius:3px;transition:width .5s"></div>
+      </div>
+      <div style="font-size:9px;color:var(--text2);margin-top:2px">Movimiento actual: ${cm.toFixed(1)}% · Promedio histórico: ${rawP.avgMax.toFixed(1)}%</div>
+    </div>
+
+    ${signal ? `<div style="font-size:10px;font-weight:800;color:${signal.col};padding:5px 8px;background:${signal.col==='#00c853'?'rgba(0,200,83,.1)':signal.col==='#ffd100'?'rgba(255,209,0,.1)':'rgba(255,61,87,.1)'};border-radius:6px;margin-bottom:4px">${signal.text}</div>` : ''}
+
+    <div style="font-size:8px;color:var(--text2);opacity:.7;margin-top:2px">Score mkt: ${contextScore}/10 · ${rawP.source} · Probs ajustadas al movimiento actual</div>
+  </div>`;
+}
+
 // what-if replaced by renderKpiProjection
 
 // ── PARTIAL CLOSE MODAL ──
@@ -4390,7 +4621,10 @@ function saveMCP(){
     t.obs=`${totalClosed}% cerrado · P&L hasta acá: ${totalPnlSoFar>=0?'+':''}$${totalPnlSoFar.toFixed(2)} · quedan $${t.margen}`;
   }
   
-  persist(D);closeMCP();updateKPIs();updateOpenCount();renderOpenTrades();
+  persist(D);
+  // ── Auto-learning: update momentum stats on full close ──
+  if(mcpFullClose||pctClose===100){ updateMomentumStats(t); }
+  closeMCP();updateKPIs();updateOpenCount();renderOpenTrades();
   if(mcpFullClose||pctClose===100) setTimeout(()=>switchTab('historial'),300);
 }
 
