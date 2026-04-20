@@ -354,6 +354,16 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
     </div>
     <div class="check-row"><input type="checkbox" id="f-open"><label for="f-open">🟢 Trade abierto (en curso)</label></div>
     <div class="check-row"><input type="checkbox" id="f-10p"><label for="f-10p">🏆 Llegó al 10%</label></div>
+    <div class="field">
+      <label>🚦 ¿El semáforo acompañaba? <span style="color:var(--text2);font-size:9px;font-weight:600">opcional</span></label>
+      <div style="display:flex;gap:6px" id="f-semaforo-btns">
+        <button type="button" onclick="setSemaforo('si')"   class="semaforo-btn" data-val="si"   style="flex:1;padding:8px 6px;border-radius:8px;border:1.5px solid var(--border);background:var(--input-bg);color:var(--text2);font-family:'Nunito',sans-serif;font-size:12px;font-weight:700;cursor:pointer">🟢 Sí</button>
+        <button type="button" onclick="setSemaforo('no')"   class="semaforo-btn" data-val="no"   style="flex:1;padding:8px 6px;border-radius:8px;border:1.5px solid var(--border);background:var(--input-bg);color:var(--text2);font-family:'Nunito',sans-serif;font-size:12px;font-weight:700;cursor:pointer">🔴 No</button>
+        <button type="button" onclick="setSemaforo('neutro')" class="semaforo-btn" data-val="neutro" style="flex:1;padding:8px 6px;border-radius:8px;border:1.5px solid var(--border);background:var(--input-bg);color:var(--text2);font-family:'Nunito',sans-serif;font-size:12px;font-weight:700;cursor:pointer">🟡 Neutro</button>
+        <button type="button" onclick="setSemaforo('')"     class="semaforo-btn" data-val=""     style="flex:1;padding:8px 6px;border-radius:8px;border:1.5px solid var(--border);background:var(--input-bg);color:var(--text2);font-family:'Nunito',sans-serif;font-size:12px;font-weight:700;cursor:pointer">— N/A</button>
+      </div>
+      <input type="hidden" id="f-semaforo" value="">
+    </div>
     <div class="field" id="f-closedhora-row" style="display:none">
       <label>Fecha y hora de cierre <span style="color:var(--text2);font-size:9px;font-weight:600">(edición)</span></label>
       <input type="datetime-local" id="f-closedhora">
@@ -1056,6 +1066,7 @@ renderGraficos=function(){
   if(crossEl)crossEl.innerHTML=renderCrossStats(T);
   renderPikachuStatsBlock(T);
   renderEstadoStats(T);
+  renderSemaforoStats(T);
   renderBestTradeRec(T);
 };
 
@@ -1210,6 +1221,77 @@ function renderBestTradeRec(T){
 
 
 // ══ ESTADO MENTAL STATS ══
+// ══ SEMÁFORO × HISTORIAL STATS ══
+function renderSemaforoStats(T){
+  const el=document.getElementById('semaforo-stats-container');
+  if(!el)return;
+  const withSem=T.filter(t=>t.semaforo&&t.semaforo!=='');
+  if(withSem.length<3){
+    el.innerHTML='';
+    return;
+  }
+
+  function grpStats(arr){
+    if(!arr.length)return null;
+    const ev=arr.reduce((s,t)=>s+t.resultado,0)/arr.length;
+    const wr=arr.filter(t=>t.resultado>0).length/arr.length*100;
+    const pnl=arr.reduce((s,t)=>s+(t.margen*t.resultado/100),0);
+    return{n:arr.length,ev,wr,pnl};
+  }
+
+  const si     = withSem.filter(t=>t.semaforo==='si');
+  const no     = withSem.filter(t=>t.semaforo==='no');
+  const neutro = withSem.filter(t=>t.semaforo==='neutro');
+
+  const sSi=grpStats(si), sNo=grpStats(no), sNeu=grpStats(neutro);
+
+  function card(label, emoji, color, bg, s){
+    if(!s)return'';
+    const lowN=s.n<5;
+    return`<div style="background:${bg};border-radius:10px;padding:12px;flex:1;min-width:120px">
+      <div style="font-size:11px;font-weight:800;color:${color};margin-bottom:8px">${emoji} ${label}${lowN?' <span style="color:#ffd100;font-size:9px">⚠️</span>':''}</div>
+      <div style="font-size:22px;font-weight:900;color:${s.ev>=0?'#00c853':'#ff3d57'}">${s.ev>=0?'+':''}${s.ev.toFixed(1)}%</div>
+      <div style="font-size:10px;color:var(--text2);margin-top:3px">WR ${s.wr.toFixed(0)}% · ${s.n} trade${s.n>1?'s':''}</div>
+      <div style="font-size:10px;font-weight:700;color:${s.pnl>=0?'#00c853':'#ff3d57'};margin-top:2px">P&L ${s.pnl>=0?'+':''}$${s.pnl.toFixed(0)}</div>
+    </div>`;
+  }
+
+  // Insight principal
+  let insight='', insightCol='var(--text2)';
+  if(sSi&&sNo&&sSi.n>=3&&sNo.n>=3){
+    const diff=sSi.ev-sNo.ev;
+    if(diff>5){
+      insight=`Seguir el semáforo te da <strong style="color:#00c853">+${diff.toFixed(1)}%</strong> de EV extra por trade vs ignorarlo.`;
+      insightCol='#00c853';
+    } else if(diff<-3){
+      insight=`Curiosamente operás <strong style="color:#ffd100">${Math.abs(diff).toFixed(1)}% mejor</strong> cuando el semáforo no acompaña. Revisá si el semáforo está bien calibrado.`;
+      insightCol='#ffd100';
+    } else {
+      insight=`Sin diferencia significativa entre seguir o ignorar el semáforo todavía. Necesitás más muestra.`;
+    }
+  } else if(sSi&&sSi.n>=3){
+    insight=`${sSi.n} trades con semáforo a favor: EV ${sSi.ev>=0?'+':''}${sSi.ev.toFixed(1)}%. Agregá más trades para comparar.`;
+  }
+
+  // Pct de trades con semaforo registrado
+  const total=T.filter(t=>!t.open).length;
+  const pctRegistrado=total?Math.round(withSem.length/total*100):0;
+
+  el.innerHTML=`<div class="chart-box" style="cursor:default">
+    <div class="chart-label">🚦 Semáforo — ¿seguirlo hace diferencia?</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+      ${card('Semáforo sí','🟢','#00c853','rgba(0,200,83,.08)',sSi)}
+      ${card('Semáforo no','🔴','#ff3d57','rgba(255,61,87,.08)',sNo)}
+      ${card('Neutro','🟡','#ffd100','rgba(255,209,0,.08)',sNeu)}
+    </div>
+    ${insight?`<div style="font-size:12px;font-weight:700;color:${insightCol};background:var(--surface2);border-radius:8px;padding:9px 12px;margin-bottom:8px">${insight}</div>`:''}
+    <div style="font-size:10px;color:var(--text2)">
+      ${withSem.length} de ${total} trades con semáforo registrado (${pctRegistrado}%)
+      ${pctRegistrado<50?' · <span style="color:#ffd100">Registrá el semáforo al cargar trades para ver el análisis completo</span>':''}
+    </div>
+  </div>`;
+}
+
 function renderEstadoStats(T){
   var el=document.getElementById('estado-stats-container');
   if(!el)return;
@@ -1490,19 +1572,30 @@ function renderSessionStats(T){
 // ══ SHOW OBS POPUP ══
 function showObs(id){
   const t=D.trades.find(x=>x.id===id);
-  if(!t||!t.obs)return;
-  // Remove existing popup
+  if(!t)return;
   const existing=document.getElementById('obs-popup');
   if(existing)existing.remove();
   const pop=document.createElement('div');
   pop.id='obs-popup';
-  pop.style.cssText='position:fixed;bottom:80px;left:50%;transform:translateX(-50%);max-width:340px;width:90%;background:var(--card);border:1.5px solid #ff6b00;border-radius:12px;padding:14px 16px;z-index:9999;box-shadow:0 8px 32px rgba(0,0,0,.4);font-family:Nunito,sans-serif';
-  pop.innerHTML='<div style="font-size:11px;font-weight:700;color:#ff6b00;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">💬 '+t.ticker+' · '+t.fecha+'</div>'+
-    '<div style="font-size:13px;color:var(--text);line-height:1.6">'+t.obs+'</div>'+
-    '<div style="text-align:right;margin-top:8px"><button onclick="document.getElementById(&apos;obs-popup&apos;).remove()" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:12px;font-weight:700">✕ Cerrar</button></div>';
+  pop.style.cssText='position:fixed;bottom:80px;left:50%;transform:translateX(-50%);max-width:360px;width:92%;background:var(--card);border:1.5px solid #ff6b00;border-radius:12px;padding:14px 16px;z-index:9999;box-shadow:0 8px 32px rgba(0,0,0,.4);font-family:Nunito,sans-serif';
+  pop.innerHTML=
+    '<div style="font-size:11px;font-weight:700;color:#ff6b00;margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">💬 '+t.ticker+' · '+t.fecha+'</div>'+
+    '<textarea id="obs-popup-input" rows="3" style="width:100%;background:var(--input-bg);border:1.5px solid var(--border);border-radius:8px;color:var(--text);font-family:Nunito,sans-serif;font-size:13px;padding:8px 10px;resize:none;outline:none;transition:border-color .2s" onfocus="this.style.borderColor=\'#ff6b00\'" onblur="this.style.borderColor=\'var(--border)\'">'+(t.obs||'')+'</textarea>'+
+    '<div style="display:flex;justify-content:space-between;margin-top:8px;gap:8px">'+
+      '<button onclick="document.getElementById(\'obs-popup\').remove()" style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text2);cursor:pointer;font-size:12px;font-weight:700;padding:7px;font-family:Nunito,sans-serif">Cancelar</button>'+
+      '<button onclick="saveObsQuick(\''+id+'\')" style="flex:1;background:#ff6b00;border:none;border-radius:8px;color:#fff;cursor:pointer;font-size:12px;font-weight:800;padding:7px;font-family:Nunito,sans-serif">💾 Guardar</button>'+
+    '</div>';
   document.body.appendChild(pop);
-  // Auto-close after 5s
-  setTimeout(()=>{const p=document.getElementById('obs-popup');if(p)p.remove();},5000);
+  setTimeout(()=>{ const inp=document.getElementById('obs-popup-input'); if(inp){inp.focus();inp.setSelectionRange(inp.value.length,inp.value.length);} },80);
+}
+function saveObsQuick(id){
+  const t=D.trades.find(x=>x.id===id);
+  const inp=document.getElementById('obs-popup-input');
+  if(!t||!inp)return;
+  t.obs=inp.value.trim();
+  persist(D);
+  document.getElementById('obs-popup').remove();
+  renderHistorial();
 }
 
 // ══ RISK EXPOSURE BAR ══
@@ -2057,7 +2150,7 @@ function renderHistorial(){
       <td style="font-size:11px;color:var(--text2)">${t.salida||'—'}</td>
       <td>${t.timing?`<span class="timing-badge ${timingClass}" style="font-size:10px">${t.timing}</span>`:'<span style="color:var(--text2);font-size:11px">—</span>'}</td>
       <td>${p10flag}</td>
-      <td onclick="event.stopPropagation()" style="text-align:center">${t.obs?`<span onclick="showObs('${t.id}')" title="${t.obs.replace(/'/g,'&apos;')}" style="cursor:pointer;font-size:14px;color:#ff6b00" >💬</span>`:`<span style="color:var(--border);font-size:11px">—</span>`}</td>
+      <td onclick="event.stopPropagation();showObs('${t.id}')" style="text-align:center;cursor:pointer">${t.obs?`<span style="font-size:14px;color:#ff6b00">💬</span>`:`<span style="color:var(--border);font-size:14px">✏️</span>`}</td>
       <td style="font-size:11px;color:var(--text2);white-space:nowrap">${_tdurStr}</td>
       <td onclick="event.stopPropagation()"><button class="btn-icon del" onclick="delTrade('${t.id}')">✕</button></td>
     </tr>
@@ -2433,7 +2526,8 @@ function renderGraficos(){
     ${stratData.map(d=>{
       const w=mxS>0?Math.max(Math.abs(d.avg)/mxS*100,3):3;
       const label=(d.avg>=0?'+':'')+d.avg.toFixed(1)+'%';
-      return`<div class="bar-row"><div class="bar-name" title="${d.name}">${d.name}</div><div class="bar-track"><div class="bar-fill ${d.avg>=0?'pos':'neg'}" style="width:${w}%">${w>15?label:''}</div></div><div style="font-size:10px;font-weight:800;color:${d.avg>=0?'#00c853':'#ff3d57'};width:50px;text-align:right;flex-shrink:0">${label}</div><div class="bar-count">${d.count}t</div></div>`;
+      const lowN=d.count<5;
+      return`<div class="bar-row"><div class="bar-name" title="${d.name}">${d.name}${lowN?' <span style="color:#ffd100;font-size:9px">⚠️</span>':''}</div><div class="bar-track"><div class="bar-fill ${d.avg>=0?'pos':'neg'}" style="width:${w}%;opacity:${lowN?0.45:1}">${w>15?label:''}</div></div><div style="font-size:10px;font-weight:800;color:${d.avg>=0?'#00c853':'#ff3d57'};width:50px;text-align:right;flex-shrink:0">${label}</div><div class="bar-count">${d.count}t</div></div>`;
     }).join('')}
   </div></div>
 
@@ -2469,10 +2563,10 @@ function renderGraficos(){
     <div class="chart-label">⏱️ Temporalidad — EV y WR</div>
     ${tempData.map(d=>`<div class="bar-row">
       <div class="bar-name" style="width:36px">${d.name}</div>
-      <div class="bar-track" style="flex:1"><div class="bar-fill ${d.avg>=0?'pos':'neg'}" style="width:${Math.abs(d.avg)/mxT*100}%">${Math.abs(d.avg)>2?(d.avg>=0?'+':'')+d.avg.toFixed(1)+'%':''}</div></div>
-      <div style="font-size:10px;color:var(--text2);width:70px;text-align:right;flex-shrink:0">WR ${d.wr.toFixed(0)}% · ${d.count}t</div>
+      <div class="bar-track" style="flex:1"><div class="bar-fill ${d.avg>=0?'pos':'neg'}" style="width:${Math.abs(d.avg)/mxT*100}%;opacity:${d.count<5?0.45:1}">${Math.abs(d.avg)>2?(d.avg>=0?'+':'')+d.avg.toFixed(1)+'%':''}</div></div>
+      <div style="font-size:10px;color:var(--text2);width:90px;text-align:right;flex-shrink:0">WR ${d.wr.toFixed(0)}% · ${d.count}t${d.count<5?' <span style="color:#ffd100;font-size:9px" title="Muestra insuficiente">⚠️</span>':''}</div>
     </div>`).join('')}
-    <div style="font-size:10px;color:var(--text2);margin-top:6px">Ordenado por EV (expectativa real por timeframe)</div>
+    <div style="font-size:10px;color:var(--text2);margin-top:6px">Ordenado por EV · <span style="color:#ffd100">⚠️</span> = menos de 5 trades, datos poco confiables</div>
   </div></div>
 
   <!-- ⑧ TIMING DE ENTRADA -->
@@ -2693,6 +2787,7 @@ function renderGraficos(){
   </div></div>
 
   <div class="desktop-col-full"><div id="estado-stats-container"></div></div>
+  <div class="desktop-col-full"><div id="semaforo-stats-container"></div></div>
   <div class="desktop-col-full"><div id="best-trade-rec-container"></div></div>
   </div>`; // close desktop-grid
 }
@@ -3148,6 +3243,15 @@ function clearFilters(){
 function sortBy(col){if(sortCol===col)sortDir*=-1;else{sortCol=col;sortDir=-1;}renderHistorial();}
 
 // ══ ESTADO MENTAL ══
+function setSemaforo(val){
+  document.getElementById('f-semaforo').value=val;
+  document.querySelectorAll('.semaforo-btn').forEach(b=>{
+    const active=b.dataset.val===val;
+    b.style.background=active?'rgba(255,107,0,.15)':'var(--input-bg)';
+    b.style.borderColor=active?'#ff6b00':'var(--border)';
+    b.style.color=active?'#ff6b00':'var(--text2)';
+  });
+}
 function setEstado(val){
   const hidden=document.getElementById('f-estado');
   if(hidden)hidden.value=val||'';
@@ -3254,7 +3358,7 @@ function saveTrade(){
     temp:document.getElementById('f-temp').value,estrategia:document.getElementById('f-estrategia').value,
     salida:document.getElementById('f-salida').value,timing:document.getElementById('f-timing').value,patron:document.getElementById('f-patron').value||null,
     open:document.getElementById('f-open').checked,
-    p10:document.getElementById('f-10p').checked,obs:document.getElementById('f-obs').value,estado:document.getElementById('f-estado').value||null,resultado,
+    p10:document.getElementById('f-10p').checked,obs:document.getElementById('f-obs').value,estado:document.getElementById('f-estado').value||null,semaforo:document.getElementById('f-semaforo').value||null,resultado,
     ...(closedHoraFinal?{closedHora:closedHoraFinal}:{})};
   if(editingId){const i=D.trades.findIndex(x=>x.id===editingId);D.trades[i]=t;}else{D.trades.push(t);}
   persist(D);const wasEditing=!!editingId;const wasOpen=t.open;resetForm();updateKPIs();updateTickerDropdown();updateOpenCount();
@@ -3301,6 +3405,7 @@ function loadTradeForEdit(id){
     document.getElementById('f-10p').checked=t.p10||false;
     document.getElementById('f-obs').value=t.obs||'';
     setEstado(t.estado||'');
+    setSemaforo(t.semaforo||'');
     document.getElementById('f-resultado').value=t.resultado;
     document.getElementById('f-pnl').value=t.margen?((t.margen*t.resultado)/100).toFixed(2):'';
     applyLive(t.resultado);
@@ -3311,7 +3416,7 @@ function loadTradeForEdit(id){
 }
 function resetForm(){
   editingId=null;resultManualMode=false;
-  ['f-ticker','f-margen','f-entrada','f-actual','f-resultado','f-pnl'].forEach(id=>document.getElementById(id).value='');document.getElementById('f-obs').value='';setEstado('');
+  ['f-ticker','f-margen','f-entrada','f-actual','f-resultado','f-pnl'].forEach(id=>document.getElementById(id).value='');document.getElementById('f-obs').value='';setEstado('');setSemaforo('');
   document.getElementById('f-lev').value=5;
   document.getElementById('f-open').checked=false;
   document.getElementById('f-10p').checked=false;
