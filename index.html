@@ -2127,7 +2127,7 @@ function renderHistorial(){
     }
     const pnl=(margenDisplay*resultado/100).toFixed(2);
     const rc=resultado>0?'pos':resultado<0?'neg':'neutral';
-    const f=t.fecha?t.fecha.slice(5).replace('-','/'):''
+    const f=(t.fechaCierre||t.fecha)?((t.fechaCierre||t.fecha).slice(5).replace('-','/')):''
     const p10flag=t.p10?'<span class="badge-10">★</span>':'';
     const timingClass=t.timing?'timing-'+t.timing.toLowerCase().replace(' ',''):'';
     // duration for this trade
@@ -3430,6 +3430,8 @@ function saveTrade(){
     ...(closedHoraFinal?{closedHora:closedHoraFinal}:{})};
   if(editingId){const i=D.trades.findIndex(x=>x.id===editingId);D.trades[i]=t;}else{D.trades.push(t);}
   persist(D);const wasEditing=!!editingId;const wasOpen=t.open;resetForm();updateKPIs();updateTickerDropdown();updateOpenCount();
+  // Force "en curso" checked after any browser form-restore interference
+  setTimeout(()=>{const el=document.getElementById('f-open');if(el&&!wasEditing)el.checked=true;},50);
   if(wasEditing)switchTab(wasOpen?'abiertos':'historial');
 }
 function loadTradeForEdit(id){
@@ -3751,7 +3753,7 @@ function saveMCP(){
     if(obs)t.obs=obs;
     if(mcpPatron)t.patron=mcpPatron;
     t.closedHora=closedHora;
-    t.fecha=closedHora.slice(0,10);
+    t.fechaCierre=closedHora.slice(0,10); // fecha de cierre — no pisar t.fecha (apertura)
     if(pct>=10)t.p10=true;
 
     if(t.partialCloses&&t.partialCloses.length){
