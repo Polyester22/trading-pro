@@ -2189,13 +2189,30 @@ function restoreBackup(input){
       const p=JSON.parse(e.target.result);
       if(!p.trades)throw new Error('Formato inválido');
       if(!confirm(`¿Restaurar? Se reemplazarán ${D.trades.length} trades por ${p.trades.length}.`))return;
-      // Restore trades
-      D=p;persist(D);
-      // Restore capital tracker if present
-      if(p._capital!=null) localStorage.setItem('tpro_capital',p._capital);
-      if(p._capitalMoves!=null) localStorage.setItem('tpro_capital_moves',p._capitalMoves);
-      populateSelects();updatePreviews();updateKPIs();populateFilterDropdowns();
-      alert('✅ Restaurado — incluyendo Capital Tracker.');
+
+      // Extract capital data before setting D (keep D clean)
+      const capVal   = p._capital||null;
+      const capMoves = p._capitalMoves||null;
+
+      // Strip capital fields from trades data object
+      const {_capital, _capitalMoves, ...tradesData} = p;
+      D = tradesData;
+      persist(D);
+
+      // Restore capital tracker to its own localStorage keys
+      if(capVal   != null) localStorage.setItem('tpro_capital', capVal);
+      if(capMoves != null) localStorage.setItem('tpro_capital_moves', capMoves);
+
+      // Refresh entire UI including capital tracker
+      populateSelects();
+      updatePreviews();
+      updateKPIs();
+      populateFilterDropdowns();
+      loadCapital();
+      renderCapitalTracker();
+
+      const capMsg = capVal ? ' + Capital Tracker' : '';
+      alert('✅ Restaurado' + capMsg + '.');
     }catch(err){alert('❌ Archivo inválido: '+err.message);}
   };
   r.readAsText(f);input.value='';
