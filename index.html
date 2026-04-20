@@ -796,7 +796,10 @@ function switchTab(tab){
     // Stop auto-refresh when leaving the tab
     if(priceInterval){clearInterval(priceInterval);priceInterval=null;}
   }
-  if(tab==='cargar'){updatePreviews();updateKPIs();updateDotSilent();if(cycleInterval)clearInterval(cycleInterval);cycleInterval=setInterval(updateDotSilent,300000);}
+  if(tab==='cargar'){updatePreviews();updateKPIs();updateDotSilent();if(cycleInterval)clearInterval(cycleInterval);cycleInterval=setInterval(updateDotSilent,300000);
+    // Marcar "en curso" por defecto solo si es un trade nuevo (no edición)
+    if(!editingId){const el=document.getElementById('f-open');if(el)el.checked=true;}
+  }
 }
 
 // ══ INIT ══
@@ -3430,9 +3433,8 @@ function saveTrade(){
     ...(closedHoraFinal?{closedHora:closedHoraFinal}:{})};
   if(editingId){const i=D.trades.findIndex(x=>x.id===editingId);D.trades[i]=t;}else{D.trades.push(t);}
   persist(D);const wasEditing=!!editingId;const wasOpen=t.open;resetForm();updateKPIs();updateTickerDropdown();updateOpenCount();
-  // Force "en curso" checked after any browser form-restore interference
-  setTimeout(()=>{const el=document.getElementById('f-open');if(el&&!wasEditing)el.checked=true;},50);
-  if(wasEditing)switchTab(wasOpen?'abiertos':'historial');
+  if(wasEditing) switchTab(wasOpen?'abiertos':'historial');
+  else if(wasOpen) switchTab('abiertos'); // nuevo trade abierto → ir directo a En curso
 }
 function loadTradeForEdit(id){
   const t=D.trades.find(x=>x.id===id);if(!t)return;
