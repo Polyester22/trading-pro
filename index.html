@@ -3835,6 +3835,12 @@ function renderKpiProjection(openTrades){
 
   function d(cur,nw,hi=true){const diff=nw-cur;const ok=hi?diff>=0:diff<=0;return{col:ok?'#00c853':'#ff3d57',arrow:Math.abs(diff)>0.001?(diff>0?'↑':'↓'):'→'};}
   function chip(lbl,cur,nw,dd){return'<div style="flex:1;min-width:0;background:var(--surface2);border-radius:8px;padding:7px 5px;text-align:center"><div style="font-size:8px;color:var(--text2);font-weight:700;margin-bottom:3px;text-transform:uppercase">'+lbl+'</div><div style="font-size:10px;color:var(--text2);text-decoration:line-through">'+cur+'</div><div style="font-size:9px;color:'+dd.col+'">'+dd.arrow+'</div><div style="font-size:13px;font-weight:900;color:'+dd.col+'">'+nw+'</div></div>';}
+
+  // Capital total proyectado
+  const capital=getCapital();
+  const projPnlDiff=projPnlTotal-currentPnlTotal; // ganancia/pérdida neta de los abiertos
+  const capitalProj=capital>0?capital+projPnlDiff:0;
+
   if(projectionOpen)box.style.display='block';
   box.innerHTML=
     (partialPnl!==0?'<div style="font-size:10px;color:#ffd100;font-weight:700;text-align:center;margin-bottom:6px">✓ Incluye $'+partialPnl.toFixed(2)+' de cierres parciales ya realizados</div>':'')+
@@ -3844,6 +3850,7 @@ function renderKpiProjection(openTrades){
     chip('EV',(current.ev>=0?'+':'')+current.ev.toFixed(1)+'%',(proj.ev>=0?'+':'')+proj.ev.toFixed(1)+'%',d(current.ev,proj.ev))+
     chip('DD',current.maxDDeq.toFixed(1)+'%',proj.maxDDeq.toFixed(1)+'%',d(current.maxDDeq,proj.maxDDeq,false))+
     chip('P&L',(currentPnlTotal>=0?'+':'')+'$'+currentPnlTotal.toFixed(0),(projPnlTotal>=0?'+':'')+'$'+projPnlTotal.toFixed(0),d(currentPnlTotal,projPnlTotal))+
+    (capital>0?chip('CAPITAL','$'+capital.toFixed(0),'$'+capitalProj.toFixed(0),d(capital,capitalProj)):'')+
     '</div>';
 }
 
