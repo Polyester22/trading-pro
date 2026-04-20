@@ -2168,8 +2168,38 @@ function rmManage(i){const arr=manageMode==='strat'?D.estrategias:D.salidas;arr.
 function updatePreviews(){document.getElementById('strat-preview').textContent=D.estrategias.join(' · ')||'Sin estrategias';document.getElementById('exit-preview').textContent=D.salidas.join(' · ')||'Sin motivos';}
 
 // ══ BACKUP & EXPORT ══
-function saveBackup(){const b=new Blob([JSON.stringify(D,null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='tradingpro_backup.json';a.click();URL.revokeObjectURL(a.href);}
-function restoreBackup(input){const f=input.files[0];if(!f)return;const r=new FileReader();r.onload=e=>{try{const p=JSON.parse(e.target.result);if(!p.trades)throw new Error('Formato inválido');if(!confirm(`¿Restaurar? Se reemplazarán ${D.trades.length} trades por ${p.trades.length}.`))return;D=p;persist(D);populateSelects();updatePreviews();updateKPIs();populateFilterDropdowns();alert('✅ Restaurado.');}catch(err){alert('❌ Archivo inválido: '+err.message);}};r.readAsText(f);input.value='';}
+function saveBackup(){
+  const backup={
+    ...D,
+    _capital: localStorage.getItem('tpro_capital')||null,
+    _capitalMoves: localStorage.getItem('tpro_capital_moves')||null,
+  };
+  const b=new Blob([JSON.stringify(backup,null,2)],{type:'application/json'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(b);
+  a.download='tradingpro_backup.json';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+function restoreBackup(input){
+  const f=input.files[0];if(!f)return;
+  const r=new FileReader();
+  r.onload=e=>{
+    try{
+      const p=JSON.parse(e.target.result);
+      if(!p.trades)throw new Error('Formato inválido');
+      if(!confirm(`¿Restaurar? Se reemplazarán ${D.trades.length} trades por ${p.trades.length}.`))return;
+      // Restore trades
+      D=p;persist(D);
+      // Restore capital tracker if present
+      if(p._capital!=null) localStorage.setItem('tpro_capital',p._capital);
+      if(p._capitalMoves!=null) localStorage.setItem('tpro_capital_moves',p._capitalMoves);
+      populateSelects();updatePreviews();updateKPIs();populateFilterDropdowns();
+      alert('✅ Restaurado — incluyendo Capital Tracker.');
+    }catch(err){alert('❌ Archivo inválido: '+err.message);}
+  };
+  r.readAsText(f);input.value='';
+}
 function exportExcel(){const h=['Fecha','Ticker','Posicion','Margen','Entrada','Actual','Apalancamiento','Temporalidad','Estrategia','Salida','Timing','Resultado%','PnL$','Abierto','10%','Observaciones'];const rows=D.trades.map(t=>[t.fecha,t.ticker,t.pos,t.margen,t.entrada||'',t.actual||'',t.lev,t.temp,t.estrategia,t.salida||'',t.timing||'',t.resultado.toFixed(2),(t.margen*t.resultado/100).toFixed(2),t.open?'SI':'NO',t.p10?'SI':'NO',t.obs||'']);const csv=[h,...rows].map(r=>r.map(v=>`"${v}"`).join(',')).join('\n');const b=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8;'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='polytrades.csv';a.click();}
 
 // ══ GOOGLE DRIVE SYNC ══
