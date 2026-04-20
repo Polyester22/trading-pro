@@ -2564,6 +2564,105 @@ function renderGraficos(){
     })()}
   </div></div>
 
+  <!-- ⑧c TIMEFRAME × DURACIÓN -->
+  <div class="desktop-col-full">
+  <div class="chart-box" style="cursor:default">
+    <div class="chart-label">🕐 Temporalidad × Duración real — ¿cada timeframe se está usando bien?</div>
+    <div style="font-size:10px;color:var(--text2);margin-bottom:12px">Compara cuánto duran realmente tus trades vs la temporalidad de entrada. Un trade en 4H que cierra en 20min probablemente entró mal.</div>
+    ${(()=>{
+      const withDur=T.filter(t=>!t.open&&t.fechahora&&t.closedHora&&t.temp);
+      if(withDur.length<3)return'<div style="color:var(--text2);font-size:12px">Necesitás al menos 3 trades con duración y temporalidad registradas.</div>';
+
+      // Duraciones "esperadas" por timeframe
+      const tfExpected={'1m':{label:'1m',minIdeal:1,maxIdeal:60,name:'minutos'},'5m':{label:'5m',minIdeal:5,maxIdeal:240,name:'minutos–horas'},'15m':{label:'15m',minIdeal:15,maxIdeal:480,name:'minutos–horas'},'1h':{label:'1H',minIdeal:60,maxIdeal:1440,name:'horas'},'4h':{label:'4H',minIdeal:240,maxIdeal:4320,name:'horas–días'},'1d':{label:'1D',minIdeal:1440,maxIdeal:43200,name:'días'}};
+
+      // Agrupar por timeframe
+      const byTemp={};
+      withDur.forEach(t=>{
+        const tf=t.temp;
+        if(!byTemp[tf])byTemp[tf]=[];
+        const m=Math.max(0,(new Date(t.closedHora)-new Date(t.fechahora))/60000);
+        byTemp[tf].push({mins:m,res:t.resultado,win:t.resultado>0});
+      });
+
+      // Buckets de duración
+      const durBuckets=[
+        {label:'<30m', min:0, max:30},
+        {label:'30m–2h', min:30, max:120},
+        {label:'2h–8h', min:120, max:480},
+        {label:'8h–1d', min:480, max:1440},
+        {label:'1d–3d', min:1440, max:4320},
+        {label:'>3d', min:4320, max:Infinity}
+      ];
+
+      const tfs=Object.keys(byTemp).sort((a,b)=>{
+        const order=['1m','5m','15m','1h','4h','1d'];
+        return(order.indexOf(a)||99)-(order.indexOf(b)||99);
+      });
+
+      if(!tfs.length)return'<div style="color:var(--text2);font-size:12px">Sin datos.</div>';
+
+      return tfs.map(tf=>{
+        const trades=byTemp[tf];
+        const exp=tfExpected[tf]||{minIdeal:60,maxIdeal:1440};
+        const avgMins=trades.reduce((s,t)=>s+t.mins,0)/trades.length;
+        const avgRes=trades.reduce((s,t)=>s+t.res,0)/trades.length;
+        const wr=trades.filter(t=>t.win).length/trades.length*100;
+
+        // Cuántos trades están en el rango ideal
+        const inRange=trades.filter(t=>t.mins>=exp.minIdeal&&t.mins<=exp.maxIdeal).length;
+        const tooShort=trades.filter(t=>t.mins<exp.minIdeal).length;
+        const tooLong=trades.filter(t=>t.mins>exp.maxIdeal).length;
+        const pctInRange=Math.round(inRange/trades.length*100);
+
+        function fmtM(m){return m<60?Math.round(m)+'m':m<1440?(Math.floor(m/60)+'h'+(Math.round(m%60)?''+Math.round(m%60)+'m':'')):Math.floor(m/1440)+'d'+Math.floor((m%1440)/60)+'h';}
+
+        // Distribución visual por bucket
+        const dist=durBuckets.map(b=>{
+          const g=trades.filter(t=>t.mins>=b.min&&t.mins<b.max);
+          if(!g.length)return'';
+          const avgR=g.reduce((s,t)=>s+t.res,0)/g.length;
+          const col=avgR>=0?'#00c853':'#ff3d57';
+          const isIdeal=b.min>=exp.minIdeal&&b.max<=exp.maxIdeal*1.5;
+          return'<div style="background:var(--input-bg);border-radius:7px;padding:7px 8px;flex:1;min-width:70px;border:1.5px solid '+(isIdeal?'rgba(255,107,0,.3)':'var(--border)')+'">'+
+            '<div style="font-size:9px;font-weight:700;color:var(--text2);margin-bottom:3px">'+b.label+(isIdeal?' ⭐':'')+'</div>'+
+            '<div style="font-size:13px;font-weight:900;color:'+col+'">'+(avgR>=0?'+':'')+avgR.toFixed(1)+'%</div>'+
+            '<div style="font-size:9px;color:var(--text2)">'+g.length+'t · WR '+Math.round(g.filter(t=>t.win).length/g.length*100)+'%</div>'+
+          '</div>';
+        }).filter(Boolean).join('');
+
+        // Diagnóstico
+        let diag='', diagCol='var(--text2)';
+        if(pctInRange>=70){diag='✅ Duraciones consistentes con el timeframe';diagCol='#00c853';}
+        else if(tooShort>trades.length*0.4){diag='⚠️ Muchos trades muy cortos para '+tf+' — posible microgestión o salidas tempranas';diagCol='#ffd100';}
+        else if(tooLong>trades.length*0.4){diag='⚠️ Muchos trades demasiado largos para '+tf+' — revisá si usás SL correctamente';diagCol='#ffd100';}
+        else{diag='〰️ Distribución mixta';diagCol='var(--text2)';}
+
+        const evCol=avgRes>=0?'#00c853':'#ff3d57';
+
+        return'<div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:10px">'+
+          // Header
+          '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">'+
+            '<div style="display:flex;align-items:center;gap:8px">'+
+              '<span style="background:rgba(255,107,0,.15);color:#ff6b00;border-radius:6px;padding:3px 10px;font-size:13px;font-weight:900">'+tf+'</span>'+
+              '<span style="font-size:11px;color:var(--text2)">'+trades.length+' trades · duración prom: <strong style="color:var(--text)">'+fmtM(avgMins)+'</strong></span>'+
+            '</div>'+
+            '<div style="text-align:right">'+
+              '<div style="font-size:14px;font-weight:900;color:'+evCol+'">'+(avgRes>=0?'+':'')+avgRes.toFixed(1)+'% EV</div>'+
+              '<div style="font-size:10px;color:var(--text2)">WR '+wr.toFixed(0)+'%</div>'+
+            '</div>'+
+          '</div>'+
+          // Distribución
+          '<div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:8px">'+dist+'</div>'+
+          // Diagnóstico
+          '<div style="font-size:10px;font-weight:700;color:'+diagCol+'">'+diag+'</div>'+
+          // Rango ideal
+          '<div style="font-size:9px;color:var(--text2);margin-top:3px">Rango ideal para '+tf+': '+fmtM(exp.minIdeal)+' – '+fmtM(exp.maxIdeal)+' · '+pctInRange+'% de tus trades lo cumplen ⭐</div>'+
+        '</div>';
+      }).join('');
+    })()}
+  </div></div>
+
   <!-- PIKACHU PATRON STATS -->
   <div class="desktop-col-full" id="pikachu-stats-container"></div>
 
