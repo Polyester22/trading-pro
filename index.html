@@ -287,6 +287,24 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
     </div>
   </div>
 
+  <!-- MOMENTUM SCANNER — debajo del semáforo -->
+  <div id="momentum-panel" style="margin-bottom:10px">
+    <button onclick="toggleMomentum()" id="momentum-toggle-btn" style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:9px 14px;font-family:'Nunito',sans-serif;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:10px">
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="font-size:16px">🚀</span>
+        <div style="text-align:left">
+          <div style="font-size:12px;font-weight:800;color:var(--text)">Tickers en momentum</div>
+          <div style="font-size:10px;color:var(--text2)" id="momentum-subtitle">Cargando...</div>
+        </div>
+      </div>
+      <span id="momentum-arrow" style="color:var(--text2);font-size:12px">▼</span>
+    </button>
+    <div id="momentum-body" style="display:none;background:var(--surface);border:1px solid var(--border);border-top:none;border-radius:0 0 10px 10px;padding:12px 14px">
+      <div id="momentum-content"><div style="font-size:11px;color:var(--text2);text-align:center;padding:8px">Cargando...</div></div>
+      <button onclick="loadMomentum(true)" id="momentum-refresh-btn" class="btn btn-dark btn-sm" style="width:100%;margin-top:8px;margin-bottom:0;font-size:11px">⟳ Actualizar</button>
+    </div>
+  </div>
+
   <div id="edit-banner" class="edit-banner" style="display:none">✏️ Editando — <span id="edit-banner-ticker"></span></div>
   <div class="card">
     <div class="card-title">📋 Datos del trade</div>
@@ -599,6 +617,8 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
   </div>
   <div id="open-trades-list"></div>
   <div id="risk-exposure-bar" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:10px 14px;margin-top:10px;margin-bottom:6px"></div>
+
+  <!-- MOMENTUM SCANNER -->
   <div id="open-empty" style="display:none" class="empty-state">
     <div class="empty-icon">🟢</div>
     <div class="empty-text">No hay trades abiertos</div>
@@ -3109,8 +3129,7 @@ async function updateDotSilent(){
     if(dot){dot.style.background='#555';dot.style.boxShadow='none';}
     return;
   }
-  try{
-    const {pd,gd,md,btc4h,eth4h}=await fetchCoinGeckoData();
+  try{    const {pd,gd,md,btc4h,eth4h}=await fetchCoinGeckoData();
     const btc=pd.bitcoin,eth=pd.ethereum;
     if(!btc||!eth)return;
     const btc1h=btc.usd_1h_change||0,btc24=btc.usd_24h_change||0;
@@ -3166,12 +3185,160 @@ async function updateDotSilent(){
     const timingMode=tL>=2?'long':tS>=2?'short':'neutral';
 
     updateCollapsedHeader(mode, timingMode, actionTxt, col);
+    // Actualizar momentum en background (sin abrir el panel)
+    loadMomentumSilent();
     // El updater silencioso solo actualiza los dots/header — nunca re-renderiza el panel
   }catch(_e){}
 }
 let cycleInterval=null;
 let cycleOpen=false;
 let _cycleLoaded=false; // true una vez que el panel cargó exitosamente
+
+// ══ MOMENTUM SCANNER ══════════════════════════════════════════════════
+let _momentumOpen=false;
+let _momentumLoaded=false;
+
+function toggleMomentum(){
+  _momentumOpen=!_momentumOpen;
+  document.getElementById('momentum-body').style.display=_momentumOpen?'block':'none';
+  document.getElementById('momentum-arrow').textContent=_momentumOpen?'▲':'▼';
+  // Si ya hay datos cargados en background, no refetchear
+  if(_momentumOpen&&!_momentumLoaded) loadMomentum(false);
+}
+
+// Versión silenciosa: actualiza datos + subtítulo sin abrir el panel
+async function loadMomentumSilent(){
+  try{
+    await loadMomentum(false);
+  }catch(_e){}
+}
+
+async function loadMomentum(forceRefresh){
+  const box=document.getElementById('momentum-content');
+  const btn=document.getElementById('momentum-refresh-btn');
+  const sub=document.getElementById('momentum-subtitle');
+  if(!box)return;
+  if(forceRefresh){_momentumLoaded=false;if(_cgCacheTime)_cgCacheTime=0;}
+  if(_momentumLoaded&&!forceRefresh)return; // ya cargado, no refetchear
+  // Solo mostrar "actualizando" en el panel si está abierto
+  if(_momentumOpen){
+    if(btn){btn.textContent='⟳ Actualizando...';btn.disabled=true;}
+    if(!_momentumLoaded) box.innerHTML='<div style="font-size:11px;color:var(--text2);text-align:center;padding:10px">Analizando mercado...</div>';
+  }
+
+  try{
+    const cache=await fetchCoinGeckoData();
+    const md=cache.md||[];
+    const dirMode=document.getElementById('cycle-dot-dir')?.style.background==='rgb(0, 200, 83)'?'long':
+                  document.getElementById('cycle-dot-dir')?.style.background==='rgb(255, 61, 87)'?'short':'wait';
+
+    // User's historical tickers
+    const myTickers=new Set(D.trades.map(t=>t.ticker).filter(Boolean));
+    // Open trades tickers
+    const openTickers=new Set(D.trades.filter(t=>t.open).map(t=>t.ticker));
+
+    // Build ticker list from CoinGecko top100 + user tickers via tickerChangeCache
+    const allTickers=[];
+
+    // CoinGecko top100 (has 1H and 24H)
+    md.filter(c=>c.id!=='bitcoin'&&c.id!=='ethereum').forEach(c=>{
+      const sym=c.symbol.toUpperCase();
+      const c1h=c.price_change_percentage_1h_in_currency||0;
+      const c24=c.price_change_percentage_24h||0;
+      // If we also have Binance 4H data for this ticker, use it
+      const bc=tickerChangeCache[sym];
+      const c4h=bc?bc.change4h:null;
+      allTickers.push({sym,c1h,c4h,c24,mine:myTickers.has(sym),open:openTickers.has(sym),rank:allTickers.length+1});
+    });
+
+    // Add user tickers not in top100
+    Object.entries(tickerChangeCache).forEach(([sym,tc])=>{
+      if(!allTickers.find(t=>t.sym===sym)){
+        allTickers.push({sym,c1h:tc.change1h||0,c4h:tc.change4h||null,c24:tc.change24h||0,mine:true,open:openTickers.has(sym),rank:999});
+      }
+    });
+
+    // Score momentum: based on direction mode
+    // long mode → positive 1H + positive 4H (or 24H)
+    // short mode → negative 1H + negative 4H (or 24H)
+    // wait → show both sides sorted by abs(1H)
+    function momentumScore(t){
+      const s1h=t.c1h, s4h=t.c4h!==null?t.c4h:t.c24*0.4;
+      if(dirMode==='long') return s1h>0&&s4h>0?s1h+s4h*0.5:-999;
+      if(dirMode==='short') return s1h<0&&s4h<0?Math.abs(s1h)+Math.abs(s4h)*0.5:-999;
+      return Math.abs(s1h); // neutral: sort by abs movement
+    }
+
+    const MIN_1H = dirMode==='wait'?0.5:0.8;
+    const filtered=allTickers
+      .filter(t=>{
+        const score=momentumScore(t);
+        if(score===-999)return false;
+        if(dirMode==='long') return t.c1h>=MIN_1H;
+        if(dirMode==='short') return t.c1h<=-MIN_1H;
+        return Math.abs(t.c1h)>=MIN_1H;
+      })
+      .sort((a,b)=>momentumScore(b)-momentumScore(a))
+      .slice(0,30);
+
+    if(!filtered.length){
+      box.innerHTML='<div style="font-size:11px;color:var(--text2);text-align:center;padding:10px">Sin tickers con momentum claro ahora mismo</div>';
+      if(sub)sub.textContent='Sin señal clara · '+new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
+      if(btn){btn.textContent='⟳ Actualizar';btn.disabled=false;}
+      _momentumLoaded=true;
+      return;
+    }
+
+    const dirLabel=dirMode==='long'?'🟢 LONG':dirMode==='short'?'🔴 SHORT':'↔ Mixto';
+    const dirCol=dirMode==='long'?'#00c853':dirMode==='short'?'#ff3d57':'#ffd100';
+
+    // Group: mine first, then rest
+    const mine=filtered.filter(t=>t.mine);
+    const rest=filtered.filter(t=>!t.mine);
+
+    function tickerChip(t){
+      const up=dirMode!=='short';
+      const c1hCol=t.c1h>0?'#00c853':'#ff3d57';
+      const c4hCol=t.c4h!==null?(t.c4h>0?'#00c853':'#ff3d57'):'var(--text2)';
+      const openBadge=t.open?'<span style="font-size:8px;background:rgba(255,107,0,.2);color:#ff6b00;border-radius:3px;padding:1px 4px;margin-left:3px;font-weight:700">EN CURSO</span>':'';
+      const mineBadge=t.mine&&!t.open?'<span style="font-size:8px;color:#ff6b00;margin-left:2px">★</span>':'';
+      return`<div style="background:var(--surface2);border-radius:8px;padding:8px 10px;display:flex;align-items:center;justify-content:space-between;margin-bottom:5px;border-left:2px solid ${t.open?'#ff6b00':t.mine?'rgba(255,107,0,.4)':'var(--border)'}">
+        <div style="font-size:13px;font-weight:900">${t.sym}${mineBadge}${openBadge}</div>
+        <div style="display:flex;gap:6px;align-items:center">
+          <span style="font-size:11px;font-weight:800;color:${c1hCol};background:${t.c1h>0?'rgba(0,200,83,.12)':'rgba(255,61,87,.1)'};padding:2px 6px;border-radius:5px">1H ${t.c1h>=0?'+':''}${t.c1h.toFixed(1)}%</span>
+          ${t.c4h!==null?`<span style="font-size:10px;font-weight:700;color:${c4hCol}">4H ${t.c4h>=0?'+':''}${t.c4h.toFixed(1)}%</span>`:''}
+          <span style="font-size:10px;color:var(--text2)">24H ${t.c24>=0?'+':''}${t.c24.toFixed(1)}%</span>
+        </div>
+      </div>`;
+    }
+
+    let html='';
+    // Header
+    html+=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <span style="font-size:10px;font-weight:800;color:${dirCol};text-transform:uppercase;letter-spacing:.5px">Dirección: ${dirLabel}</span>
+      <span style="font-size:9px;color:var(--text2)">${filtered.length} tickers · ★ = operados antes</span>
+    </div>`;
+
+    if(mine.length){
+      html+=`<div style="font-size:10px;font-weight:700;color:#ff6b00;text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px">Tus tickers</div>`;
+      html+=mine.map(tickerChip).join('');
+    }
+    if(rest.length){
+      if(mine.length) html+=`<div style="font-size:10px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin:8px 0 5px">Top 100</div>`;
+      html+=rest.map(tickerChip).join('');
+    }
+
+    html+=`<div style="font-size:9px;color:var(--text2);margin-top:6px;opacity:.7">CoinGecko · Binance 4H · Actualizado: ${new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})}</div>`;
+
+    box.innerHTML=html;
+    if(sub)sub.textContent=`${filtered.length} en momentum · ${new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})}`;
+    _momentumLoaded=true;
+
+  }catch(e){
+    box.innerHTML=`<div style="color:#ff3d57;font-size:11px;text-align:center;padding:8px">❌ ${e.message}</div>`;
+  }
+  if(btn){btn.textContent='⟳ Actualizar';btn.disabled=false;}
+}
 
 function startCycleMonitor(){
   updateDotSilent();
