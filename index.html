@@ -2750,7 +2750,15 @@ async function fetchCoinGeckoData(){
   }
   const btc4h=calc4h(b4hBTC), eth4h=calc4h(b4hETH);
 
-  _cgCache={pd, gd:gd||{data:{market_cap_percentage:{btc:50}}}, md:md||[], btc4h, eth4h};
+  // Funding rates BTC + ETH desde Binance Futures (fapi) — sin auth
+  await new Promise(r=>setTimeout(r,150));
+  const frBTC=await cgFetchSafe('https://fapi.binance.com/fapi/v1/premiumIndex?symbol=BTCUSDT');
+  await new Promise(r=>setTimeout(r,100));
+  const frETH=await cgFetchSafe('https://fapi.binance.com/fapi/v1/premiumIndex?symbol=ETHUSDT');
+  const btcFR=frBTC?.lastFundingRate!=null?parseFloat(frBTC.lastFundingRate)*100:null; // en %
+  const ethFR=frETH?.lastFundingRate!=null?parseFloat(frETH.lastFundingRate)*100:null;
+
+  _cgCache={pd, gd:gd||{data:{market_cap_percentage:{btc:50}}}, md:md||[], btc4h, eth4h, btcFR, ethFR};
   _cgCacheTime=Date.now();
   _cgFetching=false;
   return _cgCache;
@@ -3777,7 +3785,7 @@ async function checkMarketCycle(){
   }
   if(btn){btn.textContent='⟳ Analizando...';btn.disabled=true;}_cgCacheTime=0;
   try{
-    const {pd:priceData, gd:globalData, md:marketsData, btc4h, eth4h}=await fetchCoinGeckoData();
+    const {pd:priceData, gd:globalData, md:marketsData, btc4h, eth4h, btcFR, ethFR}=await fetchCoinGeckoData();
 
     const btc=priceData.bitcoin, eth=priceData.ethereum;
     if(!btc||!eth)throw new Error('Sin datos de precio');
@@ -4080,12 +4088,60 @@ async function checkMarketCycle(){
          '⏳ Esperá alineación 4H + 1H en el mismo sentido')+
       '</div>'+
 
+      // Funding Rate
+      (()=>{
+        if(btcFR===null&&ethFR===null) return '';
+        function frBlock(label, fr){
+          if(fr===null) return '';
+          const absF=Math.abs(fr);
+          // Niveles: neutro <0.01% | elevado 0.01-0.05% | extremo >0.05%
+          const extreme=absF>=0.05, high=absF>=0.01;
+          const positive=fr>0;
+          let col,bg,icon,warn='';
+          if(!high){
+            col='var(--text2)'; bg='var(--surface2)'; icon='〰️';
+          } else if(extreme){
+            col=positive?'#ff3d57':'#00c853';
+            bg=positive?'rgba(255,61,87,.12)':'rgba(0,200,83,.1)';
+            icon=positive?'🔥':'🧊';
+            warn=positive
+              ?' — Longs sobreexpuestos, riesgo de barrida'
+              :' — Shorts sobreexpuestos, riesgo de squeeze';
+          } else {
+            col=positive?'#ff9500':'#66ddaa';
+            bg=positive?'rgba(255,149,0,.1)':'rgba(0,200,83,.07)';
+            icon=positive?'⚠️':'💧';
+            warn=positive?' — Longs pagando, sesgo alcista frágil':' — Shorts pagando, cuidado con rebotes';
+          }
+          return '<div style="display:flex;justify-content:space-between;align-items:center">'+
+            '<span style="font-size:11px;font-weight:700;color:var(--text2)">'+label+'</span>'+
+            '<span style="background:'+bg+';color:'+col+';border-radius:5px;padding:2px 8px;font-size:11px;font-weight:800">'+
+              icon+' '+(fr>=0?'+':'')+fr.toFixed(4)+'%'+warn+
+            '</span>'+
+          '</div>';
+        }
+        const btcBlock=frBlock('BTC Funding',btcFR);
+        const ethBlock=frBlock('ETH Funding',ethFR);
+        if(!btcBlock&&!ethBlock) return '';
+        return '<div style="margin-top:10px;background:var(--surface2);border-radius:10px;padding:10px 12px">'+
+          '<div style="font-size:10px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.6px;margin-bottom:7px">'+
+            '💰 Funding Rate (Futuros Perp.)'+
+          '</div>'+
+          '<div style="display:flex;flex-direction:column;gap:5px">'+
+            btcBlock+ethBlock+
+          '</div>'+
+          '<div style="font-size:9px;color:var(--text2);margin-top:5px;opacity:.7">'+
+            'Neutro: ±0.01% · Elevado: ±0.01–0.05% · Extremo: >±0.05% — no cambia la dirección, es advertencia de riesgo'+
+          '</div>'+
+        '</div>';
+      })()+
+
       // Top movers
       (topMoversHTML?'<div style="margin-top:10px">'+topMoversHTML+'</div>':'')+
 
       // Footer
       '<div style="font-size:10px;color:var(--text2);border-top:1px solid var(--border);padding-top:8px;margin-top:8px;opacity:.7">'+
-        (hasBinance4h?'📊 Datos 4H: Binance · ':'⚠️ Sin datos 4H (Binance) · ')+
+        (hasBinance4h?'📊 4H + Funding: Binance · ':'⚠️ Sin datos 4H · ')+
         'CoinGecko 1H/24H · '+
         'Actualizado: '+new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})+
       '</div>';
