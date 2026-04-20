@@ -2241,7 +2241,12 @@ async function syncUp(){
   btn.disabled=true;btn.textContent='☁️ Subiendo...';
   showSyncStatus('⏳ Subiendo datos a Drive...','#ff6b00',-1);
   try{
-    const resp=await fetch(SYNC_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify(D)});
+    const payload={
+      ...D,
+      _capital: localStorage.getItem('tpro_capital')||null,
+      _capitalMoves: localStorage.getItem('tpro_capital_moves')||null,
+    };
+    const resp=await fetch(SYNC_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify(payload)});
     const result=await resp.json();
     if(result.error)throw new Error(result.error);
     localStorage.setItem('tpro_sync_ts',Date.now().toString());
@@ -2249,7 +2254,12 @@ async function syncUp(){
     showSyncStatus('✅ '+D.trades.length+' trades subidos','#00c853',3000);
   }catch(e){
     try{
-      const r2=await fetch(SYNC_URL+'?action=save&data='+encodeURIComponent(JSON.stringify(D)));
+      const payload={
+        ...D,
+        _capital: localStorage.getItem('tpro_capital')||null,
+        _capitalMoves: localStorage.getItem('tpro_capital_moves')||null,
+      };
+      const r2=await fetch(SYNC_URL+'?action=save&data='+encodeURIComponent(JSON.stringify(payload)));
       await r2.json();
       localStorage.setItem('tpro_sync_ts',Date.now().toString());
       updateSyncLastTime();
@@ -2271,11 +2281,22 @@ async function syncDown(){
     const parsed=result.trades?result:null;
     if(!parsed||!parsed.trades)throw new Error('Formato inválido');
     if(!confirm('Drive tiene '+parsed.trades.length+' trades. Tu dispositivo tiene '+D.trades.length+'.\n¿Reemplazar datos locales con los de Drive?')){btn.disabled=false;btn.textContent='⬇️ Bajar de Drive';showSyncStatus('','#00c853',0);return;}
-    D=parsed;persist(D);populateSelects();updatePreviews();updateKPIs();updateOpenCount();
+
+    // Extract capital data, keep D clean
+    const {_capital, _capitalMoves, ...tradesData}=parsed;
+    D=tradesData;persist(D);
+
+    // Restore capital tracker
+    if(_capital!=null) localStorage.setItem('tpro_capital',_capital);
+    if(_capitalMoves!=null) localStorage.setItem('tpro_capital_moves',_capitalMoves);
+
+    populateSelects();updatePreviews();updateKPIs();updateOpenCount();
+    loadCapital();renderCapitalTracker();
     if(document.getElementById('page-historial').classList.contains('active')){populateFilterDropdowns();renderHistorial();}
     localStorage.setItem('tpro_sync_ts',Date.now().toString());
     updateSyncLastTime();
-    showSyncStatus('✅ '+parsed.trades.length+' trades descargados','#00c853',3000);
+    const capMsg=_capitalMoves?' + Capital Tracker':'';
+    showSyncStatus('✅ '+parsed.trades.length+' trades descargados'+capMsg,'#00c853',3000);
   }catch(e){showSyncStatus('❌ Error: '+e.message,'#ff3d57',5000);}
   btn.disabled=false;btn.textContent='⬇️ Bajar de Drive';
 }
