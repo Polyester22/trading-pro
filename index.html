@@ -3050,6 +3050,18 @@ async function fetchCoinGeckoData(){
   }
   const btc4h=calc4h(b4hBTC), eth4h=calc4h(b4hETH);
 
+  // Binance 15m candles for BTC and ETH — last CLOSED candle = index -2
+  await new Promise(r=>setTimeout(r,150));
+  const b15mBTC=await cgFetchSafe('https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=15m&limit=3');
+  await new Promise(r=>setTimeout(r,150));
+  const b15mETH=await cgFetchSafe('https://api.binance.com/api/v3/klines?symbol=ETHUSDT&interval=15m&limit=3');
+  function calc15m(k){
+    if(!k||k.length<2)return null;
+    const c=k[k.length-2];
+    return(parseFloat(c[4])-parseFloat(c[1]))/parseFloat(c[1])*100;
+  }
+  const btc15m=calc15m(b15mBTC), eth15m=calc15m(b15mETH);
+
   // Funding rates BTC + ETH desde Binance Futures (fapi) — sin auth
   await new Promise(r=>setTimeout(r,150));
   const frBTC=await cgFetchSafe('https://fapi.binance.com/fapi/v1/premiumIndex?symbol=BTCUSDT');
@@ -3058,7 +3070,7 @@ async function fetchCoinGeckoData(){
   const btcFR=frBTC?.lastFundingRate!=null?parseFloat(frBTC.lastFundingRate)*100:null; // en %
   const ethFR=frETH?.lastFundingRate!=null?parseFloat(frETH.lastFundingRate)*100:null;
 
-  _cgCache={pd, gd:gd||{data:{market_cap_percentage:{btc:50}}}, md:md||[], btc4h, eth4h, btcFR, ethFR};
+  _cgCache={pd, gd:gd||{data:{market_cap_percentage:{btc:50}}}, md:md||[], btc4h, eth4h, btc15m, eth15m, btcFR, ethFR};
   _cgCacheTime=Date.now();
   _cgFetching=false;
   return _cgCache;
@@ -3229,57 +3241,122 @@ async function loadMomentum(forceRefresh){
   try{
     const cache=await fetchCoinGeckoData();
     const md=cache.md||[];
+    const btc1hGlobal=cache.pd?.bitcoin?.usd_1h_change||0;
+    const btc24Global=cache.pd?.bitcoin?.usd_24h_change||0;
+    const btc4hGlobal=cache.btc4h||0;
+    const btc15mGlobal=cache.btc15m||0;
+
+    // ── GLOBAL BIAS (filtro de mercado) ──────────────────────────────────
+    // Amplitud: % de altcoins en positivo en 24H
+    const altsMkt=md.filter(c=>c.id!=='bitcoin'&&c.id!=='ethereum'&&c.price_change_percentage_24h!=null);
+    const ampAvgGlobal=altsMkt.length?Math.round(altsMkt.filter(c=>(c.price_change_percentage_24h||0)>0).length/altsMkt.length*100):50;
+
+    let globalBias;
+    if(btc4hGlobal>0&&ampAvgGlobal>=60)       globalBias='long';
+    else if(btc4hGlobal<0&&ampAvgGlobal<=40)   globalBias='short';
+    else                                         globalBias='neutral';
+
+    // dirMode from the semáforo dot (already computed by checkMarketCycle)
     const dirMode=document.getElementById('cycle-dot-dir')?.style.background==='rgb(0, 200, 83)'?'long':
                   document.getElementById('cycle-dot-dir')?.style.background==='rgb(255, 61, 87)'?'short':'wait';
 
     // User's historical tickers
     const myTickers=new Set(D.trades.map(t=>t.ticker).filter(Boolean));
-    // Open trades tickers
     const openTickers=new Set(D.trades.filter(t=>t.open).map(t=>t.ticker));
 
-    // Build ticker list from CoinGecko top100 + user tickers via tickerChangeCache
     const allTickers=[];
-
-    // CoinGecko top100 (has 1H and 24H)
     md.filter(c=>c.id!=='bitcoin'&&c.id!=='ethereum').forEach(c=>{
       const sym=c.symbol.toUpperCase();
       const c1h=c.price_change_percentage_1h_in_currency||0;
       const c24=c.price_change_percentage_24h||0;
-      // If we also have Binance 4H data for this ticker, use it
       const bc=tickerChangeCache[sym];
-      const c4h=bc?bc.change4h:null;
-      allTickers.push({sym,c1h,c4h,c24,mine:myTickers.has(sym),open:openTickers.has(sym),rank:allTickers.length+1});
+      const c4h=bc?bc.change4h:(cache.btc4h!==null?null:null); // use cache if available
+      const c15m=bc?.change15m??null; // only if we cached it
+      allTickers.push({sym,c1h,c4h,c15m,c24,mine:myTickers.has(sym),open:openTickers.has(sym),rank:allTickers.length+1});
     });
-
-    // Add user tickers not in top100
     Object.entries(tickerChangeCache).forEach(([sym,tc])=>{
       if(!allTickers.find(t=>t.sym===sym)){
-        allTickers.push({sym,c1h:tc.change1h||0,c4h:tc.change4h||null,c24:tc.change24h||0,mine:true,open:openTickers.has(sym),rank:999});
+        allTickers.push({sym,c1h:tc.change1h||0,c4h:tc.change4h??null,c15m:tc.change15m??null,c24:tc.change24h||0,mine:true,open:openTickers.has(sym),rank:999});
       }
     });
 
-    // Score momentum: based on direction mode
-    // long mode → positive 1H + positive 4H (or 24H)
-    // short mode → negative 1H + negative 4H (or 24H)
-    // wait → show both sides sorted by abs(1H)
-    function momentumScore(t){
-      const s1h=t.c1h, s4h=t.c4h!==null?t.c4h:t.c24*0.4;
-      if(dirMode==='long') return s1h>0&&s4h>0?s1h+s4h*0.5:-999;
-      if(dirMode==='short') return s1h<0&&s4h<0?Math.abs(s1h)+Math.abs(s4h)*0.5:-999;
-      return Math.abs(s1h); // neutral: sort by abs movement
+    // ── MOMENTUM SCORE (7 componentes) ──────────────────────────────────
+    function calcMomentumScore(t){
+      const p15m = t.c15m;      // puede ser null
+      const p1h  = t.c1h;
+      const p4h  = t.c4h !== null ? t.c4h : (p1h * 2.5); // estimación si no hay dato
+      const p24h = t.c24;
+
+      let score = 0;
+
+      // 1. Dirección base (más peso al 4H)
+      if(p4h  > 0) score += 2;
+      if(p1h  > 0) score += 1;
+      if(p24h > 0) score += 1;
+      if(p15m !== null && p15m > 0) score += 1;
+
+      // 2. Aceleración (1H vs promedio horario del 24H)
+      const avg24hPerHour = p24h / 24;
+      if(p1h > avg24hPerHour + 0.05)      score += 1;  // acelerando
+      else if(p1h < avg24hPerHour - 0.05) score -= 1;  // frenando
+
+      // 3. Fuerza relativa vs BTC (1H)
+      const rs1h = p1h - btc1hGlobal;
+      if(rs1h > 0) score += 1;
+      else         score -= 1;
+
+      // 4. Consistencia (evita fake moves)
+      const allUp   = (p15m===null||p15m>0) && p1h>0 && p4h>0;
+      const allDown = (p15m===null||p15m<0) && p1h<0 && p4h<0;
+      if(allUp)   score += 1;
+      if(allDown) score -= 1;
+
+      return score; // rango típico: -3 a +7 (+8 con 15m)
     }
 
-    const MIN_1H = dirMode==='wait'?0.5:0.8;
-    const filtered=allTickers
-      .filter(t=>{
-        const score=momentumScore(t);
-        if(score===-999)return false;
-        if(dirMode==='long') return t.c1h>=MIN_1H;
-        if(dirMode==='short') return t.c1h<=-MIN_1H;
-        return Math.abs(t.c1h)>=MIN_1H;
-      })
-      .sort((a,b)=>momentumScore(b)-momentumScore(a))
-      .slice(0,30);
+    // ── ESTADO INDIVIDUAL por score ──────────────────────────────────────
+    function scoreToEstado(score){
+      if(score >= 5) return 'long';
+      if(score >= 2) return 'neutral';
+      return 'short';
+    }
+
+    // ── ESTADO FINAL con filtro global (REGLA DE ORO) ────────────────────
+    function estadoFinal(score){
+      const est = scoreToEstado(score);
+      if(globalBias === 'neutral') return {est, final: est, blocked: false};
+      if(est !== globalBias)       return {est, final: 'notrade', blocked: true};
+      return {est, final: est, blocked: false};
+    }
+
+    // Calcular scores para todos
+    const scored = allTickers.map(t=>({
+      ...t,
+      score: calcMomentumScore(t),
+    })).map(t=>({
+      ...t,
+      ...estadoFinal(t.score),
+    }));
+
+    // Filtrar según dirMode + score mínimo
+    // En modo long: mostrar tickers con final==='long' o (long y neutral)
+    // En modo short: mostrar tickers con final==='short'
+    // En modo wait: mostrar los scores más extremos en ambos sentidos
+    const MIN_SCORE_LONG  = 4;
+    const MIN_SCORE_SHORT = 0; // score < 2 = short
+
+    let filtered;
+    if(dirMode==='long'){
+      filtered = scored.filter(t=>t.score>=MIN_SCORE_LONG)
+                       .sort((a,b)=>b.score-a.score).slice(0,30);
+    } else if(dirMode==='short'){
+      filtered = scored.filter(t=>t.score<2)
+                       .sort((a,b)=>a.score-b.score).slice(0,30);
+    } else {
+      // wait/neutral: mostrar extremos de ambos lados
+      filtered = scored.filter(t=>t.score>=5||t.score<=0)
+                       .sort((a,b)=>Math.abs(b.score)-Math.abs(a.score)).slice(0,30);
+    }
 
     if(!filtered.length){
       box.innerHTML='<div style="font-size:11px;color:var(--text2);text-align:center;padding:10px">Sin tickers con momentum claro ahora mismo</div>';
@@ -3292,31 +3369,90 @@ async function loadMomentum(forceRefresh){
     const dirLabel=dirMode==='long'?'🟢 LONG':dirMode==='short'?'🔴 SHORT':'↔ Mixto';
     const dirCol=dirMode==='long'?'#00c853':dirMode==='short'?'#ff3d57':'#ffd100';
 
-    // Group: mine first, then rest
-    const mine=filtered.filter(t=>t.mine);
-    const rest=filtered.filter(t=>!t.mine);
+    // ── BADGE DE SCORE / SEMÁFORO ────────────────────────────────────────
+    function scoreBadge(t){
+      if(t.blocked){
+        return`<span style="font-size:10px;font-weight:800;background:rgba(100,100,100,.2);color:var(--text2);padding:2px 7px;border-radius:5px">⛔ NO TRADE</span>`;
+      }
+      if(t.final==='long'){
+        const intensity = t.score>=7?'🔥':t.score>=6?'💪':'';
+        return`<span style="font-size:10px;font-weight:800;background:rgba(0,200,83,.18);color:#00c853;padding:2px 7px;border-radius:5px">🟢 ${t.score>0?'+':''}${t.score} ${intensity}</span>`;
+      }
+      if(t.final==='short'){
+        return`<span style="font-size:10px;font-weight:800;background:rgba(255,61,87,.18);color:#ff3d57;padding:2px 7px;border-radius:5px">🔴 ${t.score}</span>`;
+      }
+      return`<span style="font-size:10px;font-weight:800;background:rgba(255,209,0,.15);color:#ffd100;padding:2px 7px;border-radius:5px">🟡 ${t.score>0?'+':''}${t.score}</span>`;
+    }
 
+    // ── CHIP DE TICKER ───────────────────────────────────────────────────
     function tickerChip(t){
-      const up=dirMode!=='short';
       const c1hCol=t.c1h>0?'#00c853':'#ff3d57';
       const c4hCol=t.c4h!==null?(t.c4h>0?'#00c853':'#ff3d57'):'var(--text2)';
       const openBadge=t.open?'<span style="font-size:8px;background:rgba(255,107,0,.2);color:#ff6b00;border-radius:3px;padding:1px 4px;margin-left:3px;font-weight:700">EN CURSO</span>':'';
       const mineBadge=t.mine&&!t.open?'<span style="font-size:8px;color:#ff6b00;margin-left:2px">★</span>':'';
-      return`<div style="background:var(--surface2);border-radius:8px;padding:8px 10px;display:flex;align-items:center;justify-content:space-between;margin-bottom:5px;border-left:2px solid ${t.open?'#ff6b00':t.mine?'rgba(255,107,0,.4)':'var(--border)'}">
-        <div style="font-size:13px;font-weight:900">${t.sym}${mineBadge}${openBadge}</div>
-        <div style="display:flex;gap:6px;align-items:center">
+      const rs1h=(t.c1h-btc1hGlobal);
+      const rsCol=rs1h>0?'#00c853':'#ff3d57';
+      const accel=(t.c1h - t.c24/24);
+      const accelIcon=accel>0.05?'⚡':'';
+
+      // Score bar visual (0–8 scale)
+      const scoreMax=8;
+      const scorePct=Math.max(0,Math.min(100,((t.score+3)/(scoreMax+3))*100));
+      const barCol=t.final==='long'?'#00c853':t.final==='short'?'#ff3d57':t.blocked?'#555':'#ffd100';
+
+      const borderCol=t.blocked?'var(--border)':t.final==='long'?'rgba(0,200,83,.4)':t.final==='short'?'rgba(255,61,87,.4)':t.open?'#ff6b00':t.mine?'rgba(255,107,0,.4)':'var(--border)';
+
+      return`<div style="background:var(--surface2);border-radius:10px;padding:10px 12px;margin-bottom:5px;border-left:2.5px solid ${borderCol};opacity:${t.blocked?'.55':'1'}">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px">
+          <div style="font-size:13px;font-weight:900">${t.sym}${mineBadge}${openBadge} <span style="font-size:10px;font-weight:600;color:var(--text2)">${accelIcon}</span></div>
+          ${scoreBadge(t)}
+        </div>
+        <!-- score bar -->
+        <div style="height:4px;background:var(--border);border-radius:2px;margin-bottom:6px;overflow:hidden">
+          <div style="height:100%;width:${scorePct}%;background:${barCol};border-radius:2px;transition:width .4s ease"></div>
+        </div>
+        <div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center">
+          ${t.c15m!==null?`<span style="font-size:10px;font-weight:700;color:${t.c15m>0?'#00c853':'#ff3d57'};background:${t.c15m>0?'rgba(0,200,83,.1)':'rgba(255,61,87,.1)'};padding:2px 5px;border-radius:4px">15m ${t.c15m>=0?'+':''}${t.c15m.toFixed(2)}%</span>`:''}
           <span style="font-size:11px;font-weight:800;color:${c1hCol};background:${t.c1h>0?'rgba(0,200,83,.12)':'rgba(255,61,87,.1)'};padding:2px 6px;border-radius:5px">1H ${t.c1h>=0?'+':''}${t.c1h.toFixed(1)}%</span>
           ${t.c4h!==null?`<span style="font-size:10px;font-weight:700;color:${c4hCol}">4H ${t.c4h>=0?'+':''}${t.c4h.toFixed(1)}%</span>`:''}
           <span style="font-size:10px;color:var(--text2)">24H ${t.c24>=0?'+':''}${t.c24.toFixed(1)}%</span>
+          <span style="font-size:9px;font-weight:700;color:${rsCol};margin-left:auto">RS ${rs1h>=0?'+':''}${rs1h.toFixed(1)}%</span>
         </div>
       </div>`;
     }
 
+    // Group: mine first, then rest
+    const mine=filtered.filter(t=>t.mine);
+    const rest=filtered.filter(t=>!t.mine);
+
+    // Bias badge
+    const biasColor=globalBias==='long'?'#00c853':globalBias==='short'?'#ff3d57':'#ffd100';
+    const biasLabel=globalBias==='long'?'🟢 BIAS LONG':globalBias==='short'?'🔴 BIAS SHORT':'🟡 SIN BIAS';
+    const biasNote=globalBias==='neutral'?'Todos los scores son válidos':'Solo se muestran activos alineados con el bias';
+
     let html='';
-    // Header
+    html+=`<div style="background:rgba(${globalBias==='long'?'0,200,83':globalBias==='short'?'255,61,87':'255,209,0'},.08);border:1px solid rgba(${globalBias==='long'?'0,200,83':globalBias==='short'?'255,61,87':'255,209,0'},.3);border-radius:8px;padding:8px 12px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center">
+      <div>
+        <div style="font-size:11px;font-weight:800;color:${biasColor}">${biasLabel}</div>
+        <div style="font-size:9px;color:var(--text2);margin-top:1px">${biasNote}</div>
+      </div>
+      <div style="text-align:right">
+        <div style="font-size:10px;color:var(--text2)">BTC 4H ${btc4hGlobal>=0?'+':''}${btc4hGlobal.toFixed(1)}%</div>
+        <div style="font-size:10px;color:var(--text2)">Amp ${ampAvgGlobal}%</div>
+      </div>
+    </div>`;
+
+    // Score legend
+    html+=`<div style="display:flex;gap:6px;margin-bottom:8px;font-size:9px;font-weight:700;color:var(--text2)">
+      <span>🟢 ≥5 LONG</span>
+      <span>🟡 2–4 NEUTRAL</span>
+      <span>🔴 &lt;2 SHORT</span>
+      <span style="margin-left:auto">⛔ = contra bias</span>
+    </div>`;
+
     html+=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-      <span style="font-size:10px;font-weight:800;color:${dirCol};text-transform:uppercase;letter-spacing:.5px">Dirección: ${dirLabel}</span>
-      <span style="font-size:9px;color:var(--text2)">${filtered.length} tickers · ★ = operados antes</span>
+      <span style="font-size:10px;font-weight:800;color:${dirCol};text-transform:uppercase;letter-spacing:.5px">Dirección mkt: ${dirLabel}</span>
+      <span style="font-size:9px;color:var(--text2)">${filtered.length} tickers · ★ = operados</span>
     </div>`;
 
     if(mine.length){
@@ -3328,10 +3464,12 @@ async function loadMomentum(forceRefresh){
       html+=rest.map(tickerChip).join('');
     }
 
-    html+=`<div style="font-size:9px;color:var(--text2);margin-top:6px;opacity:.7">CoinGecko · Binance 4H · Actualizado: ${new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})}</div>`;
+    html+=`<div style="font-size:9px;color:var(--text2);margin-top:6px;opacity:.7">Score: base+aceleración+RS+consistencia · CoinGecko+Binance · ${new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})}</div>`;
 
     box.innerHTML=html;
-    if(sub)sub.textContent=`${filtered.length} en momentum · ${new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})}`;
+    const longCnt=filtered.filter(t=>t.final==='long').length;
+    const ntCnt=filtered.filter(t=>t.blocked).length;
+    if(sub)sub.textContent=`${longCnt} LONG · ${ntCnt} bloq. · ${new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})}`;
     _momentumLoaded=true;
 
   }catch(e){
