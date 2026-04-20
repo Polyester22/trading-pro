@@ -1831,6 +1831,103 @@ function tickerSemaphoreHTML(t, tc){
   </div>`;
 }
 
+// ══ TP SUGERIDO POR MOMENTUM ══
+function getMomentumTP(ticker, pos){
+  const tc = tickerChangeCache[ticker] || null;
+  const isLong = pos === 'Long';
+
+  // Sin datos de mercado: no mostrar
+  if(!tc) return null;
+
+  const c1h  = tc.change1h  || 0;
+  const c24  = tc.change24h || 0;
+  const c4h  = tc.change4h  || 0;
+
+  // Fuerza relativa vs BTC (necesitamos btc1h del cache global)
+  const btc1h = _cgCache?.pd?.bitcoin?.usd_1h_change || 0;
+  const rs    = c1h - btc1h;
+  const accel = c1h - (c24 / 24);
+
+  // Amplitud: % altcoins en positivo (del cache)
+  const md = _cgCache?.md || [];
+  const alts = md.filter(c=>c.id!=='bitcoin'&&c.id!=='ethereum'&&c.price_change_percentage_24h!=null);
+  const amp = alts.length ? Math.round(alts.filter(c=>(c.price_change_percentage_24h||0)>0).length/alts.length*100) : 50;
+
+  // Score de momentum para este ticker/dirección
+  let score = 0;
+  if(isLong){
+    if(c4h  > 0) score += 2;
+    if(c1h  > 0) score += 1;
+    if(c24  > 0) score += 1;
+    if(rs   > 0) score += 1;
+    if(accel > 0.05) score += 1;
+    if(amp  >= 60) score += 1;
+  } else {
+    // Short: debilidad
+    if(rs   < 0) score += 2;
+    if(c1h  < 0) score += 2;
+    if(accel < -0.05) score += 2;
+    if(c24  < 0) score += 1;
+    if(c4h  < 0) score += 1;
+  }
+
+  const acelerando = isLong ? accel > 0.08 : accel < -0.08;
+  const rsStrong   = isLong ? rs > 1.5 : rs < -1.5;
+
+  // Clasificar
+  let level, tpLabel, tpDetail, tpColor, tpBg, tpBorder, estrategia;
+  if(score >= 6 && acelerando){
+    level     = 'FUERTE';
+    tpColor   = '#00c853';
+    tpBg      = 'rgba(0,200,83,.08)';
+    tpBorder  = 'rgba(0,200,83,.35)';
+    if(isLong){
+      tpLabel   = '🔥 Momentum fuerte — extendé el TP';
+      tpDetail  = 'TP1 8–10% · TP2 15–20% · dejar runner';
+      estrategia= 'Cerrar 50% en TP1, dejar correr el resto. Si la 1H deja de acelerar → cerrar todo.';
+    } else {
+      tpLabel   = '🔥 Short fuerte — extendé el TP';
+      tpDetail  = 'TP1 -8–10% · TP2 -15–20% · dejar runner';
+      estrategia= 'Cerrar 50% en TP1, dejar correr el resto. Si la 1H rebota → cerrar todo.';
+    }
+  } else if(score >= 4){
+    level     = 'MEDIO';
+    tpColor   = '#ffd100';
+    tpBg      = 'rgba(255,209,0,.08)';
+    tpBorder  = 'rgba(255,209,0,.35)';
+    if(isLong){
+      tpLabel   = '🟡 Momentum medio — TP limpio';
+      tpDetail  = 'TP único: 8–12%';
+      estrategia= 'No te cases con el trade. Salir limpio sin esperar más.';
+    } else {
+      tpLabel   = '🟡 Short medio — TP limpio';
+      tpDetail  = 'TP único: -8–12%';
+      estrategia= 'No te cases. Salir limpio sin esperar más caída.';
+    }
+  } else {
+    level     = 'DÉBIL';
+    tpColor   = '#ff6b00';
+    tpBg      = 'rgba(255,107,0,.08)';
+    tpBorder  = 'rgba(255,107,0,.35)';
+    if(isLong){
+      tpLabel   = '⚠️ Momentum débil — scalp rápido';
+      tpDetail  = 'TP: 5–8% máximo';
+      estrategia= 'No esperes más. Salir sin dudar en el primer objetivo.';
+    } else {
+      tpLabel   = '⚠️ Short débil — scalp rápido';
+      tpDetail  = 'TP: -5–8% máximo';
+      estrategia= 'No esperes más. Salir en el primer objetivo sin dudar.';
+    }
+  }
+
+  // Alerta trailing si acelerando
+  const trailingNote = acelerando && level==='FUERTE'
+    ? '<div style="font-size:9px;color:#00aaff;margin-top:3px;font-weight:700">💡 Trailing: si la 1H baja respecto a la anterior → cerrar posición</div>'
+    : '';
+
+  return {level, tpLabel, tpDetail, estrategia, tpColor, tpBg, tpBorder, trailingNote, score, acelerando};
+}
+
 function renderOpenTrades(){
   const open=D.trades.filter(t=>t.open).sort((a,b)=>b.fecha.localeCompare(a.fecha));
   // Fetch ticker-specific price changes in background
@@ -1908,6 +2005,18 @@ function renderOpenTrades(){
       </div>
       ${t.obs?`<div style="margin-top:8px;font-size:11px;color:var(--text2);font-style:italic;padding:0 2px">${t.obs}</div>`:''}
       ${tickerSemaphoreHTML(t, tickerChangeCache[t.ticker]||null)}
+      ${(()=>{
+        const tp = getMomentumTP(t.ticker, t.pos);
+        if(!tp) return '';
+        return `<div style="background:${tp.tpBg};border:1px solid ${tp.tpBorder};border-radius:8px;padding:8px 10px;margin-top:8px" onclick="event.stopPropagation()">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
+            <div style="font-size:11px;font-weight:900;color:${tp.tpColor}">${tp.tpLabel}</div>
+            <div style="font-size:10px;font-weight:800;background:${tp.tpBg};color:${tp.tpColor};border:1px solid ${tp.tpBorder};border-radius:5px;padding:1px 7px">${tp.tpDetail}</div>
+          </div>
+          <div style="font-size:10px;color:var(--text2);line-height:1.4">${tp.estrategia}</div>
+          ${tp.trailingNote}
+        </div>`;
+      })()}
       ${(()=>{const rec=getTradeRecommendation(t,livePct,totalMins,tickerChangeCache[t.ticker]||null);const cev=getCompositeEV(t);return`<div style="display:flex;align-items:center;gap:8px;background:${rec.bg};border:1px solid ${rec.border};border-radius:8px;padding:8px 10px;margin-top:8px"><div style="flex:1"><div style="font-size:12px;font-weight:900;color:${rec.color}">${rec.action}</div><div style="font-size:10px;color:var(--text2);margin-top:1px">${rec.reason}</div></div>${cev?`<div style="text-align:right;flex-shrink:0"><div style="font-size:9px;color:var(--text2);font-weight:700">EV HIST</div><div style="font-size:13px;font-weight:900;color:${cev.ev>=0?'#00c853':'#ff3d57'}">${cev.ev>=0?'+':''}${cev.ev.toFixed(1)}%</div><div style="font-size:8px;color:var(--text2)">${cev.sources} fuentes</div></div>`:''}</div>`;})()}
       <div style="display:flex;gap:6px;margin-top:10px" onclick="event.stopPropagation()">
         <button class="btn btn-dark btn-sm" style="flex:1;font-size:12px" onclick="openMCP('${t.id}',false)">📉 Cierre parcial</button>
