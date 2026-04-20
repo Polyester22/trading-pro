@@ -3280,38 +3280,46 @@ async function loadMomentum(forceRefresh){
       }
     });
 
-    // ── MOMENTUM SCORE (7 componentes) ──────────────────────────────────
+    // ── MOMENTUM SCORE LONG (7 componentes) ─────────────────────────────
     function calcMomentumScore(t){
-      const p15m = t.c15m;      // puede ser null
+      const p15m = t.c15m;
       const p1h  = t.c1h;
-      const p4h  = t.c4h !== null ? t.c4h : (p1h * 2.5); // estimación si no hay dato
+      const p4h  = t.c4h !== null ? t.c4h : (p1h * 2.5);
       const p24h = t.c24;
-
       let score = 0;
-
-      // 1. Dirección base (más peso al 4H)
       if(p4h  > 0) score += 2;
       if(p1h  > 0) score += 1;
       if(p24h > 0) score += 1;
       if(p15m !== null && p15m > 0) score += 1;
-
-      // 2. Aceleración (1H vs promedio horario del 24H)
       const avg24hPerHour = p24h / 24;
-      if(p1h > avg24hPerHour + 0.05)      score += 1;  // acelerando
-      else if(p1h < avg24hPerHour - 0.05) score -= 1;  // frenando
-
-      // 3. Fuerza relativa vs BTC (1H)
+      if(p1h > avg24hPerHour + 0.05)      score += 1;
+      else if(p1h < avg24hPerHour - 0.05) score -= 1;
       const rs1h = p1h - btc1hGlobal;
       if(rs1h > 0) score += 1;
       else         score -= 1;
-
-      // 4. Consistencia (evita fake moves)
       const allUp   = (p15m===null||p15m>0) && p1h>0 && p4h>0;
       const allDown = (p15m===null||p15m<0) && p1h<0 && p4h<0;
       if(allUp)   score += 1;
       if(allDown) score -= 1;
+      return score;
+    }
 
-      return score; // rango típico: -3 a +7 (+8 con 15m)
+    // ── SCORE SHORT (espejo inteligente — debilidad real) ────────────────
+    // Máximo típico: 9 pts
+    function calcShortScore(t){
+      const p1h  = t.c1h;
+      const p4h  = t.c4h !== null ? t.c4h : (p1h * 2.5);
+      const p24h = t.c24;
+      const rs1h = p1h - btc1hGlobal;
+      const accel = p1h - (p24h / 24); // negativo = acelerando a la baja
+      let score = 0;
+      if(rs1h < 0)   score += 2;  // más débil que BTC → clave
+      if(p1h  < 0)   score += 2;
+      if(p24h < 0)   score += 1;
+      if(accel < -0.05) score += 2; // acelerando a la baja
+      if(p4h  < 0)   score += 1;
+      if(dirMode==='short') score += 1; // alineado con semáforo
+      return score; // 0–9
     }
 
     // ── ESTADO INDIVIDUAL por score ──────────────────────────────────────
@@ -3321,7 +3329,7 @@ async function loadMomentum(forceRefresh){
       return 'short';
     }
 
-    // ── ESTADO FINAL con filtro global (REGLA DE ORO) ────────────────────
+    // ── ESTADO FINAL con filtro global ───────────────────────────────────
     function estadoFinal(score){
       const est = scoreToEstado(score);
       if(globalBias === 'neutral') return {est, final: est, blocked: false};
@@ -3329,82 +3337,118 @@ async function loadMomentum(forceRefresh){
       return {est, final: est, blocked: false};
     }
 
-    // Calcular scores para todos
-    const scored = allTickers.map(t=>({
-      ...t,
-      score: calcMomentumScore(t),
-    })).map(t=>({
-      ...t,
-      ...estadoFinal(t.score),
-    }));
+    // ── DETECTAR EXTENDIDO ───────────────────────────────────────────────
+    function isExtendido(t){
+      return Math.abs(t.c1h) > 1.5 && Math.abs(t.c24) > 5;
+    }
 
-    // Filtrar según dirMode + score mínimo
-    // En modo long: mostrar tickers con final==='long' o (long y neutral)
-    // En modo short: mostrar tickers con final==='short'
-    // En modo wait: mostrar los scores más extremos en ambos sentidos
-    const MIN_SCORE_LONG  = 4;
-    const MIN_SCORE_SHORT = 0; // score < 2 = short
+    // ── CLASIFICACIÓN ACELERACIÓN ────────────────────────────────────────
+    function accelClass(t){
+      const accel = t.c1h - (t.c24 / 24);
+      if(accel > 0.08) return 'fast';
+      if(accel < -0.08) return 'slow';
+      return 'flat';
+    }
 
-    // ── MOMENTUM RANK: RS > aceleración > score ──────────────────────────
-    // Fórmula: rankValue = RS*2 + aceleración*10 + score
-    // RS = fuerza relativa vs BTC en 1H
-    // aceleración = c1h - (c24/24) → cuán rápido está moviendo ahora vs promedio del día
+    // ── EARLY MOMENTUM ───────────────────────────────────────────────────
+    function isEarlyMomentum(t){
+      return Math.abs(t.c24) < 1.5 && t.c1h > 0.5;
+    }
+
+    // ── MOMENTUM RANK (LONG) ─────────────────────────────────────────────
     function momentumRank(t){
       const rs1h = t.c1h - btc1hGlobal;
       const accel = t.c1h - (t.c24 / 24);
       return rs1h * 2 + accel * 10 + t.score;
     }
 
-    // ── CLASIFICACIÓN ACELERACIÓN ─────────────────────────────────────────
-    function accelClass(t){
-      const accel = t.c1h - (t.c24 / 24);
-      if(accel > 0.08) return 'fast';   // acelerando
-      if(accel < -0.08) return 'slow';  // frenando
-      return 'flat';
+    // ── MOMENTUM RANK (SHORT) ────────────────────────────────────────────
+    function shortRank(t){
+      const rs1h = t.c1h - btc1hGlobal; // negativo = mejor short
+      const accel = t.c1h - (t.c24 / 24); // negativo = acelerando a la baja
+      return -(rs1h * 2 + accel * 10); // más negativo = mejor short → DESC
     }
 
-    // ── EARLY MOMENTUM: 24H bajo (<1%) + 1H alto (>0.5%) ─────────────────
-    function isEarlyMomentum(t){
-      return Math.abs(t.c24) < 1.5 && t.c1h > 0.5;
-    }
+    // Calcular scores para todos
+    const scored = allTickers.map(t=>({
+      ...t,
+      score: calcMomentumScore(t),
+      shortScore: calcShortScore(t),
+    })).map(t=>({
+      ...t,
+      ...estadoFinal(t.score),
+    }));
 
+    // Filtrar según dirMode
+    const MIN_SCORE_LONG = 4;
     let filtered;
     if(dirMode==='long'){
       filtered = scored.filter(t=>t.score>=MIN_SCORE_LONG)
                        .sort((a,b)=>momentumRank(b)-momentumRank(a)).slice(0,30);
     } else if(dirMode==='short'){
-      filtered = scored.filter(t=>t.score<2)
-                       .sort((a,b)=>momentumRank(a)-momentumRank(b)).slice(0,30);
+      filtered = scored.filter(t=>t.shortScore>=5)
+                       .sort((a,b)=>shortRank(a)-shortRank(b)).slice(0,30);
     } else {
-      // wait/neutral: mostrar extremos de ambos lados
-      filtered = scored.filter(t=>t.score>=5||t.score<=0)
-                       .sort((a,b)=>Math.abs(momentumRank(b))-Math.abs(momentumRank(a))).slice(0,30);
+      filtered = scored.filter(t=>t.score>=5||t.shortScore>=5)
+                       .sort((a,b)=>momentumRank(b)-momentumRank(a)).slice(0,30);
     }
 
-    if(!filtered.length){
-      box.innerHTML='<div style="font-size:11px;color:var(--text2);text-align:center;padding:10px">Sin tickers con momentum claro ahora mismo</div>';
-      if(sub)sub.textContent='Sin señal clara · '+new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'});
-      if(btn){btn.textContent='⟳ Actualizar';btn.disabled=false;}
-      _momentumLoaded=true;
-      return;
+    // ── DETERMINAR ESTADO GLOBAL DE SESIÓN ──────────────────────────────
+    // "ENTRAR" / "ESPERAR" / "NO OPERAR" basado en semáforo + condiciones
+    const btc1hAlign = dirMode==='long' ? btc1hGlobal > 0 : dirMode==='short' ? btc1hGlobal < 0 : false;
+    let sessionState, sessionColor, sessionBg, sessionBorder, sessionNote;
+    if(dirMode==='wait'){
+      sessionState='🔴 NO OPERAR';
+      sessionColor='#ff3d57';
+      sessionBg='rgba(255,61,87,.1)';
+      sessionBorder='rgba(255,61,87,.4)';
+      sessionNote='Semáforo en NO TRADE — esperá dirección clara. El Top 3 es solo informativo.';
+    } else if(btc1hAlign && filtered.some(t=>!t.blocked&&accelClass(t)==='fast')){
+      sessionState= dirMode==='long'?'🟢 ENTRAR LONG':'🔴 ENTRAR SHORT';
+      sessionColor= dirMode==='long'?'#00c853':'#ff3d57';
+      sessionBg=    dirMode==='long'?'rgba(0,200,83,.1)':'rgba(255,61,87,.1)';
+      sessionBorder=dirMode==='long'?'rgba(0,200,83,.4)':'rgba(255,61,87,.4)';
+      sessionNote=  dirMode==='long'?'4H LONG + 1H confirma + hay aceleración → condiciones óptimas':'4H SHORT + 1H confirma + hay aceleración → condiciones óptimas';
+    } else if(dirMode!=='wait'){
+      sessionState='🟡 ESPERAR';
+      sessionColor='#ffd100';
+      sessionBg='rgba(255,209,0,.08)';
+      sessionBorder='rgba(255,209,0,.4)';
+      sessionNote= btc1hAlign ? 'Dirección ok pero sin aceleración clara — esperá pullback o confirmación'
+                              : '4H válido pero 1H no acompaña aún — esperá que la 1H se alinee';
     }
 
     const dirLabel=dirMode==='long'?'🟢 LONG':dirMode==='short'?'🔴 SHORT':'↔ Mixto';
     const dirCol=dirMode==='long'?'#00c853':dirMode==='short'?'#ff3d57':'#ffd100';
 
-    // ── BADGE DE SCORE / SEMÁFORO ────────────────────────────────────────
+    // ── BADGE DE SCORE ───────────────────────────────────────────────────
     function scoreBadge(t){
-      if(t.blocked){
+      if(t.blocked)
         return`<span style="font-size:10px;font-weight:800;background:rgba(100,100,100,.2);color:var(--text2);padding:2px 7px;border-radius:5px">⛔ NO TRADE</span>`;
-      }
       if(t.final==='long'){
         const intensity = t.score>=7?'🔥':t.score>=6?'💪':'';
-        return`<span style="font-size:10px;font-weight:800;background:rgba(0,200,83,.18);color:#00c853;padding:2px 7px;border-radius:5px">🟢 ${t.score>0?'+':''}${t.score} ${intensity}</span>`;
+        return`<span style="font-size:10px;font-weight:800;background:rgba(0,200,83,.18);color:#00c853;padding:2px 7px;border-radius:5px">🟢 +${t.score} ${intensity}</span>`;
       }
-      if(t.final==='short'){
-        return`<span style="font-size:10px;font-weight:800;background:rgba(255,61,87,.18);color:#ff3d57;padding:2px 7px;border-radius:5px">🔴 ${t.score}</span>`;
-      }
-      return`<span style="font-size:10px;font-weight:800;background:rgba(255,209,0,.15);color:#ffd100;padding:2px 7px;border-radius:5px">🟡 ${t.score>0?'+':''}${t.score}</span>`;
+      if(t.final==='short')
+        return`<span style="font-size:10px;font-weight:800;background:rgba(255,61,87,.18);color:#ff3d57;padding:2px 7px;border-radius:5px">🔴 ${t.shortScore}</span>`;
+      return`<span style="font-size:10px;font-weight:800;background:rgba(255,209,0,.15);color:#ffd100;padding:2px 7px;border-radius:5px">🟡 +${t.score}</span>`;
+    }
+
+    // ── BOTÓN ENTRAR / ESPERAR / NO TRADE por ticker ─────────────────────
+    function entryButton(t){
+      const rs1h = t.c1h - btc1hGlobal;
+      const acCls = accelClass(t);
+      const extendido = isExtendido(t);
+      if(dirMode==='wait'||t.blocked)
+        return`<span style="font-size:9px;font-weight:800;background:rgba(100,100,100,.2);color:var(--text2);border-radius:5px;padding:2px 8px">⛔ NO TRADE</span>`;
+      const scoreOk = dirMode==='long' ? t.score>=6 : t.shortScore>=7;
+      const rsOk    = dirMode==='long' ? rs1h>0 : rs1h<0;
+      const accelOk = dirMode==='long' ? acCls==='fast' : (t.c1h - t.c24/24) < -0.08;
+      if(scoreOk && rsOk && accelOk && !extendido)
+        return`<span style="font-size:9px;font-weight:800;background:${dirMode==='long'?'rgba(0,200,83,.2)':'rgba(255,61,87,.2)'};color:${dirMode==='long'?'#00c853':'#ff3d57'};border-radius:5px;padding:2px 8px">${dirMode==='long'?'🟢':'🔴'} ENTRAR</span>`;
+      if(extendido)
+        return`<span style="font-size:9px;font-weight:800;background:rgba(255,209,0,.15);color:#ffd100;border-radius:5px;padding:2px 8px">🟡 EXTENDIDO</span>`;
+      return`<span style="font-size:9px;font-weight:800;background:rgba(255,209,0,.12);color:#ffd100;border-radius:5px;padding:2px 8px">🟡 ESPERAR</span>`;
     }
 
     // ── CHIP DE TICKER ───────────────────────────────────────────────────
@@ -3415,44 +3459,35 @@ async function loadMomentum(forceRefresh){
       const mineBadge=t.mine&&!t.open?'<span style="font-size:8px;color:#ff6b00;margin-left:2px">★</span>':'';
       const rs1h=(t.c1h-btc1hGlobal);
       const rsCol=rs1h>0?'#00c853':'#ff3d57';
-      const accel=(t.c1h - t.c24/24);
       const acCls=accelClass(t);
-      // Aceleración icon + color
       const accelIcon=acCls==='fast'?'🔥':acCls==='slow'?'⚠️':'';
-      const accelLabel=acCls==='fast'?'acelerando':acCls==='slow'?'frenando':'';
-      // Early momentum badge
-      const early=isEarlyMomentum(t);
-      const earlyBadge=early&&!t.blocked?'<span style="font-size:8px;background:rgba(0,170,255,.2);color:#00aaff;border-radius:3px;padding:1px 5px;margin-left:4px;font-weight:800">⚡ EARLY</span>':'';
-
-      // Score bar visual (0–8 scale)
+      const earlyBadge=isEarlyMomentum(t)&&!t.blocked?'<span style="font-size:8px;background:rgba(0,170,255,.2);color:#00aaff;border-radius:3px;padding:1px 5px;margin-left:4px;font-weight:800">⚡ EARLY</span>':'';
+      const extBadge=isExtendido(t)?'<span style="font-size:8px;background:rgba(255,209,0,.15);color:#ffd100;border-radius:3px;padding:1px 5px;margin-left:4px;font-weight:700">📈 EXTENDIDO</span>':'';
       const scoreMax=8;
       const scorePct=Math.max(0,Math.min(100,((t.score+3)/(scoreMax+3))*100));
       const barCol=t.final==='long'?'#00c853':t.final==='short'?'#ff3d57':t.blocked?'#555':'#ffd100';
-
       const borderCol=t.blocked?'var(--border)':t.final==='long'?'rgba(0,200,83,.4)':t.final==='short'?'rgba(255,61,87,.4)':t.open?'#ff6b00':t.mine?'rgba(255,107,0,.4)':'var(--border)';
-
-      // RS prominence: highlight if rs1h > 0.5
       const rsHighlight=rs1h>0.5?'background:rgba(0,200,83,.15);border-radius:4px;padding:1px 5px;':rs1h<-0.5?'background:rgba(255,61,87,.12);border-radius:4px;padding:1px 5px;':'';
 
       return`<div style="background:var(--surface2);border-radius:10px;padding:10px 12px;margin-bottom:5px;border-left:2.5px solid ${borderCol};opacity:${t.blocked?'.55':'1'}">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px">
-          <div style="font-size:13px;font-weight:900">${t.sym}${mineBadge}${openBadge}${earlyBadge}</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+          <div style="font-size:13px;font-weight:900">${t.sym}${mineBadge}${openBadge}${earlyBadge}${extBadge}</div>
           <div style="display:flex;align-items:center;gap:5px">
-            ${accelIcon?`<span style="font-size:11px" title="${accelLabel}">${accelIcon}</span>`:''}
+            ${accelIcon?`<span style="font-size:11px">${accelIcon}</span>`:''}
             ${scoreBadge(t)}
           </div>
         </div>
-        <!-- score bar -->
         <div style="height:4px;background:var(--border);border-radius:2px;margin-bottom:6px;overflow:hidden">
           <div style="height:100%;width:${scorePct}%;background:${barCol};border-radius:2px;transition:width .4s ease"></div>
         </div>
-        <div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center;margin-bottom:5px">
           ${t.c15m!==null?`<span style="font-size:10px;font-weight:700;color:${t.c15m>0?'#00c853':'#ff3d57'};background:${t.c15m>0?'rgba(0,200,83,.1)':'rgba(255,61,87,.1)'};padding:2px 5px;border-radius:4px">15m ${t.c15m>=0?'+':''}${t.c15m.toFixed(2)}%</span>`:''}
           <span style="font-size:11px;font-weight:800;color:${c1hCol};background:${t.c1h>0?'rgba(0,200,83,.12)':'rgba(255,61,87,.1)'};padding:2px 6px;border-radius:5px">1H ${t.c1h>=0?'+':''}${t.c1h.toFixed(1)}%</span>
           ${t.c4h!==null?`<span style="font-size:10px;font-weight:700;color:${c4hCol}">4H ${t.c4h>=0?'+':''}${t.c4h.toFixed(1)}%</span>`:''}
           <span style="font-size:10px;color:var(--text2)">24H ${t.c24>=0?'+':''}${t.c24.toFixed(1)}%</span>
           <span style="font-size:10px;font-weight:800;color:${rsCol};margin-left:auto;${rsHighlight}">RS ${rs1h>=0?'+':''}${rs1h.toFixed(1)}%</span>
         </div>
+        <div style="text-align:right">${entryButton(t)}</div>
       </div>`;
     }
 
@@ -3460,12 +3495,18 @@ async function loadMomentum(forceRefresh){
     const mine=filtered.filter(t=>t.mine);
     const rest=filtered.filter(t=>!t.mine);
 
-    // Bias badge
     const biasColor=globalBias==='long'?'#00c853':globalBias==='short'?'#ff3d57':'#ffd100';
     const biasLabel=globalBias==='long'?'🟢 BIAS LONG':globalBias==='short'?'🔴 BIAS SHORT':'🟡 SIN BIAS';
     const biasNote=globalBias==='neutral'?'Todos los scores son válidos':'Solo se muestran activos alineados con el bias';
 
     let html='';
+
+    // ── BANNER ESTADO SESIÓN (ENTRAR / ESPERAR / NO OPERAR) ──────────────
+    html+=`<div style="background:${sessionBg};border:2px solid ${sessionBorder};border-radius:10px;padding:10px 14px;margin-bottom:10px">
+      <div style="font-size:14px;font-weight:900;color:${sessionColor};margin-bottom:3px">${sessionState}</div>
+      <div style="font-size:10px;color:var(--text2);line-height:1.4">${sessionNote}</div>
+    </div>`;
+
     html+=`<div style="background:rgba(${globalBias==='long'?'0,200,83':globalBias==='short'?'255,61,87':'255,209,0'},.08);border:1px solid rgba(${globalBias==='long'?'0,200,83':globalBias==='short'?'255,61,87':'255,209,0'},.3);border-radius:8px;padding:8px 12px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center">
       <div>
         <div style="font-size:11px;font-weight:800;color:${biasColor}">${biasLabel}</div>
@@ -3477,14 +3518,8 @@ async function loadMomentum(forceRefresh){
       </div>
     </div>`;
 
-    // Score legend
-    html+=`<div style="display:flex;gap:6px;margin-bottom:8px;font-size:9px;font-weight:700;color:var(--text2);flex-wrap:wrap">
-      <span>🟢 ≥5 LONG</span>
-      <span>🟡 2–4 NEUTRAL</span>
-      <span>🔴 &lt;2 SHORT</span>
-      <span>🔥 acelerando</span>
-      <span>⚠️ frenando</span>
-      <span>⚡ early</span>
+    html+=`<div style="display:flex;gap:5px;margin-bottom:8px;font-size:9px;font-weight:700;color:var(--text2);flex-wrap:wrap">
+      <span>🟢 ≥5 LONG</span><span>🔴 ≥5 SHORT</span><span>🔥 acelerando</span><span>⚠️ frenando</span><span>⚡ early</span>
       <span style="margin-left:auto">⛔ = contra bias</span>
     </div>`;
 
@@ -3494,81 +3529,112 @@ async function loadMomentum(forceRefresh){
     </div>`;
 
     // ── TOP 3 REAL ────────────────────────────────────────────────────────
-    // Filtro estricto: score>=5 + alineado con bias + RS>0 (longs) o RS<0 (shorts) + aceleración>0
+    const isShortMode = dirMode==='short';
     const top3Candidates = filtered.filter(t=>{
       if(t.blocked) return false;
-      if(t.score < 5) return false;
       const rs1h = t.c1h - btc1hGlobal;
       const accel = t.c1h - (t.c24/24);
-      if(dirMode==='long'  && rs1h <= 0) return false;
-      if(dirMode==='short' && rs1h >= 0) return false;
-      if(accel <= 0) return false; // solo acelerando
+      if(!isShortMode){
+        if(t.score < 5) return false;
+        if(rs1h <= 0) return false;
+        if(accel <= 0) return false;
+      } else {
+        if(t.shortScore < 5) return false;
+        if(rs1h >= 0) return false;
+        if(accel >= 0) return false;
+      }
       return true;
     });
-    // Ya vienen ordenados por momentumRank, tomar primeros 3
     const top3 = top3Candidates.slice(0,3);
 
-    if(top3.length){
+    // Labels cambian según dirección
+    const top3MedalsLabel = isShortMode
+      ? ['Short líder','Short fuerte','Short oportunidad']
+      : ['Líder actual','Fuerte','Oportunidad'];
+    const top3MedalsHint = isShortMode
+      ? ['RS negativo + cayendo → mejor short ahora','Debilidad sólida, sin rebote','Aceleración bajista → posible próximo short']
+      : ['RS alto + acelerando → el mejor trade ahora','Buen RS, momentum estable','Aceleración alta → posible próximo líder'];
+
+    if(top3.length && dirMode!=='wait'){
       const medals=['🥇','🥈','🥉'];
-      const medalsLabel=['Líder actual','Fuerte','Oportunidad'];
-      const medalsHint=['RS alto + acelerando → el mejor trade ahora','Buen RS, momentum estable','Aceleración alta → posible próximo líder'];
       const medalsBg=['rgba(255,215,0,.1)','rgba(192,192,192,.1)','rgba(205,127,50,.1)'];
       const medalsBorder=['rgba(255,215,0,.5)','rgba(192,192,192,.4)','rgba(205,127,50,.4)'];
       const medalsColor=['#ffd100','#aaaaaa','#cd7f32'];
+      const top3Title=isShortMode?'🔻 TOP '+top3.length+' SHORT REAL':'🚀 TOP '+top3.length+' MOMENTUM REAL';
+      const top3TitleColor=isShortMode?'#ff3d57':'#ff6b00';
+      const top3Border=isShortMode?'rgba(255,61,87,.3)':'rgba(255,107,0,.3)';
+      const top3BgPanel=isShortMode?'rgba(255,61,87,.06)':'rgba(255,107,0,.06)';
 
-      html+=`<div style="background:rgba(255,107,0,.06);border:1.5px solid rgba(255,107,0,.3);border-radius:12px;padding:12px;margin-bottom:10px">
-        <div style="font-size:11px;font-weight:900;color:#ff6b00;margin-bottom:8px;letter-spacing:.3px">🚀 TOP ${top3.length} MOMENTUM REAL</div>`;
+      html+=`<div style="background:${top3BgPanel};border:1.5px solid ${top3Border};border-radius:12px;padding:12px;margin-bottom:10px">
+        <div style="font-size:11px;font-weight:900;color:${top3TitleColor};margin-bottom:8px;letter-spacing:.3px">${top3Title}</div>`;
 
       top3.forEach((t,i)=>{
         const rs1h=(t.c1h-btc1hGlobal);
-        const accel=(t.c1h-t.c24/24);
         const acCls=accelClass(t);
         const accelDisp=acCls==='fast'?'🔥 Acelerando':acCls==='slow'?'⚠️ Frenando':'→ Estable';
         const accelCol=acCls==='fast'?'#00c853':acCls==='slow'?'#ffd100':'var(--text2)';
         const openBadge=t.open?'<span style="font-size:8px;background:rgba(255,107,0,.2);color:#ff6b00;border-radius:3px;padding:1px 4px;margin-left:3px;font-weight:700">EN CURSO</span>':'';
         const earlyBadge=isEarlyMomentum(t)?'<span style="font-size:8px;background:rgba(0,170,255,.2);color:#00aaff;border-radius:3px;padding:1px 5px;margin-left:3px;font-weight:800">⚡ EARLY</span>':'';
+        const scoreDisplay=isShortMode?t.shortScore:t.score;
+        const scoreLabel=isShortMode?'S.Short':'Score';
+        const scoreCol=isShortMode?'#ff3d57':'#ff6b00';
         html+=`<div style="display:flex;align-items:stretch;gap:10px;margin-bottom:${i<top3.length-1?'8px':'0'};padding:10px;background:${medalsBg[i]};border:1px solid ${medalsBorder[i]};border-radius:10px">
           <div style="font-size:22px;line-height:1;flex-shrink:0;padding-top:2px">${medals[i]}</div>
           <div style="flex:1;min-width:0">
             <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
               <span style="font-size:15px;font-weight:900">${t.sym}</span>${openBadge}${earlyBadge}
-              <span style="font-size:9px;font-weight:800;color:${medalsColor[i]};background:${medalsBg[i]};border:1px solid ${medalsBorder[i]};border-radius:4px;padding:1px 6px;margin-left:auto">${medalsLabel[i]}</span>
+              <span style="font-size:9px;font-weight:800;color:${medalsColor[i]};border:1px solid ${medalsBorder[i]};border-radius:4px;padding:1px 6px;margin-left:auto">${top3MedalsLabel[i]}</span>
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin-bottom:4px">
-              <div style="font-size:10px;color:var(--text2)">Score <strong style="color:#ff6b00">+${t.score}</strong></div>
+              <div style="font-size:10px;color:var(--text2)">${scoreLabel} <strong style="color:${scoreCol}">${scoreDisplay>=0?'+':''}${scoreDisplay}</strong></div>
               <div style="font-size:10px;color:var(--text2)">RS <strong style="color:${rs1h>0?'#00c853':'#ff3d57'}">${rs1h>=0?'+':''}${rs1h.toFixed(1)}%</strong></div>
               <div style="font-size:10px;color:var(--text2)">1H <strong style="color:${t.c1h>0?'#00c853':'#ff3d57'}">${t.c1h>=0?'+':''}${t.c1h.toFixed(1)}%</strong></div>
             </div>
             <div style="font-size:10px;font-weight:800;color:${accelCol}">${accelDisp}</div>
-            <div style="font-size:9px;color:var(--text2);margin-top:2px;opacity:.8">${medalsHint[i]}</div>
+            <div style="font-size:9px;color:var(--text2);margin-top:2px;opacity:.8">${top3MedalsHint[i]}</div>
+            <div style="text-align:right;margin-top:5px">${entryButton(t)}</div>
           </div>
         </div>`;
       });
-
       html+=`</div>`;
-    } else {
-      // Sin candidatos válidos → aviso honesto
+    } else if(dirMode!=='wait'){
       html+=`<div style="background:rgba(255,209,0,.07);border:1px solid rgba(255,209,0,.3);border-radius:10px;padding:10px 12px;margin-bottom:10px;font-size:11px;color:#ffd100;font-weight:700">
-        ⚠️ Sin Top 3 ahora — ningún ticker cumple: score≥5 + lider vs BTC + acelerando
+        ⚠️ Sin Top 3 — ningún ticker cumple todos los filtros: score≥5 + líder vs BTC + acelerando
       </div>`;
     }
 
     // ── LISTA COMPLETA ────────────────────────────────────────────────────
-    if(mine.length){
-      html+=`<div style="font-size:10px;font-weight:700;color:#ff6b00;text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px">Tus tickers</div>`;
-      html+=mine.map(tickerChip).join('');
-    }
-    if(rest.length){
-      if(mine.length) html+=`<div style="font-size:10px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin:8px 0 5px">Top 100</div>`;
-      html+=rest.map(tickerChip).join('');
+    if(filtered.length && dirMode!=='wait'){
+      if(mine.length){
+        html+=`<div style="font-size:10px;font-weight:700;color:#ff6b00;text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px">Tus tickers</div>`;
+        html+=mine.map(tickerChip).join('');
+      }
+      if(rest.length){
+        if(mine.length) html+=`<div style="font-size:10px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin:8px 0 5px">Top 100</div>`;
+        html+=rest.map(tickerChip).join('');
+      }
+    } else if(dirMode==='wait'){
+      // En NO TRADE: mostrar lista en gris con disclaimer
+      html+=`<div style="font-size:10px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;opacity:.6">Solo informativo — no operar</div>`;
+      html+=filtered.slice(0,10).map(t=>{
+        const rs1h=(t.c1h-btc1hGlobal);
+        const rsCol=rs1h>0?'#00c853':'#ff3d57';
+        return`<div style="background:var(--surface2);border-radius:8px;padding:8px 10px;margin-bottom:4px;opacity:.5;display:flex;justify-content:space-between;align-items:center">
+          <span style="font-size:12px;font-weight:800;color:var(--text2)">${t.sym}</span>
+          <span style="font-size:10px;color:${t.c1h>0?'#00c853':'#ff3d57'}">1H ${t.c1h>=0?'+':''}${t.c1h.toFixed(1)}%</span>
+          <span style="font-size:10px;font-weight:700;color:${rsCol}">RS ${rs1h>=0?'+':''}${rs1h.toFixed(1)}%</span>
+          <span style="font-size:9px;color:var(--text2)">+${t.score}</span>
+        </div>`;
+      }).join('');
     }
 
-    html+=`<div style="font-size:9px;color:var(--text2);margin-top:6px;opacity:.7">Orden: RS > aceleración > score · 🔥 acelerando · ⚠️ frenando · ⚡EARLY = 24H bajo + 1H alto · CoinGecko+Binance · ${new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})}</div>`;
+    html+=`<div style="font-size:9px;color:var(--text2);margin-top:6px;opacity:.7">Orden: RS > aceleración > score · 🔥 acelerando · ⚠️ frenando · ⚡EARLY · 📈EXTENDIDO · CoinGecko+Binance · ${new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})}</div>`;
 
     box.innerHTML=html;
     const longCnt=filtered.filter(t=>t.final==='long').length;
     const ntCnt=filtered.filter(t=>t.blocked).length;
-    if(sub)sub.textContent=`${top3.length>0?'🥇 Top '+top3.length+' · ':''} ${longCnt} LONG · ${ntCnt} bloq. · ${new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})}`;
+    const stateShort = dirMode==='wait'?'🔴 NO OPERAR':sessionState.startsWith('🟢')||sessionState.startsWith('🔴')?sessionState:'🟡 ESPERAR';
+    if(sub)sub.textContent=`${stateShort} · ${top3.length>0?'Top '+top3.length+' · ':''}${longCnt} señales · ${new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})}`;
     _momentumLoaded=true;
 
   }catch(e){
