@@ -3345,17 +3345,40 @@ async function loadMomentum(forceRefresh){
     const MIN_SCORE_LONG  = 4;
     const MIN_SCORE_SHORT = 0; // score < 2 = short
 
+    // ── MOMENTUM RANK: RS > aceleración > score ──────────────────────────
+    // Fórmula: rankValue = RS*2 + aceleración*10 + score
+    // RS = fuerza relativa vs BTC en 1H
+    // aceleración = c1h - (c24/24) → cuán rápido está moviendo ahora vs promedio del día
+    function momentumRank(t){
+      const rs1h = t.c1h - btc1hGlobal;
+      const accel = t.c1h - (t.c24 / 24);
+      return rs1h * 2 + accel * 10 + t.score;
+    }
+
+    // ── CLASIFICACIÓN ACELERACIÓN ─────────────────────────────────────────
+    function accelClass(t){
+      const accel = t.c1h - (t.c24 / 24);
+      if(accel > 0.08) return 'fast';   // acelerando
+      if(accel < -0.08) return 'slow';  // frenando
+      return 'flat';
+    }
+
+    // ── EARLY MOMENTUM: 24H bajo (<1%) + 1H alto (>0.5%) ─────────────────
+    function isEarlyMomentum(t){
+      return Math.abs(t.c24) < 1.5 && t.c1h > 0.5;
+    }
+
     let filtered;
     if(dirMode==='long'){
       filtered = scored.filter(t=>t.score>=MIN_SCORE_LONG)
-                       .sort((a,b)=>b.score-a.score).slice(0,30);
+                       .sort((a,b)=>momentumRank(b)-momentumRank(a)).slice(0,30);
     } else if(dirMode==='short'){
       filtered = scored.filter(t=>t.score<2)
-                       .sort((a,b)=>a.score-b.score).slice(0,30);
+                       .sort((a,b)=>momentumRank(a)-momentumRank(b)).slice(0,30);
     } else {
       // wait/neutral: mostrar extremos de ambos lados
       filtered = scored.filter(t=>t.score>=5||t.score<=0)
-                       .sort((a,b)=>Math.abs(b.score)-Math.abs(a.score)).slice(0,30);
+                       .sort((a,b)=>Math.abs(momentumRank(b))-Math.abs(momentumRank(a))).slice(0,30);
     }
 
     if(!filtered.length){
@@ -3393,7 +3416,13 @@ async function loadMomentum(forceRefresh){
       const rs1h=(t.c1h-btc1hGlobal);
       const rsCol=rs1h>0?'#00c853':'#ff3d57';
       const accel=(t.c1h - t.c24/24);
-      const accelIcon=accel>0.05?'⚡':'';
+      const acCls=accelClass(t);
+      // Aceleración icon + color
+      const accelIcon=acCls==='fast'?'🔥':acCls==='slow'?'⚠️':'';
+      const accelLabel=acCls==='fast'?'acelerando':acCls==='slow'?'frenando':'';
+      // Early momentum badge
+      const early=isEarlyMomentum(t);
+      const earlyBadge=early&&!t.blocked?'<span style="font-size:8px;background:rgba(0,170,255,.2);color:#00aaff;border-radius:3px;padding:1px 5px;margin-left:4px;font-weight:800">⚡ EARLY</span>':'';
 
       // Score bar visual (0–8 scale)
       const scoreMax=8;
@@ -3402,10 +3431,16 @@ async function loadMomentum(forceRefresh){
 
       const borderCol=t.blocked?'var(--border)':t.final==='long'?'rgba(0,200,83,.4)':t.final==='short'?'rgba(255,61,87,.4)':t.open?'#ff6b00':t.mine?'rgba(255,107,0,.4)':'var(--border)';
 
+      // RS prominence: highlight if rs1h > 0.5
+      const rsHighlight=rs1h>0.5?'background:rgba(0,200,83,.15);border-radius:4px;padding:1px 5px;':rs1h<-0.5?'background:rgba(255,61,87,.12);border-radius:4px;padding:1px 5px;':'';
+
       return`<div style="background:var(--surface2);border-radius:10px;padding:10px 12px;margin-bottom:5px;border-left:2.5px solid ${borderCol};opacity:${t.blocked?'.55':'1'}">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px">
-          <div style="font-size:13px;font-weight:900">${t.sym}${mineBadge}${openBadge} <span style="font-size:10px;font-weight:600;color:var(--text2)">${accelIcon}</span></div>
-          ${scoreBadge(t)}
+          <div style="font-size:13px;font-weight:900">${t.sym}${mineBadge}${openBadge}${earlyBadge}</div>
+          <div style="display:flex;align-items:center;gap:5px">
+            ${accelIcon?`<span style="font-size:11px" title="${accelLabel}">${accelIcon}</span>`:''}
+            ${scoreBadge(t)}
+          </div>
         </div>
         <!-- score bar -->
         <div style="height:4px;background:var(--border);border-radius:2px;margin-bottom:6px;overflow:hidden">
@@ -3416,7 +3451,7 @@ async function loadMomentum(forceRefresh){
           <span style="font-size:11px;font-weight:800;color:${c1hCol};background:${t.c1h>0?'rgba(0,200,83,.12)':'rgba(255,61,87,.1)'};padding:2px 6px;border-radius:5px">1H ${t.c1h>=0?'+':''}${t.c1h.toFixed(1)}%</span>
           ${t.c4h!==null?`<span style="font-size:10px;font-weight:700;color:${c4hCol}">4H ${t.c4h>=0?'+':''}${t.c4h.toFixed(1)}%</span>`:''}
           <span style="font-size:10px;color:var(--text2)">24H ${t.c24>=0?'+':''}${t.c24.toFixed(1)}%</span>
-          <span style="font-size:9px;font-weight:700;color:${rsCol};margin-left:auto">RS ${rs1h>=0?'+':''}${rs1h.toFixed(1)}%</span>
+          <span style="font-size:10px;font-weight:800;color:${rsCol};margin-left:auto;${rsHighlight}">RS ${rs1h>=0?'+':''}${rs1h.toFixed(1)}%</span>
         </div>
       </div>`;
     }
@@ -3443,10 +3478,13 @@ async function loadMomentum(forceRefresh){
     </div>`;
 
     // Score legend
-    html+=`<div style="display:flex;gap:6px;margin-bottom:8px;font-size:9px;font-weight:700;color:var(--text2)">
+    html+=`<div style="display:flex;gap:6px;margin-bottom:8px;font-size:9px;font-weight:700;color:var(--text2);flex-wrap:wrap">
       <span>🟢 ≥5 LONG</span>
       <span>🟡 2–4 NEUTRAL</span>
       <span>🔴 &lt;2 SHORT</span>
+      <span>🔥 acelerando</span>
+      <span>⚠️ frenando</span>
+      <span>⚡ early</span>
       <span style="margin-left:auto">⛔ = contra bias</span>
     </div>`;
 
@@ -3464,7 +3502,7 @@ async function loadMomentum(forceRefresh){
       html+=rest.map(tickerChip).join('');
     }
 
-    html+=`<div style="font-size:9px;color:var(--text2);margin-top:6px;opacity:.7">Score: base+aceleración+RS+consistencia · CoinGecko+Binance · ${new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})}</div>`;
+    html+=`<div style="font-size:9px;color:var(--text2);margin-top:6px;opacity:.7">Orden: RS > aceleración > score · 🔥 acelerando · ⚠️ frenando · ⚡EARLY = 24H bajo + 1H alto · CoinGecko+Binance · ${new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})}</div>`;
 
     box.innerHTML=html;
     const longCnt=filtered.filter(t=>t.final==='long').length;
