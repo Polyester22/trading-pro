@@ -3493,6 +3493,67 @@ async function loadMomentum(forceRefresh){
       <span style="font-size:9px;color:var(--text2)">${filtered.length} tickers · ★ = operados</span>
     </div>`;
 
+    // ── TOP 3 REAL ────────────────────────────────────────────────────────
+    // Filtro estricto: score>=5 + alineado con bias + RS>0 (longs) o RS<0 (shorts) + aceleración>0
+    const top3Candidates = filtered.filter(t=>{
+      if(t.blocked) return false;
+      if(t.score < 5) return false;
+      const rs1h = t.c1h - btc1hGlobal;
+      const accel = t.c1h - (t.c24/24);
+      if(dirMode==='long'  && rs1h <= 0) return false;
+      if(dirMode==='short' && rs1h >= 0) return false;
+      if(accel <= 0) return false; // solo acelerando
+      return true;
+    });
+    // Ya vienen ordenados por momentumRank, tomar primeros 3
+    const top3 = top3Candidates.slice(0,3);
+
+    if(top3.length){
+      const medals=['🥇','🥈','🥉'];
+      const medalsLabel=['Líder actual','Fuerte','Oportunidad'];
+      const medalsHint=['RS alto + acelerando → el mejor trade ahora','Buen RS, momentum estable','Aceleración alta → posible próximo líder'];
+      const medalsBg=['rgba(255,215,0,.1)','rgba(192,192,192,.1)','rgba(205,127,50,.1)'];
+      const medalsBorder=['rgba(255,215,0,.5)','rgba(192,192,192,.4)','rgba(205,127,50,.4)'];
+      const medalsColor=['#ffd100','#aaaaaa','#cd7f32'];
+
+      html+=`<div style="background:rgba(255,107,0,.06);border:1.5px solid rgba(255,107,0,.3);border-radius:12px;padding:12px;margin-bottom:10px">
+        <div style="font-size:11px;font-weight:900;color:#ff6b00;margin-bottom:8px;letter-spacing:.3px">🚀 TOP ${top3.length} MOMENTUM REAL</div>`;
+
+      top3.forEach((t,i)=>{
+        const rs1h=(t.c1h-btc1hGlobal);
+        const accel=(t.c1h-t.c24/24);
+        const acCls=accelClass(t);
+        const accelDisp=acCls==='fast'?'🔥 Acelerando':acCls==='slow'?'⚠️ Frenando':'→ Estable';
+        const accelCol=acCls==='fast'?'#00c853':acCls==='slow'?'#ffd100':'var(--text2)';
+        const openBadge=t.open?'<span style="font-size:8px;background:rgba(255,107,0,.2);color:#ff6b00;border-radius:3px;padding:1px 4px;margin-left:3px;font-weight:700">EN CURSO</span>':'';
+        const earlyBadge=isEarlyMomentum(t)?'<span style="font-size:8px;background:rgba(0,170,255,.2);color:#00aaff;border-radius:3px;padding:1px 5px;margin-left:3px;font-weight:800">⚡ EARLY</span>':'';
+        html+=`<div style="display:flex;align-items:stretch;gap:10px;margin-bottom:${i<top3.length-1?'8px':'0'};padding:10px;background:${medalsBg[i]};border:1px solid ${medalsBorder[i]};border-radius:10px">
+          <div style="font-size:22px;line-height:1;flex-shrink:0;padding-top:2px">${medals[i]}</div>
+          <div style="flex:1;min-width:0">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+              <span style="font-size:15px;font-weight:900">${t.sym}</span>${openBadge}${earlyBadge}
+              <span style="font-size:9px;font-weight:800;color:${medalsColor[i]};background:${medalsBg[i]};border:1px solid ${medalsBorder[i]};border-radius:4px;padding:1px 6px;margin-left:auto">${medalsLabel[i]}</span>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin-bottom:4px">
+              <div style="font-size:10px;color:var(--text2)">Score <strong style="color:#ff6b00">+${t.score}</strong></div>
+              <div style="font-size:10px;color:var(--text2)">RS <strong style="color:${rs1h>0?'#00c853':'#ff3d57'}">${rs1h>=0?'+':''}${rs1h.toFixed(1)}%</strong></div>
+              <div style="font-size:10px;color:var(--text2)">1H <strong style="color:${t.c1h>0?'#00c853':'#ff3d57'}">${t.c1h>=0?'+':''}${t.c1h.toFixed(1)}%</strong></div>
+            </div>
+            <div style="font-size:10px;font-weight:800;color:${accelCol}">${accelDisp}</div>
+            <div style="font-size:9px;color:var(--text2);margin-top:2px;opacity:.8">${medalsHint[i]}</div>
+          </div>
+        </div>`;
+      });
+
+      html+=`</div>`;
+    } else {
+      // Sin candidatos válidos → aviso honesto
+      html+=`<div style="background:rgba(255,209,0,.07);border:1px solid rgba(255,209,0,.3);border-radius:10px;padding:10px 12px;margin-bottom:10px;font-size:11px;color:#ffd100;font-weight:700">
+        ⚠️ Sin Top 3 ahora — ningún ticker cumple: score≥5 + lider vs BTC + acelerando
+      </div>`;
+    }
+
+    // ── LISTA COMPLETA ────────────────────────────────────────────────────
     if(mine.length){
       html+=`<div style="font-size:10px;font-weight:700;color:#ff6b00;text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px">Tus tickers</div>`;
       html+=mine.map(tickerChip).join('');
@@ -3507,7 +3568,7 @@ async function loadMomentum(forceRefresh){
     box.innerHTML=html;
     const longCnt=filtered.filter(t=>t.final==='long').length;
     const ntCnt=filtered.filter(t=>t.blocked).length;
-    if(sub)sub.textContent=`${longCnt} LONG · ${ntCnt} bloq. · ${new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})}`;
+    if(sub)sub.textContent=`${top3.length>0?'🥇 Top '+top3.length+' · ':''} ${longCnt} LONG · ${ntCnt} bloq. · ${new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})}`;
     _momentumLoaded=true;
 
   }catch(e){
