@@ -345,17 +345,6 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
     <div class="note-small" id="result-note">Ingresá precios, R% o P&L$ — se calculan entre sí.</div>
     <div class="field"><label>Resultado en tiempo real</label><div class="result-live zero" id="result-live">— %</div></div>
     <div class="row2">
-      <div class="field">
-        <label>MFE % <span style="color:var(--text2);font-weight:600;text-transform:none;font-size:9px">máximo alcanzado</span></label>
-        <input type="number" id="f-mfe" placeholder="ej: 7.5" step="any" style="border-color:rgba(0,170,255,.4)" oninput="onMfeChange()">
-      </div>
-      <div class="field">
-        <label>MAE % <span style="color:var(--text2);font-weight:600;text-transform:none;font-size:9px">máximo en contra</span></label>
-        <input type="number" id="f-mae" placeholder="ej: -3.2" step="any" style="border-color:rgba(255,61,87,.3)" oninput="onMaeChange()">
-      </div>
-    </div>
-    <div id="mfe-efficiency-note" style="display:none;font-size:10px;font-weight:700;text-align:center;margin:-4px 0 6px;padding:4px 10px;border-radius:6px"></div>
-    <div class="row2">
       <div class="field"><label>Apalancamiento</label><input type="text" inputmode="decimal" id="f-lev" placeholder="5" value="5" autocomplete="off" oninput="calcResult(false)"></div>
       <div class="field"><label>Temporalidad</label>
         <select id="f-temp">
@@ -2069,6 +2058,44 @@ const TICKER_MAP={
   BLUR:'blur',CAKE:'pancakeswap-token',SUSHI:'sushi'
 };
 
+// ══ AUTO-CALCULATE MFE / MAE (pure price %, no leverage) ══
+// MFE = (maxFavorablePrice - entryPrice) / entryPrice * 100  (always positive)
+// MAE = (maxAdversePrice  - entryPrice) / entryPrice * 100  (always positive, means against)
+// Both are pure price movement, leverage-free.
+function updateMFEMAE(livePrice){
+  // livePrice can be a map {TICKER: price} or called per-trade
+  let changed = false;
+  D.trades.filter(t=>t.open && t.entrada && t.entrada > 0).forEach(t=>{
+    const price = typeof livePrice === 'object' ? livePrice[t.ticker] : livePrice;
+    if(!price || price <= 0) return;
+
+    const entry = t.entrada;
+    const isLong = t.pos === 'Long';
+
+    // Raw price move % (no leverage, no margin — just price)
+    const rawPricePct = (price - entry) / entry * 100;
+
+    // MFE: favorable move (positive for Long when price rises, positive for Short when price falls)
+    const favorablePct = isLong ? rawPricePct : -rawPricePct;
+    // MAE: adverse move (positive when price went against us)
+    const adversePct   = isLong ? -rawPricePct : rawPricePct;
+
+    // Update MFE: keep running maximum of favorable move
+    if(favorablePct > 0){
+      const prev = t.maxMovePct || 0;
+      if(favorablePct > prev){ t.maxMovePct = parseFloat(favorablePct.toFixed(3)); changed = true; }
+    }
+
+    // Update MAE: keep running maximum of adverse move (most negative excursion)
+    if(adversePct > 0){
+      const prev = t.maxAdversePct || 0;
+      if(adversePct > prev){ t.maxAdversePct = parseFloat(adversePct.toFixed(3)); changed = true; }
+    }
+  });
+  if(changed){ persist(D); }
+  return changed;
+}
+
 async function refreshPrices(){
   const btn=document.getElementById('refresh-btn');
   if(!location.protocol.startsWith('https')){
@@ -2081,7 +2108,6 @@ async function refreshPrices(){
   const tickers=[...new Set(openTrades.map(t=>t.ticker))];
 
   try{
-    // ── Try Binance first (more reliable, no rate limit issues) ──
     const symbols=tickers.map(tk=>tk+'USDT');
     const symParam=JSON.stringify(symbols);
     const binRes=await fetch(`https://api.binance.com/api/v3/ticker/price?symbols=${encodeURIComponent(symParam)}`);
@@ -2095,7 +2121,6 @@ async function refreshPrices(){
       throw new Error('Binance failed');
     }
   }catch(e){
-    // ── Fallback to CoinGecko ──
     try{
       const ids=tickers.map(t=>TICKER_MAP[t]).filter(Boolean).join(',');
       if(ids){
@@ -2111,6 +2136,9 @@ async function refreshPrices(){
     }
   }
 
+  // ── AUTO-CALCULATE MFE / MAE from live prices (pure price %, no leverage) ──
+  updateMFEMAE(livePrices);
+
   // ── AUTO-MARK 10% ──
   let changed=false;
   D.trades.forEach(t=>{
@@ -2123,7 +2151,6 @@ async function refreshPrices(){
   renderOpenTrades();
   if(btn){
     btn.innerHTML='✅ Actualizado';
-    // Also update semaphore cache silently so trade recommendations have market data
     updateDotSilent();
     setTimeout(()=>{if(btn){btn.innerHTML='⟳ Actualizar precios';btn.disabled=false;}},2000);
   }
@@ -2288,8 +2315,8 @@ function renderHistorial(){
       <td style="font-weight:800"><span style="display:inline-block;width:14px;color:#00c853;font-size:11px">${t.open?'●':''}</span>${t.ticker}</td>
       <td><span class="badge badge-${t.pos.toLowerCase()}">${t.pos}</span></td>
       <td class="${rc}">${isLive?'<span class="live-dot"></span>':''}${resultado>=0?'+':''}${resultado.toFixed(2)}%</td>
-      <td style="font-size:11px;font-weight:700;color:#00aaff">${t.maxMovePct!=null?(resultado>=0?'+':'')+parseFloat(t.maxMovePct).toFixed(1)+'%':'<span style="color:var(--text2)">—</span>'}</td>
-      <td style="font-size:11px;font-weight:700;color:${(()=>{if(t.maxMovePct==null||t.maxMovePct==0)return'var(--text2)';const e=Math.min(100,Math.round(Math.abs(t.resultado)/Math.abs(t.maxMovePct)*100));return e>=70?'#00c853':e>=40?'#ffd100':'#ff3d57';})()}">${(()=>{if(t.maxMovePct==null||t.maxMovePct==0)return'—';return Math.min(100,Math.round(Math.abs(t.resultado)/Math.abs(t.maxMovePct)*100))+'%';})()}</td>
+      <td style="font-size:11px;font-weight:700;color:#00aaff">${t.maxMovePct!=null?(t.resultado>=0?'+':'-')+parseFloat(t.maxMovePct).toFixed(1)+'%':'<span style="color:var(--text2)">—</span>'}</td>
+      <td style="font-size:11px;font-weight:700;color:${(()=>{if(t.maxMovePct==null||t.maxMovePct==0)return'var(--text2)';const lev=t.lev||1;const e=Math.min(100,Math.round(Math.abs(t.resultado)/lev/t.maxMovePct*100));return e>=70?'#00c853':e>=40?'#ffd100':'#ff3d57';})()}">${(()=>{if(t.maxMovePct==null||t.maxMovePct==0)return'—';const lev=t.lev||1;return Math.min(100,Math.round(Math.abs(t.resultado)/lev/t.maxMovePct*100))+'%';})()}</td>
       <td class="${rc}">${parseFloat(pnl)>=0?'+':''}$${pnl}</td>
       <td style="font-size:11px;font-weight:700;color:#ff6b00">$${margenDisplay||'—'}${t.margenOriginal&&t.open?'':''}</td>
       <td style="font-size:11px;color:var(--text2)">${t.lev||1}x</td>
@@ -4030,39 +4057,17 @@ function onMargenChange(){
   calcResult(false);
 }
 
-// ── MFE / MAE inline efficiency feedback ──
-function onMfeChange(){
-  const mfe = parseFloat(document.getElementById('f-mfe').value);
-  const res = parseFloat(document.getElementById('f-resultado').value);
-  const el  = document.getElementById('mfe-efficiency-note');
-  if(!el) return;
-  if(!isNaN(mfe) && !isNaN(res) && mfe > 0){
-    const eff = Math.min(100, Math.round((res / mfe) * 100));
-    const col = eff >= 70 ? '#00c853' : eff >= 40 ? '#ffd100' : '#ff3d57';
-    const msg = eff >= 80 ? '✅ Excelente captura' : eff >= 55 ? '🟡 Captura aceptable' : '⚠️ Dejaste plata — cerraste muy temprano';
-    el.style.display = 'block';
-    el.style.color = col;
-    el.style.background = col === '#00c853' ? 'rgba(0,200,83,.1)' : col === '#ffd100' ? 'rgba(255,209,0,.1)' : 'rgba(255,61,87,.1)';
-    el.textContent = `Eficiencia de captura: ${eff}% — ${msg}`;
-  } else {
-    el.style.display = 'none';
-  }
-}
-function onMaeChange(){
-  // No visual feedback needed, just stored
-}
-
-
 function saveTrade(){
   const ticker=document.getElementById('f-ticker').value.toUpperCase().trim();
   if(!ticker){alert('Ingresá el ticker');return;}
   const resultado=parseFloat(document.getElementById('f-resultado').value)||0;
-  const mfe=parseFloat(document.getElementById('f-mfe').value);
-  const mae=parseFloat(document.getElementById('f-mae').value);
   const fechahora=getFechaHoraValue();
   const closedHoraVal=document.getElementById('f-closedhora').value||null;
   const existingTrade=editingId?D.trades.find(x=>x.id===editingId):null;
   const closedHoraFinal=closedHoraVal||(existingTrade?existingTrade.closedHora:null)||null;
+  // Preserve auto-calculated MFE/MAE from the existing trade — never overwrite from form
+  const mfePreserved = existingTrade?.maxMovePct   != null ? {maxMovePct:   existingTrade.maxMovePct}   : {};
+  const maePreserved = existingTrade?.maxAdversePct != null ? {maxAdversePct: existingTrade.maxAdversePct} : {};
   const t={id:editingId||uid(),fecha:getFechaValue(),fechahora,ticker,pos:document.getElementById('f-pos').value,
     margen:parseFloat(document.getElementById('f-margen').value)||0,entrada:parseFloat(document.getElementById('f-entrada').value)||0,
     actual:parseFloat(document.getElementById('f-actual').value)||0,lev:parseFloat(document.getElementById('f-lev').value)||5,
@@ -4070,8 +4075,7 @@ function saveTrade(){
     salida:document.getElementById('f-salida').value,timing:document.getElementById('f-timing').value,patron:document.getElementById('f-patron').value||null,
     open:document.getElementById('f-open').checked,
     p10:document.getElementById('f-10p').checked,obs:document.getElementById('f-obs').value,estado:document.getElementById('f-estado').value||null,semaforo:document.getElementById('f-semaforo').value||null,resultado,
-    ...(!isNaN(mfe)&&mfe!==null?{maxMovePct:mfe}:{}),
-    ...(!isNaN(mae)&&mae!==null?{maxAdversePct:mae}:{}),
+    ...mfePreserved, ...maePreserved,
     ...(closedHoraFinal?{closedHora:closedHoraFinal}:{})};
   if(editingId){const i=D.trades.findIndex(x=>x.id===editingId);D.trades[i]=t;}else{D.trades.push(t);}
   persist(D);
@@ -4124,9 +4128,6 @@ function loadTradeForEdit(id){
     setSemaforo(t.semaforo||'');
     document.getElementById('f-resultado').value=t.resultado;
     document.getElementById('f-pnl').value=t.margen?((t.margen*t.resultado)/100).toFixed(2):'';
-    document.getElementById('f-mfe').value=t.maxMovePct!=null?t.maxMovePct:'';
-    document.getElementById('f-mae').value=t.maxAdversePct!=null?t.maxAdversePct:'';
-    onMfeChange();
     applyLive(t.resultado);
     document.getElementById('result-note').textContent='✏️ Podés editar manual o actualizar precios.';
     document.getElementById('btn-save').innerHTML='💾 Guardar cambios';
@@ -4135,9 +4136,8 @@ function loadTradeForEdit(id){
 }
 function resetForm(){
   editingId=null;resultManualMode=false;
-  ['f-ticker','f-margen','f-entrada','f-actual','f-resultado','f-pnl','f-mfe','f-mae'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+  ['f-ticker','f-margen','f-entrada','f-actual','f-resultado','f-pnl'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
   document.getElementById('f-obs').value='';setEstado('');setSemaforo('');
-  const _mfen=document.getElementById('mfe-efficiency-note');if(_mfen)_mfen.style.display='none';
   document.getElementById('f-lev').value=5;
   document.getElementById('f-open').checked=true;
   document.getElementById('f-10p').checked=false;
@@ -4378,9 +4378,12 @@ function updateMomentumStats(trade){
   s.maxMoves.push(maxMove);
   if(s.maxMoves.length > 200) s.maxMoves.shift();
 
-  // Efficiency tracking (only when MFE was recorded)
+  // Efficiency tracking (only when MFE was recorded — MFE is pure price %)
+  // Convert resultado (leverage-adjusted) back to pure price % for fair comparison
   if(trade.maxMovePct != null && trade.maxMovePct > 0){
-    const eff = Math.min(100, Math.abs(trade.resultado) / trade.maxMovePct * 100);
+    const lev = trade.lev || 1;
+    const purePriceResult = Math.abs(trade.resultado) / lev; // pure price move captured
+    const eff = Math.min(100, purePriceResult / trade.maxMovePct * 100);
     s.effSum  = (s.effSum  || 0) + eff;
     s.effCnt  = (s.effCnt  || 0) + 1;
     s.avgEff  = s.effSum / s.effCnt;
@@ -4501,16 +4504,19 @@ function renderTPProbBlock(trade, livePct){
   const s      = stats[tier];
   const prior  = stats._priors[tier];
   const rawP   = getTPProbs(tier, stats);
-  const cm     = livePct !== null ? Math.abs(livePct) : 0;
-  const adjP   = adjustProbs(rawP, cm);
-  const potU   = potentialUsed(cm, rawP.avgMax);
-  const signal = autoSignal(potU, adjP, cm);
+
+  // MFE/MAE are pure price % (no leverage). livePct is leverage-adjusted.
+  const lev = trade.lev || 1;
+  const cmPrice = livePct !== null ? Math.abs(livePct) / lev : 0;
+
+  const adjP   = adjustProbs(rawP, cmPrice);
+  const potU   = potentialUsed(cmPrice, rawP.avgMax);
   const acCls  = tc ? (()=>{
     const c1h = tc.change1h || 0; const c24 = tc.change24h || 0;
     const accel = c1h - (c24/24);
     return accel > 0.08 ? 'fast' : accel < -0.08 ? 'slow' : 'flat';
   })() : 'flat';
-  const exh    = exhaustionLevel(cm, s, prior);
+  const exh    = exhaustionLevel(cmPrice, s, prior);
   const action = actionFromExhaustion(exh, acCls, adjP);
 
   const tierLabel = tier==='fuerte'?'🔥 Momentum fuerte':tier==='medio'?'🟡 Momentum medio':'⚠️ Momentum débil';
@@ -4528,15 +4534,18 @@ function renderTPProbBlock(trade, livePct){
     </div>`;
   };
 
-  // Avg efficiency from stats
-  const effStr = s.avgEff != null ? ` · Efic. ${s.avgEff.toFixed(0)}%` : '';
-  const maeStr = s.avgMAE != null ? ` · MAE avg ${s.avgMAE.toFixed(1)}%` : '';
-  const nStr   = rawP.n > 0 ? `${rawP.n} trades tuyos` : 'priors calibrados';
+  // MFE/MAE live display (pure price %)
+  const mfeLive  = trade.maxMovePct    != null ? `+${trade.maxMovePct.toFixed(2)}%`    : '—';
+  const maeLive  = trade.maxAdversePct != null ? `-${trade.maxAdversePct.toFixed(2)}%` : '—';
+  const effVal   = trade.maxMovePct > 0 && cmPrice > 0 ? Math.min(100, Math.round(cmPrice / trade.maxMovePct * 100)) : null;
+  const effLive  = effVal !== null ? effVal + '%' : '—';
+  const effColor = effVal !== null ? (effVal >= 70 ? '#00c853' : effVal >= 40 ? '#ffd100' : '#ff3d57') : 'var(--text2)';
 
-  // MFE percentile markers
-  const p75 = s.p75MFE || (prior.avgMax * 1.3);
-  const p90 = s.p90MFE || (prior.avgMax * 1.6);
+  const p75    = s.p75MFE  || (prior.avgMax * 1.3);
+  const p90    = s.p90MFE  || (prior.avgMax * 1.6);
   const avgMFE = rawP.avgMax;
+  const nStr   = rawP.n > 0 ? `${rawP.n} trades tuyos` : 'priors calibrados';
+  const effStr = s.avgEff  != null ? ` · Efic.histórica ${s.avgEff.toFixed(0)}%` : '';
 
   return `<div style="background:var(--surface2);border:1px solid ${exh.level==='extremo'?'rgba(255,61,87,.5)':exh.level==='alto'?'rgba(255,209,0,.4)':'var(--border)'};border-radius:8px;padding:10px 12px;margin-top:8px" onclick="event.stopPropagation()">
 
@@ -4545,35 +4554,43 @@ function renderTPProbBlock(trade, livePct){
       <div style="font-size:9px;font-weight:700;color:${tierColor}">${tierLabel}</div>
     </div>
 
-    <!-- Barras de probabilidad -->
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:8px">
+      <div style="background:var(--card);border-radius:6px;padding:5px 7px;text-align:center">
+        <div style="font-size:8px;color:var(--text2);font-weight:700;margin-bottom:1px">MFE precio</div>
+        <div style="font-size:12px;font-weight:900;color:#00aaff">${mfeLive}</div>
+      </div>
+      <div style="background:var(--card);border-radius:6px;padding:5px 7px;text-align:center">
+        <div style="font-size:8px;color:var(--text2);font-weight:700;margin-bottom:1px">MAE precio</div>
+        <div style="font-size:12px;font-weight:900;color:#ff3d57">${maeLive}</div>
+      </div>
+      <div style="background:var(--card);border-radius:6px;padding:5px 7px;text-align:center">
+        <div style="font-size:8px;color:var(--text2);font-weight:700;margin-bottom:1px">Captura</div>
+        <div style="font-size:12px;font-weight:900;color:${effColor}">${effLive}</div>
+      </div>
+    </div>
+
     ${probBar(adjP.p3, '#00c853', '🎯 TP1 (3%)')}
     ${probBar(adjP.p5, '#ff6b00', '🚀 TP2 (5%)')}
     ${probBar(adjP.p8, '#ff3d57', '💣 Runner (8%)')}
     ${probBar(adjP.p12, '#9999b8', '⚡ Ext. (12%+)')}
 
-    <!-- MFE / Agotamiento -->
     <div style="margin-top:8px;margin-bottom:6px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
-        <span style="font-size:10px;color:var(--text2)">Zona MFE</span>
+        <span style="font-size:10px;color:var(--text2)">Zona MFE histórico</span>
         <div style="display:flex;gap:6px;font-size:9px;font-weight:700">
           <span style="color:var(--text2)">avg ${avgMFE.toFixed(1)}%</span>
           <span style="color:#ffd100">p75 ${p75.toFixed(1)}%</span>
           <span style="color:#ff3d57">p90 ${p90.toFixed(1)}%</span>
         </div>
       </div>
-      <!-- MFE zone bar: show where current move sits -->
       <div style="position:relative;height:8px;background:var(--border);border-radius:4px;overflow:hidden;margin-bottom:4px">
-        <!-- avg marker -->
         <div style="position:absolute;left:${Math.min(95,avgMFE/p90*100)}%;top:0;bottom:0;width:2px;background:#ff6b00;opacity:.7"></div>
-        <!-- p75 marker -->
         <div style="position:absolute;left:${Math.min(95,p75/p90*100)}%;top:0;bottom:0;width:2px;background:#ffd100"></div>
-        <!-- current fill -->
-        <div style="position:absolute;left:0;top:0;bottom:0;width:${Math.min(100,cm/p90*100)}%;background:${exh.col};border-radius:4px;opacity:.85;transition:width .5s"></div>
+        <div style="position:absolute;left:0;top:0;bottom:0;width:${Math.min(100,cmPrice/p90*100)}%;background:${exh.col};border-radius:4px;opacity:.85;transition:width .5s"></div>
       </div>
       <div style="font-size:9px;font-weight:800;color:${exh.col}">${exh.label}</div>
     </div>
 
-    <!-- Potencial consumido -->
     <div style="margin-bottom:8px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px">
         <span style="font-size:9px;color:var(--text2)">Potencial consumido</span>
@@ -4582,13 +4599,11 @@ function renderTPProbBlock(trade, livePct){
       <div style="height:5px;background:var(--border);border-radius:3px;overflow:hidden">
         <div style="height:100%;width:${potU}%;background:${potColor};border-radius:3px;transition:width .5s"></div>
       </div>
-      <div style="font-size:9px;color:var(--text2);margin-top:2px">Movimiento: ${cm.toFixed(1)}% · avgMFE: ${avgMFE.toFixed(1)}%</div>
+      <div style="font-size:9px;color:var(--text2);margin-top:2px">Precio movió: ${cmPrice.toFixed(2)}% · avgMFE: ${avgMFE.toFixed(1)}%</div>
     </div>
 
-    <!-- Acción recomendada -->
     <div style="font-size:10px;font-weight:800;color:${action.col};padding:5px 8px;background:${action.col==='#00c853'?'rgba(0,200,83,.1)':action.col==='#ffd100'?'rgba(255,209,0,.1)':'rgba(255,61,87,.1)'};border-radius:6px;margin-bottom:4px">${action.text}</div>
-
-    <div style="font-size:8px;color:var(--text2);opacity:.7">Score: ${contextScore}/10 · ${nStr}${effStr}${maeStr}</div>
+    <div style="font-size:8px;color:var(--text2);opacity:.7">Score: ${contextScore}/10 · ${nStr}${effStr} · MFE/MAE = % precio sin apalancamiento</div>
   </div>`;
 }
 
