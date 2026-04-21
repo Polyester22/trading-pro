@@ -4481,29 +4481,43 @@ function conditionalProb(cmPrice, target, tier, side){
 
 // ── EXHAUSTION SCORE 0–100 ──
 // Combines zone + conditional prob + momentum into one number
-function calcExhaustionScore({ cmPrice, p75, p90, condProbNext, acCls }){
+// ── EXHAUSTION SCORE 0–100 ──
+// Priority: Context (momentum/bias/PnL) > Statistics (MFE zone/condProb)
+function calcExhaustionScore({ cmPrice, p75, p90, condProbNext, acCls, livePct, contraBias, momentumTier }){
   let score = 0;
 
-  // Zone component (0–50)
-  if(cmPrice >= p90)      score += 50;
-  else if(cmPrice >= p75) score += 30;
-  else if(cmPrice >= (p75 + p90) / 2) score += 15; // approaching p75
+  // ── 1. CONTEXT SIGNALS (max 60 pts) — highest priority ──
 
-  // Conditional probability component (0–35)
-  // condProbNext = prob of continuing to p90 from here
+  // Momentum direction (0–30)
+  if(acCls === 'slow')       score += 25;  // price decelerating
+  else if(acCls === 'flat')  score += 10;
+
+  // Contra-bias (0–20): market going against the trade direction
+  if(contraBias)             score += 20;
+
+  // Trade in loss (0–15)
+  if(livePct !== null && livePct < -1)       score += 15;
+  else if(livePct !== null && livePct < 0)   score += 8;
+
+  // Momentum tier (0–10)
+  if(momentumTier === 'debil')               score += 10;
+  else if(momentumTier === 'medio')          score += 4;
+
+  // ── 2. STATISTICAL SIGNALS (max 40 pts) — secondary ──
+
+  // MFE zone (0–25)
+  if(cmPrice >= p90)                         score += 25;
+  else if(cmPrice >= p75)                    score += 15;
+  else if(cmPrice >= (p75 + p90) / 2)        score += 7;
+
+  // Conditional probability (0–15)
   if(condProbNext !== null){
-    if(condProbNext < 20)       score += 35;
-    else if(condProbNext < 35)  score += 25;
-    else if(condProbNext < 50)  score += 12;
+    if(condProbNext < 20)                    score += 15;
+    else if(condProbNext < 35)              score += 10;
+    else if(condProbNext < 50)              score += 5;
   } else {
-    // No data: use prior — assume moderate exhaustion above p75
-    if(cmPrice >= p75) score += 20;
+    if(cmPrice >= p75)                       score += 10; // no data + above p75 = assume risk
   }
-
-  // Momentum component (0–20)
-  if(acCls === 'slow')       score += 20;
-  else if(acCls === 'flat')  score += 8;
-  // 'fast' adds nothing — momentum still in favor
 
   return Math.min(100, score);
 }
@@ -4515,31 +4529,52 @@ function exhaustionLabel(score){
   return              { label:'🟢 Puede seguir', col:'#00c853', bg:'rgba(0,200,83,.08)', border:'rgba(0,200,83,.3)' };
 }
 
-// ── SINGLE DECISION based on exhaustion score + context ──
-function buildDecision(exhScore, exhL, mfeZ, acCls, condProbNext){
-  const isDecel = acCls === 'slow';
-  const isAccel = acCls === 'fast';
-  const probStr = condProbNext !== null ? ` (${condProbNext}% lo logra)` : '';
+// ── SINGLE DECISION — context-first hierarchy ──
+// Priority: context signals > statistical signals
+function buildDecision(exhScore, exhL, mfeZ, acCls, condProbNext, livePct, contraBias, momentumTier){
+  const isDecel   = acCls === 'slow';
+  const isAccel   = acCls === 'fast';
+  const inLoss    = livePct !== null && livePct < 0;
+  const probStr   = condProbNext !== null ? ` (solo ${condProbNext}% lo logra)` : '';
+  const weakMom   = momentumTier === 'debil';
+  const midMom    = momentumTier === 'medio';
 
-  if(exhScore >= 80){
-    return `🔴 Cerrar todo — trade estadísticamente agotado`;
-  }
+  // ── CONTEXT OVERRIDE: momentum+bias against trade + in loss ──
+  if(contraBias && weakMom && inLoss)
+    return `⚠️ Potencial sin confirmación — el mercado va en contra, momentum débil y en pérdida → salida rápida`;
+  if(contraBias && inLoss)
+    return `⚠️ Contexto en contra — bias opuesto y trade en pérdida → evaluar salida`;
+  if(weakMom && inLoss && isDecel)
+    return `🔴 Cerrar — momentum débil + frenando + en pérdida → no sostener`;
+  if(contraBias && weakMom)
+    return `⚠️ Contexto adverso — momentum débil + contra el bias → no dejar correr sin confirmación`;
+
+  // ── STATISTICAL: high exhaustion ──
+  if(exhScore >= 80)
+    return `🔴 Cerrar todo — trade estadísticamente agotado${condProbNext !== null ? probStr : ''}`;
   if(exhScore >= 60){
-    if(isAccel) return `🟠 Cerrar 50–70% — zona de alto riesgo; si acelerás seguís con runner`;
-    return `🔴 Cerrar 70–100% — zona de agotamiento + sin aceleración`;
+    if(isAccel && !contraBias) return `🟠 Cerrar 50–70% — zona de alto riesgo; acelerando, dejar runner`;
+    return `🔴 Cerrar 70–100% — agotamiento${isDecel ? ' + frenando' : ''}${contraBias ? ' + contra el bias' : ''}`;
   }
+
+  // ── MEDIUM EXHAUSTION ──
   if(exhScore >= 35){
-    if(mfeZ.zone === 'alto' && isAccel) return `🟡 Cerrar 50% + trailing — entre p75/p90 pero acelerando`;
-    if(isDecel) return `🟡 Cerrar parcial — perdiendo momentum en zona avanzada`;
-    if(mfeZ.toP90 > 0) return `🟡 Asegurar BE — le falta +${mfeZ.toP90.toFixed(1)}% para p90${probStr}`;
-    return `🟡 Proteger ganancias — seguir solo si acelerás`;
+    if(contraBias) return `🟡 Cuidado — potencial estadístico pero contexto no acompaña`;
+    if(weakMom)    return `🟡 Reducir exposición — momentum débil en zona avanzada`;
+    if(isDecel)    return `🟡 Cerrar parcial — frenando en zona avanzada`;
+    if(mfeZ.toP90 > 0) return `🟡 Asegurar BE — falta +${mfeZ.toP90.toFixed(1)}% para p90${mfeZ.zone==='alto'?probStr:''}`;
+    return `🟡 Proteger — seguir solo si el momentum confirma`;
   }
-  // Low exhaustion
+
+  // ── LOW EXHAUSTION: favor continuation ──
+  if(contraBias) return `🟡 Potencial disponible pero contexto en contra — no escalar`;
+  if(weakMom)    return `🟡 Recorrido disponible — momentum débil, esperá confirmación antes de mantener`;
   if(mfeZ.zone === 'bajo'){
-    return `🟢 Dejar correr — mucho recorrido disponible${mfeZ.toP75 > 0 ? `, falta +${mfeZ.toP75.toFixed(1)}% para p75` : ''}`;
+    const distStr = mfeZ.toP75 > 0 ? `, falta +${mfeZ.toP75.toFixed(1)}% para p75` : '';
+    return `🟢 Dejar correr — mucho recorrido disponible${distStr}`;
   }
   if(isAccel) return `🟢 Mantener — acelerando con recorrido disponible`;
-  return `🟢 Observar — probabilidad positiva pero sin señal clara`;
+  return `🟢 Observar — probabilidad positiva, esperá señal más clara`;
 }
 
 // ── RENDER THE FULL BLOCK ──
@@ -4563,35 +4598,56 @@ function renderTPProbBlock(trade, livePct){
   const lev     = trade.lev || 1;
   const cmPrice = livePct !== null ? Math.abs(livePct) / lev : 0;
 
-  const mfeZ   = mfeZoneState(cmPrice, s, prior);
-  const adjP   = adjustProbs(rawP, cmPrice);
-  const acCls  = tc ? (()=>{
-    const c1h = tc.change1h||0; const c24 = tc.change24h||0;
-    return (c1h - c24/24) > 0.08 ? 'fast' : (c1h - c24/24) < -0.08 ? 'slow' : 'flat';
+  // ── CONTEXT SIGNALS ──
+  const isLong = trade.pos === 'Long';
+  const c1h    = tc?.change1h  ?? null;
+  const c4h    = tc?.change4h  ?? null;
+  const c24    = tc?.change24h ?? null;
+
+  const acCls = tc ? (()=>{
+    const accel = (c1h||0) - ((c24||0)/24);
+    return accel > 0.08 ? 'fast' : accel < -0.08 ? 'slow' : 'flat';
   })() : 'flat';
+
+  // contraBias: ticker price moving against trade direction (1H AND 4H)
+  const contraBias = tc ? (
+    isLong  ? ((c1h||0) < -0.5 && (c4h||0) < -1) :
+              ((c1h||0) > 0.5  && (c4h||0) > 1)
+  ) : false;
+
+  const mfeZ = mfeZoneState(cmPrice, s, prior);
+  const adjP = adjustProbs(rawP, cmPrice);
 
   // Conditional probs: P(reach target | already at cmPrice)
   const condP75 = conditionalProb(cmPrice, mfeZ.p75, tier, trade.pos);
   const condP90 = conditionalProb(cmPrice, mfeZ.p90, tier, trade.pos);
-  // For exhaustion score, use condProb to p90 (the next meaningful target)
   const condProbNext = condP90?.prob ?? condP75?.prob ?? null;
 
-  const exhScore = calcExhaustionScore({ cmPrice, p75: mfeZ.p75, p90: mfeZ.p90, condProbNext, acCls });
+  const exhScore = calcExhaustionScore({
+    cmPrice, p75: mfeZ.p75, p90: mfeZ.p90,
+    condProbNext, acCls, livePct,
+    contraBias, momentumTier: tier
+  });
   const exhL     = exhaustionLabel(exhScore);
-  const decision = buildDecision(exhScore, exhL, mfeZ, acCls, condProbNext);
+  const decision = buildDecision(exhScore, exhL, mfeZ, acCls, condProbNext, livePct, contraBias, tier);
 
   const tierLabel = tier==='fuerte'?'🔥 Momentum fuerte':tier==='medio'?'🟡 Momentum medio':'⚠️ Momentum débil';
   const tierColor = tier==='fuerte'?'#00c853':tier==='medio'?'#ffd100':'#ff6b00';
 
-  // MFE/MAE display
   const mfeLive = trade.maxMovePct    != null ? `+${trade.maxMovePct.toFixed(2)}%`    : '—';
   const maeLive = trade.maxAdversePct != null ? `-${trade.maxAdversePct.toFixed(2)}%` : '—';
 
-  // Percentile position label (replaces confusing "vs MFE 97%")
+  // Context chips — shown FIRST, before stats
+  const contextChips = tc ? `<div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:8px">
+    <span style="font-size:9px;font-weight:800;padding:2px 7px;border-radius:4px;background:${acCls==='fast'?'rgba(0,200,83,.15)':acCls==='slow'?'rgba(255,61,87,.12)':'rgba(153,153,184,.1)'};color:${acCls==='fast'?'#00c853':acCls==='slow'?'#ff3d57':'#9999b8'}">${acCls==='fast'?'🔥 Acelerando':acCls==='slow'?'⚠️ Frenando':'→ Estable'}</span>
+    ${contraBias ? `<span style="font-size:9px;font-weight:800;padding:2px 7px;border-radius:4px;background:rgba(255,61,87,.12);color:#ff3d57">🚫 Contra el ${trade.pos}</span>` : `<span style="font-size:9px;font-weight:800;padding:2px 7px;border-radius:4px;background:rgba(0,200,83,.12);color:#00c853">✅ A favor del ${trade.pos}</span>`}
+    ${livePct !== null && livePct < 0 ? `<span style="font-size:9px;font-weight:800;padding:2px 7px;border-radius:4px;background:rgba(255,61,87,.12);color:#ff3d57">📉 En pérdida</span>` : livePct !== null && livePct > 3 ? `<span style="font-size:9px;font-weight:800;padding:2px 7px;border-radius:4px;background:rgba(0,200,83,.12);color:#00c853">✅ En ganancia</span>` : ''}
+  </div>` : '';
+
   const { p75, p90, avg } = mfeZ;
-  const pctPos    = mfeZ.pctPosition;
-  const pctLabel  = pctPos >= 95 ? 'extremo' : pctPos >= 78 ? 'zona alta' : pctPos >= 55 ? 'zona media' : 'zona normal';
-  const pctColor  = pctPos >= 95 ? '#ff3d57' : pctPos >= 78 ? '#ffd100' : pctPos >= 55 ? '#ff6b00' : '#00c853';
+  const pctPos   = mfeZ.pctPosition;
+  const pctLabel = pctPos >= 95 ? 'extremo' : pctPos >= 78 ? 'zona alta' : pctPos >= 55 ? 'zona media' : 'zona normal';
+  const pctColor = pctPos >= 95 ? '#ff3d57' : pctPos >= 78 ? '#ffd100' : pctPos >= 55 ? '#ff6b00' : '#00c853';
 
   const nStr  = rawP.n > 0 ? `${rawP.n} trades` : 'priors';
   const effStr= s.avgEff != null ? ` · Efic. ${s.avgEff.toFixed(0)}%` : '';
@@ -4607,16 +4663,16 @@ function renderTPProbBlock(trade, livePct){
     </div>`;
   };
 
-  // ── CONDITIONAL PROB BLOCK (primary — the real data) ──
+  // Conditional prob block
   const hasCondData = condP75 || condP90;
   const condBlock = hasCondData ? `
     <div style="margin-bottom:8px;padding:8px 10px;background:rgba(0,170,255,.07);border:1px solid rgba(0,170,255,.25);border-radius:8px">
       <div style="font-size:9px;font-weight:800;color:#00aaff;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">📍 Continuación desde acá</div>
-      ${cmPrice > 0 ? `<div style="font-size:9px;color:var(--text2);margin-bottom:5px">De trades que llegaron a ≥${cmPrice.toFixed(1)}% (precio):</div>` : ''}
-      ${condP75 && mfeZ.toP75 <= 0 ? '' : condP75 ? `
+      ${cmPrice > 0 ? `<div style="font-size:9px;color:var(--text2);margin-bottom:5px">De trades que llegaron a ≥${cmPrice.toFixed(1)}%:</div>` : ''}
+      ${condP75 && mfeZ.toP75 > 0 ? `
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">
           <div>
-            <div style="font-size:10px;color:var(--text2)">🎯 a p75 (${p75.toFixed(1)}%)${mfeZ.toP75>0?` — falta +${mfeZ.toP75.toFixed(1)}%`:' ✅ ya superado'}</div>
+            <div style="font-size:10px;color:var(--text2)">🎯 a p75 (${p75.toFixed(1)}%) — falta +${mfeZ.toP75.toFixed(1)}%</div>
           </div>
           <div style="text-align:right;flex-shrink:0">
             <div style="font-size:14px;font-weight:900;color:${condP75.prob>=50?'#00c853':condP75.prob>=28?'#ffd100':'#ff3d57'}">${condP75.prob}%</div>
@@ -4636,28 +4692,42 @@ function renderTPProbBlock(trade, livePct){
         </div>` : ''}
     </div>` : '';
 
-  // ── EXHAUSTION SCORE BAR ──
-  const exhBarColor = exhScore >= 80 ? '#ff3d57' : exhScore >= 60 ? '#ff6b00' : exhScore >= 35 ? '#ffd100' : '#00c853';
+  // Exhaustion score bar (gradient)
   const exhBlock = `
     <div style="margin-bottom:8px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
         <span style="font-size:9px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.3px">Score de agotamiento</span>
-        <span style="font-size:11px;font-weight:900;color:${exhBarColor}">${exhScore}/100 · ${exhL.label}</span>
+        <span style="font-size:11px;font-weight:900;color:${exhL.col}">${exhScore}/100 · ${exhL.label}</span>
       </div>
-      <div style="height:6px;background:var(--border);border-radius:3px;overflow:hidden">
-        <div style="height:100%;width:${exhScore}%;background:${exhBarColor};border-radius:3px;transition:width .5s"></div>
+      <div style="height:6px;background:var(--border);border-radius:3px;overflow:hidden;position:relative">
+        <div style="position:absolute;left:0;top:0;bottom:0;right:0;background:linear-gradient(90deg,#00c853 0%,#ffd100 35%,#ff6b00 60%,#ff3d57 100%);border-radius:3px;opacity:.3"></div>
+        <div style="position:absolute;left:0;top:0;bottom:0;width:${exhScore}%;background:${exhL.col};border-radius:3px;opacity:.9;transition:width .5s"></div>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:7px;color:var(--text2);margin-top:1px;opacity:.7">
+        <span>🟢 Puede seguir</span><span>🟡 Cuidado</span><span>🟠 Alto riesgo</span><span>🔴 Agotado</span>
       </div>
     </div>`;
 
+  // Generic tier probs: hidden if < 5 trades
+  const MIN_TRADES = 5;
+  const genericBlock = rawP.n >= MIN_TRADES ? `
+    <details style="margin-bottom:8px">
+      <summary style="font-size:9px;font-weight:700;color:var(--text2);cursor:pointer;text-transform:uppercase;letter-spacing:.5px;list-style:none">▶ Prob. generales por tier (${nStr})</summary>
+      <div style="margin-top:6px">
+        ${probBar(adjP.p3,'#00c853','🎯 3%')}${probBar(adjP.p5,'#ff6b00','🚀 5%')}${probBar(adjP.p8,'#ff3d57','💣 8%')}${probBar(adjP.p12,'#9999b8','⚡ 12%+')}
+      </div>
+    </details>` :
+    `<div style="font-size:9px;color:var(--text2);margin-bottom:8px;padding:5px 8px;background:rgba(153,153,184,.08);border-radius:6px">⚠️ Muestra insuficiente (${rawP.n} trades propios) — usando priors calibrados</div>`;
+
   return `<div style="background:var(--surface2);border:1px solid ${exhScore>=80?'rgba(255,61,87,.5)':exhScore>=60?'rgba(255,107,0,.4)':exhScore>=35?'rgba(255,209,0,.4)':'var(--border)'};border-radius:8px;padding:10px 12px;margin-top:8px" onclick="event.stopPropagation()">
 
-    <!-- Header -->
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
       <div style="font-size:11px;font-weight:900;color:var(--text)">📊 Probabilidad de continuación</div>
       <div style="font-size:9px;font-weight:700;color:${tierColor}">${tierLabel}</div>
     </div>
 
-    <!-- MFE / MAE / Percentil actual -->
+    ${contextChips}
+
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:10px">
       <div style="background:var(--card);border-radius:6px;padding:5px 7px;text-align:center">
         <div style="font-size:8px;color:var(--text2);font-weight:700;margin-bottom:1px">MFE precio</div>
@@ -4673,7 +4743,6 @@ function renderTPProbBlock(trade, livePct){
       </div>
     </div>
 
-    <!-- MFE zone bar with colored zones -->
     <div style="margin-bottom:10px">
       <div style="position:relative;height:12px;background:var(--border);border-radius:6px;overflow:hidden;margin-bottom:3px">
         <div style="position:absolute;left:0;top:0;bottom:0;width:${Math.min(100,avg/p90*100)}%;background:rgba(0,200,83,.3);border-radius:6px 0 0 6px"></div>
@@ -4689,33 +4758,14 @@ function renderTPProbBlock(trade, livePct){
         <span style="color:#ffd100">p75 ${p75.toFixed(1)}%</span>
         <span style="color:#ff3d57">p90 ${p90.toFixed(1)}%</span>
       </div>
-      ${mfeZ.toP75 > 0 ? `<div style="font-size:9px;color:#ffd100;margin-top:2px;font-weight:700">→ falta +${mfeZ.toP75.toFixed(1)}% para p75</div>` :
-        mfeZ.toP90 > 0 ? `<div style="font-size:9px;color:#ff3d57;margin-top:2px;font-weight:700">→ falta +${mfeZ.toP90.toFixed(1)}% para p90</div>` :
-        `<div style="font-size:9px;color:#ff3d57;margin-top:2px;font-weight:700">⚠️ Ya superó p90 — zona extrema</div>`}
+      ${mfeZ.toP75>0?`<div style="font-size:9px;color:#ffd100;margin-top:2px;font-weight:700">→ falta +${mfeZ.toP75.toFixed(1)}% para p75</div>`:mfeZ.toP90>0?`<div style="font-size:9px;color:#ff3d57;margin-top:2px;font-weight:700">→ falta +${mfeZ.toP90.toFixed(1)}% para p90</div>`:`<div style="font-size:9px;color:#ff3d57;margin-top:2px;font-weight:700">⚠️ Ya superó p90 — zona extrema</div>`}
     </div>
 
-    <!-- Conditional probabilities (PRIMARY — from real data) -->
     ${condBlock}
-
-    <!-- Exhaustion score -->
     ${exhBlock}
+    ${genericBlock}
 
-    <!-- Generic tier probs (secondary context) -->
-    <details style="margin-bottom:8px">
-      <summary style="font-size:9px;font-weight:700;color:var(--text2);cursor:pointer;text-transform:uppercase;letter-spacing:.5px;list-style:none;display:flex;align-items:center;gap:4px">
-        <span>▶</span> Prob. generales por tier (${nStr})
-      </summary>
-      <div style="margin-top:6px">
-        ${probBar(adjP.p3, '#00c853', '🎯 3%')}
-        ${probBar(adjP.p5, '#ff6b00', '🚀 5%')}
-        ${probBar(adjP.p8, '#ff3d57', '💣 8%')}
-        ${probBar(adjP.p12, '#9999b8', '⚡ 12%+')}
-      </div>
-    </details>
-
-    <!-- Single decision -->
     <div style="font-size:10px;font-weight:800;color:${exhL.col};padding:7px 10px;background:${exhL.bg};border:1px solid ${exhL.border};border-radius:7px;margin-bottom:5px">${decision}</div>
-
     <div style="font-size:8px;color:var(--text2);opacity:.7">Score mkt: ${contextScore}/10 · ${nStr}${effStr} · MFE/MAE = % precio sin apalancamiento</div>
   </div>`;
 }
