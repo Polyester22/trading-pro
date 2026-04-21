@@ -4433,83 +4433,37 @@ function getTPProbs(tier, stats){
 
 // Ajustar probs si el trade ya se movió
 // ── Adjust probs based on how far price already moved (pure price %) ──
+// ── Adjust generic probs based on how far price already moved ──
+// Used for the generic tier-based bars only (shown as context, not primary)
 function adjustProbs(probs, cmPrice){
   const cm = Math.abs(cmPrice || 0);
   const adj = { ...probs };
-  if(cm > 6){  adj.p12 *= 0.35; adj.p8  *= 0.45; adj.p5 *= 0.7; }
-  else if(cm > 4){ adj.p8  *= 0.6; adj.p12 *= 0.45; }
-  else if(cm > 2){ adj.p8  *= 0.8; }
+  if(cm > 6){  adj.p12 *= 0.35; adj.p8 *= 0.45; adj.p5 *= 0.7; }
+  else if(cm > 4){ adj.p8 *= 0.6; adj.p12 *= 0.45; }
+  else if(cm > 2){ adj.p8 *= 0.8; }
   return adj;
 }
 
-// MFE zone state — where current move sits relative to historical percentiles
-// Returns zone name, color, and remaining distance to p75/p90
+// ── MFE zone state — where current move sits vs historical percentiles ──
 function mfeZoneState(cmPrice, s, priors){
   const cm  = Math.abs(cmPrice || 0);
-  const avg = s.avgMax   || priors.avgMax;
-  const p75 = s.p75MFE   || priors.avgMax * 1.3;
-  const p90 = s.p90MFE   || priors.avgMax * 1.6;
-
+  const avg = s.avgMax  || priors.avgMax;
+  const p75 = s.p75MFE  || priors.avgMax * 1.3;
+  const p90 = s.p90MFE  || priors.avgMax * 1.6;
   const toP75 = Math.max(0, p75 - cm);
   const toP90 = Math.max(0, p90 - cm);
+  // Percentile position 0-100% within the 0→p90 range
+  const pctPosition = Math.min(100, Math.round(cm / p90 * 100));
 
-  if(cm >= p90) return {
-    zone:'extremo', col:'#ff3d57',
-    label:`🔴 Zona extrema — superó p90 (${p90.toFixed(1)}%)`,
-    toP75: 0, toP90: 0, avg, p75, p90
-  };
-  if(cm >= p75) return {
-    zone:'alto', col:'#ffd100',
-    label:`⚠️ Entre p75 y p90 — le falta +${toP90.toFixed(1)}% para p90`,
-    toP75: 0, toP90, avg, p75, p90
-  };
-  if(cm >= avg) return {
-    zone:'medio', col:'#ff6b00',
-    label:`🟡 Entre avg y p75 — le falta +${toP75.toFixed(1)}% para p75`,
-    toP75, toP90, avg, p75, p90
-  };
-  return {
-    zone:'bajo', col:'#00c853',
-    label:`🟢 Bajo el avg — le falta +${toP75.toFixed(1)}% para p75`,
-    toP75, toP90, avg, p75, p90
-  };
+  if(cm >= p90) return { zone:'extremo', col:'#ff3d57', toP75:0, toP90:0, avg, p75, p90, pctPosition };
+  if(cm >= p75) return { zone:'alto',    col:'#ffd100', toP75:0, toP90, avg, p75, p90, pctPosition };
+  if(cm >= avg) return { zone:'medio',   col:'#ff6b00', toP75, toP90, avg, p75, p90, pctPosition };
+  return             { zone:'bajo',    col:'#00c853', toP75, toP90, avg, p75, p90, pctPosition };
 }
 
-// Single unified decision from zone + momentum + probs
-function singleDecision(zone, acCls, adjP){
-  const isDecel = acCls === 'slow';
-  const isAccel = acCls === 'fast';
-
-  if(zone === 'extremo')
-    return { text:'🔴 Cerrar todo — ya superó el p90 histórico', col:'#ff3d57' };
-
-  if(zone === 'alto'){
-    if(isDecel || adjP.p8 < 0.18)
-      return { text:'🔴 Cerrar 70–100% — zona de agotamiento + frenando', col:'#ff3d57' };
-    if(isAccel)
-      return { text:'🟡 Cerrar 50% + trailing — acelerando pero zona alta', col:'#ffd100' };
-    return { text:'🟡 Cerrar 50% y proteger el resto', col:'#ffd100' };
-  }
-
-  if(zone === 'medio'){
-    if(isDecel)
-      return { text:'🟡 Cerrar parcial — sobre avg y frenando', col:'#ffd100' };
-    if(isAccel && adjP.p5 > 0.35)
-      return { text:'🟢 Dejar correr — sobre avg pero acelerando', col:'#00c853' };
-    return { text:'🟡 Asegurar BE — sobre avg, protegé ganancias', col:'#ffd100' };
-  }
-
-  // zone === 'bajo'
-  if(adjP.p5 > 0.42)
-    return { text:'🟢 Dejar correr — mucho potencial disponible', col:'#00c853' };
-  if(adjP.p3 > 0.55)
-    return { text:'🟢 Mantener — alta probabilidad de avance', col:'#00c853' };
-  return { text:'🟡 Observar — momentum insuficiente para proyectar', col:'#ffd100' };
-}
-
-// Contextual probability: % of similar past trades that reached target MFE
-// "similar" = same side + same tier, filtered from closed trades
-function contextualProbToTarget(target, tier, side){
+// ── CONDITIONAL probability: P(MFE >= target | MFE >= currentMFE) ──
+// "Of trades that got this far, how many continued to target?"
+function conditionalProb(cmPrice, target, tier, side){
   const closed = D.trades.filter(t =>
     !t.open &&
     t.maxMovePct != null &&
@@ -4517,12 +4471,78 @@ function contextualProbToTarget(target, tier, side){
     t.entryContextScore != null &&
     getTier(t.entryContextScore) === tier
   );
-  if(closed.length < 3) return null; // not enough data
-  const hits = closed.filter(t => t.maxMovePct >= target);
-  return { prob: Math.round(hits.length / closed.length * 100), n: closed.length };
+  if(closed.length < 3) return null;
+  // Only trades that reached at least currentMFE
+  const reached = closed.filter(t => t.maxMovePct >= cmPrice);
+  if(reached.length < 2) return null;
+  const hits = reached.filter(t => t.maxMovePct >= target);
+  return { prob: Math.round(hits.length / reached.length * 100), n: reached.length, total: closed.length };
 }
 
-// Renderizar el bloque de probabilidades en el trade card
+// ── EXHAUSTION SCORE 0–100 ──
+// Combines zone + conditional prob + momentum into one number
+function calcExhaustionScore({ cmPrice, p75, p90, condProbNext, acCls }){
+  let score = 0;
+
+  // Zone component (0–50)
+  if(cmPrice >= p90)      score += 50;
+  else if(cmPrice >= p75) score += 30;
+  else if(cmPrice >= (p75 + p90) / 2) score += 15; // approaching p75
+
+  // Conditional probability component (0–35)
+  // condProbNext = prob of continuing to p90 from here
+  if(condProbNext !== null){
+    if(condProbNext < 20)       score += 35;
+    else if(condProbNext < 35)  score += 25;
+    else if(condProbNext < 50)  score += 12;
+  } else {
+    // No data: use prior — assume moderate exhaustion above p75
+    if(cmPrice >= p75) score += 20;
+  }
+
+  // Momentum component (0–20)
+  if(acCls === 'slow')       score += 20;
+  else if(acCls === 'flat')  score += 8;
+  // 'fast' adds nothing — momentum still in favor
+
+  return Math.min(100, score);
+}
+
+function exhaustionLabel(score){
+  if(score >= 80) return { label:'🔴 Agotado', col:'#ff3d57', bg:'rgba(255,61,87,.1)', border:'rgba(255,61,87,.35)' };
+  if(score >= 60) return { label:'🟠 Alto riesgo', col:'#ff6b00', bg:'rgba(255,107,0,.1)', border:'rgba(255,107,0,.35)' };
+  if(score >= 35) return { label:'🟡 Cuidado', col:'#ffd100', bg:'rgba(255,209,0,.08)', border:'rgba(255,209,0,.35)' };
+  return              { label:'🟢 Puede seguir', col:'#00c853', bg:'rgba(0,200,83,.08)', border:'rgba(0,200,83,.3)' };
+}
+
+// ── SINGLE DECISION based on exhaustion score + context ──
+function buildDecision(exhScore, exhL, mfeZ, acCls, condProbNext){
+  const isDecel = acCls === 'slow';
+  const isAccel = acCls === 'fast';
+  const probStr = condProbNext !== null ? ` (${condProbNext}% lo logra)` : '';
+
+  if(exhScore >= 80){
+    return `🔴 Cerrar todo — trade estadísticamente agotado`;
+  }
+  if(exhScore >= 60){
+    if(isAccel) return `🟠 Cerrar 50–70% — zona de alto riesgo; si acelerás seguís con runner`;
+    return `🔴 Cerrar 70–100% — zona de agotamiento + sin aceleración`;
+  }
+  if(exhScore >= 35){
+    if(mfeZ.zone === 'alto' && isAccel) return `🟡 Cerrar 50% + trailing — entre p75/p90 pero acelerando`;
+    if(isDecel) return `🟡 Cerrar parcial — perdiendo momentum en zona avanzada`;
+    if(mfeZ.toP90 > 0) return `🟡 Asegurar BE — le falta +${mfeZ.toP90.toFixed(1)}% para p90${probStr}`;
+    return `🟡 Proteger ganancias — seguir solo si acelerás`;
+  }
+  // Low exhaustion
+  if(mfeZ.zone === 'bajo'){
+    return `🟢 Dejar correr — mucho recorrido disponible${mfeZ.toP75 > 0 ? `, falta +${mfeZ.toP75.toFixed(1)}% para p75` : ''}`;
+  }
+  if(isAccel) return `🟢 Mantener — acelerando con recorrido disponible`;
+  return `🟢 Observar — probabilidad positiva pero sin señal clara`;
+}
+
+// ── RENDER THE FULL BLOCK ──
 function renderTPProbBlock(trade, livePct){
   const tc = tickerChangeCache[trade.ticker] || null;
   const contextScore = calcContextScore(tc, trade.pos);
@@ -4533,46 +4553,53 @@ function renderTPProbBlock(trade, livePct){
     persist(D);
   }
 
-  const tier   = getTier(contextScore);
-  const stats  = loadMomentumStats();
-  const s      = stats[tier];
-  const prior  = stats._priors[tier];
-  const rawP   = getTPProbs(tier, stats);
+  const tier  = getTier(contextScore);
+  const stats = loadMomentumStats();
+  const s     = stats[tier];
+  const prior = stats._priors[tier];
+  const rawP  = getTPProbs(tier, stats);
 
   // Pure price move (no leverage)
   const lev     = trade.lev || 1;
   const cmPrice = livePct !== null ? Math.abs(livePct) / lev : 0;
 
-  const adjP   = adjustProbs(rawP, cmPrice);
   const mfeZ   = mfeZoneState(cmPrice, s, prior);
+  const adjP   = adjustProbs(rawP, cmPrice);
   const acCls  = tc ? (()=>{
-    const c1h = tc.change1h || 0; const c24 = tc.change24h || 0;
+    const c1h = tc.change1h||0; const c24 = tc.change24h||0;
     return (c1h - c24/24) > 0.08 ? 'fast' : (c1h - c24/24) < -0.08 ? 'slow' : 'flat';
   })() : 'flat';
-  const decision = singleDecision(mfeZ.zone, acCls, adjP);
+
+  // Conditional probs: P(reach target | already at cmPrice)
+  const condP75 = conditionalProb(cmPrice, mfeZ.p75, tier, trade.pos);
+  const condP90 = conditionalProb(cmPrice, mfeZ.p90, tier, trade.pos);
+  // For exhaustion score, use condProb to p90 (the next meaningful target)
+  const condProbNext = condP90?.prob ?? condP75?.prob ?? null;
+
+  const exhScore = calcExhaustionScore({ cmPrice, p75: mfeZ.p75, p90: mfeZ.p90, condProbNext, acCls });
+  const exhL     = exhaustionLabel(exhScore);
+  const decision = buildDecision(exhScore, exhL, mfeZ, acCls, condProbNext);
 
   const tierLabel = tier==='fuerte'?'🔥 Momentum fuerte':tier==='medio'?'🟡 Momentum medio':'⚠️ Momentum débil';
   const tierColor = tier==='fuerte'?'#00c853':tier==='medio'?'#ffd100':'#ff6b00';
 
-  // MFE/MAE display (pure price %)
-  const mfeLive  = trade.maxMovePct    != null ? `+${trade.maxMovePct.toFixed(2)}%`    : '—';
-  const maeLive  = trade.maxAdversePct != null ? `-${trade.maxAdversePct.toFixed(2)}%` : '—';
-  // "% del MFE ya capturado" — only meaningful when MFE > current live move
-  // i.e. price went higher but came back; shows how much of peak we're capturing now
-  const capVal   = (trade.maxMovePct > 0 && cmPrice >= 0)
-    ? Math.min(100, Math.round(cmPrice / trade.maxMovePct * 100)) : null;
-  const capStr   = capVal !== null ? capVal + '%' : '—';
-  const capColor = capVal !== null ? (capVal >= 80?'#00c853':capVal>=50?'#ffd100':'#ff3d57') : 'var(--text2)';
+  // MFE/MAE display
+  const mfeLive = trade.maxMovePct    != null ? `+${trade.maxMovePct.toFixed(2)}%`    : '—';
+  const maeLive = trade.maxAdversePct != null ? `-${trade.maxAdversePct.toFixed(2)}%` : '—';
 
-  const { avg, p75, p90 } = mfeZ;
-  const nStr   = rawP.n > 0 ? `${rawP.n} trades` : 'priors';
-  const effStr = s.avgEff != null ? ` · Efic. ${s.avgEff.toFixed(0)}%` : '';
+  // Percentile position label (replaces confusing "vs MFE 97%")
+  const { p75, p90, avg } = mfeZ;
+  const pctPos    = mfeZ.pctPosition;
+  const pctLabel  = pctPos >= 95 ? 'extremo' : pctPos >= 78 ? 'zona alta' : pctPos >= 55 ? 'zona media' : 'zona normal';
+  const pctColor  = pctPos >= 95 ? '#ff3d57' : pctPos >= 78 ? '#ffd100' : pctPos >= 55 ? '#ff6b00' : '#00c853';
 
-  // Prob bar helper — no label duplication
-  const probBar = (pct, col, label, hint) => {
+  const nStr  = rawP.n > 0 ? `${rawP.n} trades` : 'priors';
+  const effStr= s.avgEff != null ? ` · Efic. ${s.avgEff.toFixed(0)}%` : '';
+
+  const probBar = (pct, col, label) => {
     const w = Math.round(pct * 100);
-    return `<div style="display:flex;align-items:center;gap:6px;margin-bottom:5px">
-      <span style="font-size:9px;color:var(--text2);width:80px;flex-shrink:0">${label}</span>
+    return `<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+      <span style="font-size:9px;color:var(--text2);width:55px;flex-shrink:0">${label}</span>
       <div style="flex:1;height:5px;background:var(--border);border-radius:3px;overflow:hidden">
         <div style="height:100%;width:${w}%;background:${col};border-radius:3px;transition:width .4s"></div>
       </div>
@@ -4580,32 +4607,57 @@ function renderTPProbBlock(trade, livePct){
     </div>`;
   };
 
-  // ── CONTEXTUAL PROBABILITIES (real data from your trades) ──
-  const ctxP75 = contextualProbToTarget(p75, tier, trade.pos);
-  const ctxP90 = contextualProbToTarget(p90, tier, trade.pos);
-
-  const ctxBlock = (ctxP75 || ctxP90) ? `
-    <div style="margin-bottom:8px;padding:8px 10px;background:rgba(0,170,255,.06);border:1px solid rgba(0,170,255,.2);border-radius:8px">
-      <div style="font-size:9px;font-weight:800;color:#00aaff;margin-bottom:5px">🧠 PROYECCIÓN con tus datos</div>
-      ${ctxP75 ? `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
-        <span style="font-size:10px;color:var(--text2)">🎯 p75 (${p75.toFixed(1)}%) ${mfeZ.toP75 > 0 ? `— falta +${mfeZ.toP75.toFixed(1)}%` : '✅ ya alcanzado'}</span>
-        <span style="font-size:12px;font-weight:900;color:${ctxP75.prob>=50?'#00c853':ctxP75.prob>=30?'#ffd100':'#ff3d57'}">${ctxP75.prob}%</span>
-      </div>` : ''}
-      ${ctxP90 ? `<div style="display:flex;justify-content:space-between;align-items:center">
-        <span style="font-size:10px;color:var(--text2)">🚀 p90 (${p90.toFixed(1)}%) ${mfeZ.toP90 > 0 ? `— falta +${mfeZ.toP90.toFixed(1)}%` : '✅ ya alcanzado'}</span>
-        <span style="font-size:12px;font-weight:900;color:${ctxP90.prob>=30?'#00c853':ctxP90.prob>=15?'#ffd100':'#ff3d57'}">${ctxP90.prob}%</span>
-      </div>` : ''}
-      <div style="font-size:8px;color:var(--text2);margin-top:4px;opacity:.7">${ctxP75?.n || ctxP90?.n} trades similares (${tier} · ${trade.pos})</div>
+  // ── CONDITIONAL PROB BLOCK (primary — the real data) ──
+  const hasCondData = condP75 || condP90;
+  const condBlock = hasCondData ? `
+    <div style="margin-bottom:8px;padding:8px 10px;background:rgba(0,170,255,.07);border:1px solid rgba(0,170,255,.25);border-radius:8px">
+      <div style="font-size:9px;font-weight:800;color:#00aaff;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">📍 Continuación desde acá</div>
+      ${cmPrice > 0 ? `<div style="font-size:9px;color:var(--text2);margin-bottom:5px">De trades que llegaron a ≥${cmPrice.toFixed(1)}% (precio):</div>` : ''}
+      ${condP75 && mfeZ.toP75 <= 0 ? '' : condP75 ? `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">
+          <div>
+            <div style="font-size:10px;color:var(--text2)">🎯 a p75 (${p75.toFixed(1)}%)${mfeZ.toP75>0?` — falta +${mfeZ.toP75.toFixed(1)}%`:' ✅ ya superado'}</div>
+          </div>
+          <div style="text-align:right;flex-shrink:0">
+            <div style="font-size:14px;font-weight:900;color:${condP75.prob>=50?'#00c853':condP75.prob>=28?'#ffd100':'#ff3d57'}">${condP75.prob}%</div>
+            <div style="font-size:8px;color:var(--text2)">${condP75.n} trades</div>
+          </div>
+        </div>` : ''}
+      ${condP90 ? `
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <div style="font-size:10px;color:var(--text2)">🚀 a p90 (${p90.toFixed(1)}%)${mfeZ.toP90>0?` — falta +${mfeZ.toP90.toFixed(1)}%`:' ✅ ya superado'}</div>
+            ${condP90.prob < 30 && mfeZ.toP90 > 0 ? `<div style="font-size:9px;color:#ff3d57;font-weight:700">⚠️ solo ${condP90.prob}% lo logra desde acá</div>` : ''}
+          </div>
+          <div style="text-align:right;flex-shrink:0">
+            <div style="font-size:14px;font-weight:900;color:${condP90.prob>=35?'#00c853':condP90.prob>=18?'#ffd100':'#ff3d57'}">${condP90.prob}%</div>
+            <div style="font-size:8px;color:var(--text2)">${condP90.n} trades</div>
+          </div>
+        </div>` : ''}
     </div>` : '';
 
-  return `<div style="background:var(--surface2);border:1px solid ${mfeZ.zone==='extremo'?'rgba(255,61,87,.5)':mfeZ.zone==='alto'?'rgba(255,209,0,.4)':'var(--border)'};border-radius:8px;padding:10px 12px;margin-top:8px" onclick="event.stopPropagation()">
+  // ── EXHAUSTION SCORE BAR ──
+  const exhBarColor = exhScore >= 80 ? '#ff3d57' : exhScore >= 60 ? '#ff6b00' : exhScore >= 35 ? '#ffd100' : '#00c853';
+  const exhBlock = `
+    <div style="margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
+        <span style="font-size:9px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.3px">Score de agotamiento</span>
+        <span style="font-size:11px;font-weight:900;color:${exhBarColor}">${exhScore}/100 · ${exhL.label}</span>
+      </div>
+      <div style="height:6px;background:var(--border);border-radius:3px;overflow:hidden">
+        <div style="height:100%;width:${exhScore}%;background:${exhBarColor};border-radius:3px;transition:width .5s"></div>
+      </div>
+    </div>`;
 
+  return `<div style="background:var(--surface2);border:1px solid ${exhScore>=80?'rgba(255,61,87,.5)':exhScore>=60?'rgba(255,107,0,.4)':exhScore>=35?'rgba(255,209,0,.4)':'var(--border)'};border-radius:8px;padding:10px 12px;margin-top:8px" onclick="event.stopPropagation()">
+
+    <!-- Header -->
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
       <div style="font-size:11px;font-weight:900;color:var(--text)">📊 Probabilidad de continuación</div>
       <div style="font-size:9px;font-weight:700;color:${tierColor}">${tierLabel}</div>
     </div>
 
-    <!-- MFE / MAE / % capturado del pico -->
+    <!-- MFE / MAE / Percentil actual -->
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:10px">
       <div style="background:var(--card);border-radius:6px;padding:5px 7px;text-align:center">
         <div style="font-size:8px;color:var(--text2);font-weight:700;margin-bottom:1px">MFE precio</div>
@@ -4616,50 +4668,53 @@ function renderTPProbBlock(trade, livePct){
         <div style="font-size:12px;font-weight:900;color:#ff3d57">${maeLive}</div>
       </div>
       <div style="background:var(--card);border-radius:6px;padding:5px 7px;text-align:center">
-        <div style="font-size:8px;color:var(--text2);font-weight:700;margin-bottom:1px">vs MFE</div>
-        <div style="font-size:12px;font-weight:900;color:${capColor}">${capStr}</div>
+        <div style="font-size:8px;color:var(--text2);font-weight:700;margin-bottom:1px">Percentil</div>
+        <div style="font-size:11px;font-weight:900;color:${pctColor}">${pctLabel}</div>
       </div>
     </div>
 
-    <!-- MFE zone bar — the main visual, recalibrated against p90 as max -->
+    <!-- MFE zone bar with colored zones -->
     <div style="margin-bottom:10px">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
-        <span style="font-size:10px;font-weight:800;color:${mfeZ.col}">${mfeZ.label}</span>
-      </div>
-      <div style="position:relative;height:10px;background:var(--border);border-radius:5px;overflow:hidden;margin-bottom:3px">
-        <!-- zone coloring: green to avg, orange to p75, yellow to p90 -->
-        <div style="position:absolute;left:0;top:0;bottom:0;width:${Math.min(100,avg/p90*100)}%;background:rgba(0,200,83,.25);border-radius:5px 0 0 5px"></div>
-        <div style="position:absolute;left:${Math.min(100,avg/p90*100)}%;top:0;bottom:0;width:${Math.min(100,p75/p90*100)-Math.min(100,avg/p90*100)}%;background:rgba(255,107,0,.25)"></div>
-        <div style="position:absolute;left:${Math.min(100,p75/p90*100)}%;top:0;bottom:0;right:0;background:rgba(255,61,87,.2)"></div>
-        <!-- avg marker -->
-        <div style="position:absolute;left:${Math.min(97,avg/p90*100)}%;top:0;bottom:0;width:2px;background:#ff6b00;opacity:.8"></div>
-        <!-- p75 marker -->
+      <div style="position:relative;height:12px;background:var(--border);border-radius:6px;overflow:hidden;margin-bottom:3px">
+        <div style="position:absolute;left:0;top:0;bottom:0;width:${Math.min(100,avg/p90*100)}%;background:rgba(0,200,83,.3);border-radius:6px 0 0 6px"></div>
+        <div style="position:absolute;left:${Math.min(99,avg/p90*100)}%;top:0;bottom:0;width:${Math.max(0,Math.min(99,p75/p90*100)-Math.min(99,avg/p90*100))}%;background:rgba(255,107,0,.3)"></div>
+        <div style="position:absolute;left:${Math.min(99,p75/p90*100)}%;top:0;bottom:0;right:0;background:rgba(255,61,87,.25)"></div>
+        <div style="position:absolute;left:${Math.min(97,avg/p90*100)}%;top:0;bottom:0;width:2px;background:#ff6b00;opacity:.9"></div>
         <div style="position:absolute;left:${Math.min(97,p75/p90*100)}%;top:0;bottom:0;width:2px;background:#ffd100"></div>
-        <!-- current position dot -->
-        <div style="position:absolute;left:${Math.min(97,cmPrice/p90*100)}%;top:50%;transform:translate(-50%,-50%);width:10px;height:10px;border-radius:50%;background:${mfeZ.col};border:2px solid var(--card);box-shadow:0 0 4px ${mfeZ.col};transition:left .5s"></div>
+        <div style="position:absolute;left:${Math.min(96,cmPrice/p90*100)}%;top:50%;transform:translate(-50%,-50%);width:12px;height:12px;border-radius:50%;background:${mfeZ.col};border:2px solid var(--card);box-shadow:0 0 5px ${mfeZ.col};transition:left .5s"></div>
       </div>
-      <div style="display:flex;justify-content:space-between;font-size:8px;font-weight:700;color:var(--text2)">
-        <span>0</span>
+      <div style="display:flex;justify-content:space-between;font-size:8px;font-weight:700">
+        <span style="color:var(--text2)">0</span>
         <span style="color:#ff6b00">avg ${avg.toFixed(1)}%</span>
         <span style="color:#ffd100">p75 ${p75.toFixed(1)}%</span>
         <span style="color:#ff3d57">p90 ${p90.toFixed(1)}%</span>
       </div>
+      ${mfeZ.toP75 > 0 ? `<div style="font-size:9px;color:#ffd100;margin-top:2px;font-weight:700">→ falta +${mfeZ.toP75.toFixed(1)}% para p75</div>` :
+        mfeZ.toP90 > 0 ? `<div style="font-size:9px;color:#ff3d57;margin-top:2px;font-weight:700">→ falta +${mfeZ.toP90.toFixed(1)}% para p90</div>` :
+        `<div style="font-size:9px;color:#ff3d57;margin-top:2px;font-weight:700">⚠️ Ya superó p90 — zona extrema</div>`}
     </div>
 
-    <!-- Contextual probabilities from real data -->
-    ${ctxBlock}
+    <!-- Conditional probabilities (PRIMARY — from real data) -->
+    ${condBlock}
 
-    <!-- Probs genéricas del tier (siempre visibles) -->
-    <div style="margin-bottom:8px">
-      <div style="font-size:9px;font-weight:700;color:var(--text2);margin-bottom:5px;text-transform:uppercase;letter-spacing:.5px">Prob. por tier (${nStr})</div>
-      ${probBar(adjP.p3, '#00c853', '🎯 3%')}
-      ${probBar(adjP.p5, '#ff6b00', '🚀 5%')}
-      ${probBar(adjP.p8, '#ff3d57', '💣 8%')}
-      ${probBar(adjP.p12, '#9999b8', '⚡ 12%+')}
-    </div>
+    <!-- Exhaustion score -->
+    ${exhBlock}
 
-    <!-- Single unified decision -->
-    <div style="font-size:10px;font-weight:800;color:${decision.col};padding:7px 10px;background:${decision.col==='#00c853'?'rgba(0,200,83,.1)':decision.col==='#ffd100'?'rgba(255,209,0,.1)':'rgba(255,61,87,.1)'};border-radius:7px;margin-bottom:5px;border:1px solid ${decision.col==='#00c853'?'rgba(0,200,83,.3)':decision.col==='#ffd100'?'rgba(255,209,0,.3)':'rgba(255,61,87,.3)'}">${decision.text}</div>
+    <!-- Generic tier probs (secondary context) -->
+    <details style="margin-bottom:8px">
+      <summary style="font-size:9px;font-weight:700;color:var(--text2);cursor:pointer;text-transform:uppercase;letter-spacing:.5px;list-style:none;display:flex;align-items:center;gap:4px">
+        <span>▶</span> Prob. generales por tier (${nStr})
+      </summary>
+      <div style="margin-top:6px">
+        ${probBar(adjP.p3, '#00c853', '🎯 3%')}
+        ${probBar(adjP.p5, '#ff6b00', '🚀 5%')}
+        ${probBar(adjP.p8, '#ff3d57', '💣 8%')}
+        ${probBar(adjP.p12, '#9999b8', '⚡ 12%+')}
+      </div>
+    </details>
+
+    <!-- Single decision -->
+    <div style="font-size:10px;font-weight:800;color:${exhL.col};padding:7px 10px;background:${exhL.bg};border:1px solid ${exhL.border};border-radius:7px;margin-bottom:5px">${decision}</div>
 
     <div style="font-size:8px;color:var(--text2);opacity:.7">Score mkt: ${contextScore}/10 · ${nStr}${effStr} · MFE/MAE = % precio sin apalancamiento</div>
   </div>`;
