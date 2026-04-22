@@ -4792,8 +4792,10 @@ function renderTPProbBlock(trade, livePct){
 
   const { p75, p90, avg } = mfeZ;
   const pctPos   = mfeZ.pctPosition;
-  const pctLabel = pctPos >= 95 ? 'extremo' : pctPos >= 78 ? 'zona alta' : pctPos >= 55 ? 'zona media' : 'zona normal';
-  const pctColor = pctPos >= 95 ? '#ff3d57' : pctPos >= 78 ? '#ffd100' : pctPos >= 55 ? '#ff6b00' : '#00c853';
+  // Zonas: P0–40 temprano | P40–75 normal | P75–90 extendido | P90+ agotado
+  const pctZone  = pctPos >= 90 ? 'agotado' : pctPos >= 75 ? 'extendido' : pctPos >= 40 ? 'normal' : 'temprano';
+  const pctLabel = `P${pctPos} — ${pctZone}`;
+  const pctColor = pctPos >= 90 ? '#ff3d57' : pctPos >= 75 ? '#ffd100' : pctPos >= 40 ? '#ff6b00' : '#00c853';
 
   const nStr  = rawP.n > 0 ? `${rawP.n} trades` : 'priors';
   const effStr= s.avgEff != null ? ` · Efic. ${s.avgEff.toFixed(0)}%` : '';
@@ -4913,7 +4915,7 @@ function renderTPProbBlock(trade, livePct){
       </div>
       <div style="background:var(--card);border-radius:6px;padding:5px 7px;text-align:center">
         <div style="font-size:8px;color:var(--text2);font-weight:700;margin-bottom:1px">Percentil</div>
-        <div style="font-size:11px;font-weight:900;color:${pctColor}">${pctLabel}</div>
+        <div style="font-size:10px;font-weight:900;color:${pctColor}">${pctLabel}</div>
       </div>
     </div>
 
