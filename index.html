@@ -930,30 +930,15 @@ function switchTab(tab){
 function getPartialPnl(){
   let total=0;
   D.trades.filter(t=>t.open).forEach(t=>{
-    // Try 1: partialCloses array
+    // Use sum of all pnl_bruto from partialCloses (never "last partial only")
     if(t.partialCloses&&t.partialCloses.length){
-      const margenOrig=t.margenOriginal||t.margen||0;
-      let fromCloses=0;
-      t.partialCloses.forEach(c=>{
-        const pnlNum=parseFloat(c.pnl);
-        if(!isNaN(pnlNum)&&Math.abs(pnlNum)>0){
-          fromCloses+=pnlNum;
-        } else {
-          const pctNum=parseFloat(c.pct),pctCloseNum=parseFloat(c.pctClose);
-          if(!isNaN(pctNum)&&!isNaN(pctCloseNum)&&pctCloseNum>0){
-            fromCloses+=margenOrig*(pctCloseNum/100)*(pctNum/100);
-          }
-        }
-      });
+      const fromCloses=t.partialCloses.reduce((s,c)=>s+(c.pnl_bruto??c.pnl??0),0);
       if(Math.abs(fromCloses)>0){total+=fromCloses;return;}
     }
-    // Try 2: manual format "parcial:41.66" in obs
+    // Fallback: parse obs string
     if(t.obs){
       const m2=t.obs.match(/parcial:\s*([+-]?[\d.]+)/i);
       if(m2){total+=parseFloat(m2[1]);return;}
-    }
-    // Try 3: any "P&L" dollar amount in obs
-    if(t.obs){
       const m3=t.obs.match(/\+\$(\d+\.?\d*)/);
       if(m3){total+=parseFloat(m3[1]);return;}
     }
@@ -1474,25 +1459,22 @@ function getWeekKey(date){
 
 // ── Shared helper: get realized PnL for a trade (closed or partial) ──
 function getRealisedPnl(t){
-  if(!t.open)return t.margen*t.resultado/100;
-  // For open trades: try same logic as getPartialPnl
-  var fromCloses=0;
-  if(t.partialCloses&&t.partialCloses.length){
-    var margenOrig=t.margenOriginal||t.margen||0;
-    t.partialCloses.forEach(function(c){
-      var pnlNum=parseFloat(c.pnl);
-      if(!isNaN(pnlNum)&&Math.abs(pnlNum)>0){fromCloses+=pnlNum;return;}
-      var pctNum=parseFloat(c.pct),pctCloseNum=parseFloat(c.pctClose);
-      if(!isNaN(pctNum)&&!isNaN(pctCloseNum)&&pctCloseNum>0)fromCloses+=margenOrig*(pctCloseNum/100)*(pctNum/100);
-    });
-    if(Math.abs(fromCloses)>0)return fromCloses;
+  if(!t.open){
+    // Prefer explicit pnlNeto (net after fees), fallback to resultado-based
+    if(t.pnlNeto!=null) return t.pnlNeto;
+    return t.margen*t.resultado/100;
   }
-  // Fallback: parse obs string (same as getPartialPnl Try 2 & 3)
+  // For open trades: sum of pnl_bruto from partials
+  if(t.partialCloses&&t.partialCloses.length){
+    const fromCloses=t.partialCloses.reduce((s,c)=>s+(c.pnl_bruto??c.pnl??0),0);
+    if(Math.abs(fromCloses)>0) return fromCloses;
+  }
+  // Fallback: parse obs string
   if(t.obs){
-    var m2=t.obs.match(/parcial:\s*([+-]?[\d.]+)/i);
-    if(m2)return parseFloat(m2[1]);
-    var m3=t.obs.match(/\+\$(\d+\.?\d*)/);
-    if(m3)return parseFloat(m3[1]);
+    const m2=t.obs.match(/parcial:\s*([+-]?[\d.]+)/i);
+    if(m2) return parseFloat(m2[1]);
+    const m3=t.obs.match(/\+\$(\d+\.?\d*)/);
+    if(m3) return parseFloat(m3[1]);
   }
   return 0;
 }
@@ -2908,7 +2890,17 @@ function renderHistorial(){
     if(!t.open&&t.partialCloses&&t.partialCloses.length&&t.margenOriginal){
       margenDisplay=t.margenOriginal;
     }
-    const pnl=(margenDisplay*resultado/100).toFixed(2);
+    const pnlNeto = t.pnlNeto!=null ? t.pnlNeto : (margenDisplay*resultado/100);
+    const pnl     = pnlNeto.toFixed(2);
+    const pnlCol  = parseFloat(pnl)>=0?'pos':'neg';
+    // Fee breakdown cell
+    const pnlCell = (t.pnlBruto!=null&&(t.feesTotal>0||t.realizedPnlExchange!=null))
+      ? `<div style="font-size:12px;font-weight:900;color:${parseFloat(pnl)>=0?'#00c853':'#ff3d57'}">${parseFloat(pnl)>=0?'+':''}$${pnl}</div>
+         <div style="font-size:9px;color:var(--text2);line-height:1.3">
+           bruto ${t.pnlBruto>=0?'+':''}$${t.pnlBruto.toFixed(2)}
+           ${t.feesTotal>0?`<br>fees -$${t.feesTotal.toFixed(2)}`:''}
+         </div>`
+      : `${parseFloat(pnl)>=0?'+':''}$${pnl}`;
     const rc=resultado>0?'pos':resultado<0?'neg':'neutral';
     const f=(t.fechaCierre||t.fecha)?((t.fechaCierre||t.fecha).slice(5).replace('-','/')):''
     const p10flag=t.p10?'<span class="badge-10">★</span>':'';
@@ -2927,7 +2919,7 @@ function renderHistorial(){
       <td class="${rc}">${isLive?'<span class="live-dot"></span>':''}${resultado>=0?'+':''}${resultado.toFixed(2)}%</td>
       <td style="font-size:11px;font-weight:700;color:#00aaff">${t.maxMovePct!=null?(t.resultado>=0?'+':'-')+parseFloat(t.maxMovePct).toFixed(1)+'%':'<span style="color:var(--text2)">—</span>'}</td>
       <td style="font-size:11px;font-weight:700;color:${(()=>{if(t.maxMovePct==null||t.maxMovePct==0)return'var(--text2)';const lev=t.lev||1;const e=Math.min(100,Math.round(Math.abs(t.resultado)/lev/t.maxMovePct*100));return e>=70?'#00c853':e>=40?'#ffd100':'#ff3d57';})()}">${(()=>{if(t.maxMovePct==null||t.maxMovePct==0)return'—';const lev=t.lev||1;return Math.min(100,Math.round(Math.abs(t.resultado)/lev/t.maxMovePct*100))+'%';})()}</td>
-      <td class="${rc}">${parseFloat(pnl)>=0?'+':''}$${pnl}</td>
+      <td class="${pnlCol}" style="vertical-align:top">${pnlCell}</td>
       <td style="font-size:11px;font-weight:700;color:#ff6b00">$${margenDisplay||'—'}${t.margenOriginal&&t.open?'':''}</td>
       <td style="font-size:11px;color:var(--text2)">${t.lev||1}x</td>
       <td style="font-size:11px;color:var(--text2)">${t.temp||'—'}</td>
@@ -5432,18 +5424,29 @@ function openMCP(id, fullClose){
   if(!t)return;
   mcpTradeId=id; mcpFullClose=fullClose;
   const price=livePrices[t.ticker]||t.actual||0;
-  // populate salidas
+
+  // Populate salidas
   const sl=document.getElementById('mcp-salida');
   sl.innerHTML='<option value="">Sin especificar</option>'+D.salidas.map(s=>`<option value="${s}">${s}</option>`).join('');
-  // pre-fill
+
+  // Reset fields
   document.getElementById('mcp-pct').value=fullClose?'100':'';
   document.getElementById('mcp-precio').value=price?price:'';
-  // pre-fill close date/time with now (Argentina device time)
-  const _now=new Date();const _pad=n=>String(n).padStart(2,'0');
+  document.getElementById('mcp-pnl-bruto').value='';
+  document.getElementById('mcp-trading-fee').value='';
+  document.getElementById('mcp-funding-fee').value='';
+  document.getElementById('mcp-realized-pnl').value='';
+  document.getElementById('mcp-obs').value='';
+  document.getElementById('mcp-fees-result').innerHTML='';
+  document.getElementById('mcp-result').textContent='Ingresá precio o PnL bruto para calcular';
+  document.getElementById('mcp-result').style.color='var(--text2)';
+
+  // Date/time
+  const _now=new Date(); const _pad=n=>String(n).padStart(2,'0');
   document.getElementById('mcp-fecha').value=`${_now.getFullYear()}-${_pad(_now.getMonth()+1)}-${_pad(_now.getDate())}`;
   document.getElementById('mcp-hora').value=`${_pad(_now.getHours())}:${_pad(_now.getMinutes())}`;
-  document.getElementById('mcp-obs').value='';
-  // title & summary (show original margin)
+
+  // Title & summary
   const displayMargen=t.margenOriginal||t.margen;
   document.getElementById('mcp-title').textContent=fullClose?`Cerrar ${t.ticker}`:`Cierre parcial ${t.ticker}`;
   const pct=calcPct(t.entrada,price,t.pos,t.lev);
@@ -5453,31 +5456,40 @@ function openMCP(id, fullClose){
     `<div style="display:flex;justify-content:space-between;align-items:center">
       <span style="font-weight:800">${t.ticker} ${t.pos} · $${displayMargen} · ${t.lev}x</span>
       <span style="font-weight:900;color:${col}">${pct!==null?(pct>=0?'+':'')+pct.toFixed(2)+'%':''} ${pnl!==null?(pnl>=0?'+':'')+'$'+pnl.toFixed(2):''}</span>
-     </div>`;
-  // Show/hide pct controls
+    </div>`;
+
+  // Show/hide fields based on full vs partial
   const mcpPctBtns=document.getElementById('mcp-pct-btns');
   document.getElementById('mcp-pct').style.display=fullClose?'none':'block';
   if(mcpPctBtns)mcpPctBtns.style.display=fullClose?'none':'flex';
-  // Show previous partial closes if any
+  // Fees section only on full close
+  document.getElementById('mcp-fees-section').style.display=fullClose?'block':'none';
+
+  // Show previous partial closes
   const prevEl=document.getElementById('mcp-prev-closes');
   if(prevEl&&t.partialCloses&&t.partialCloses.length){
     prevEl.style.display='block';
-    const totalClosed=t.partialCloses.reduce((s,c)=>s+c.pctClose,0);
-    const totalPnl=t.partialCloses.reduce((s,c)=>s+c.pnl,0);
-    prevEl.innerHTML='<div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Cierres anteriores</div>'+
-      t.partialCloses.map((c,i)=>'<div style="display:flex;justify-content:space-between;align-items:center;background:var(--surface2);border-radius:7px;padding:6px 10px;margin-bottom:4px;font-size:11px">'+
-        '<span style="color:var(--text2)">Cierre '+(i+1)+' · '+c.pctClose+'%'+(c.closedHora?' · '+c.closedHora.slice(0,10):'')+'</span>'+
-        '<span style="font-weight:800;color:'+(c.pct>=0?'#00c853':'#ff3d57')+'">'+(c.pct>=0?'+':'')+c.pct.toFixed(1)+'% · '+(c.pnl>=0?'+':'')+'$'+c.pnl.toFixed(2)+'</span>'+
-      '</div>').join('')+
+    const totalBruto=t.partialCloses.reduce((s,c)=>s+(c.pnl_bruto??c.pnl??0),0);
+    prevEl.innerHTML='<div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Parciales anteriores</div>'+
+      t.partialCloses.map((c,i)=>
+        '<div style="display:flex;justify-content:space-between;align-items:center;background:var(--surface2);border-radius:7px;padding:6px 10px;margin-bottom:4px;font-size:11px">'+
+          '<span style="color:var(--text2)">Parcial '+(i+1)+(c.pctClose?' · '+c.pctClose+'%':'')+(c.closedHora?' · '+c.closedHora.slice(0,10):'')+'</span>'+
+          '<span style="font-weight:800;color:'+((c.pnl_bruto??c.pnl??0)>=0?'#00c853':'#ff3d57')+'">'+
+            'bruto '+(((c.pnl_bruto??c.pnl??0)>=0?'+':''))+parseFloat(c.pnl_bruto??c.pnl??0).toFixed(2)+'$'+
+          '</span>'+
+        '</div>'
+      ).join('')+
       '<div style="text-align:right;font-size:11px;font-weight:800;color:#ff6b00;margin-top:4px">'+
-        totalClosed+'% cerrado · P&L: '+(totalPnl>=0?'+':'')+'$'+totalPnl.toFixed(2)+
+        'Bruto acumulado: '+(totalBruto>=0?'+':'')+'$'+totalBruto.toFixed(2)+
       '</div>';
   } else if(prevEl){prevEl.style.display='none';}
-  // Show patron field for Pikachu trades
+
+  // Patron field for Pikachu
   const _mcpPatRow=document.getElementById('mcp-patron-row');
   if(_mcpPatRow)_mcpPatRow.style.display=t.estrategia==='Pikachu'?'block':'none';
   const _mcpPat=document.getElementById('mcp-patron');
   if(_mcpPat)_mcpPat.value=t.patron||'';
+
   mcpCalc();
   document.getElementById('modal-close-partial').classList.add('open');
 }
@@ -5486,21 +5498,29 @@ function closeMCP(){document.getElementById('modal-close-partial').classList.rem
 
 function setPct(val){
   document.getElementById('mcp-pct').value=val;
-  // highlight active button
   document.querySelectorAll('#mcp-pct-btns button').forEach(b=>{
-    b.style.borderColor=b.textContent===val+'%'||b.textContent===(val===100?'100%':'')  ?'#ff6b00':'var(--border)';
-    b.style.color=b.textContent===(val+'%')?'#ff6b00':'var(--text)';
+    b.style.borderColor=b.textContent===val+'%'?'#ff6b00':'var(--border)';
+    b.style.color=b.textContent===val+'%'?'#ff6b00':'var(--text)';
   });
   mcpCalc();
 }
 
+// Calculate from price
 function mcpCalc(){
   const t=D.trades.find(x=>x.id===mcpTradeId);
   if(!t)return;
   const precio=parseFloat(document.getElementById('mcp-precio').value);
   const pctClose=mcpFullClose?100:parseFloat(document.getElementById('mcp-pct').value)||100;
   const resEl=document.getElementById('mcp-result');
-  if(!precio||!t.entrada){resEl.textContent='Ingresá precio de cierre para calcular';resEl.style.color='var(--text2)';return;}
+  // If bruto field is filled, let it override
+  const brutoInput=parseFloat(document.getElementById('mcp-pnl-bruto').value);
+  if(!isNaN(brutoInput)&&brutoInput!==0){
+    const col=brutoInput>=0?'#00c853':'#ff3d57';
+    resEl.style.color=col;
+    resEl.innerHTML=`<span style="font-size:20px;font-weight:900">PnL bruto: ${brutoInput>=0?'+':''}$${brutoInput.toFixed(2)}</span><div style="font-size:10px;color:var(--text2);margin-top:3px">Ingresado manualmente desde exchange</div>`;
+    return;
+  }
+  if(!precio||!t.entrada){resEl.textContent='Ingresá precio o PnL bruto para calcular';resEl.style.color='var(--text2)';return;}
   const pct=calcPct(t.entrada,precio,t.pos,t.lev);
   const margenParcial=t.margen*(pctClose/100);
   const pnl=margenParcial*pct/100;
@@ -5509,79 +5529,168 @@ function mcpCalc(){
   resEl.innerHTML=`<span style="font-size:22px;font-weight:900">${pct>=0?'+':''}${pct.toFixed(2)}%</span>
     <span style="font-size:16px;font-weight:800;margin-left:10px">${pnl>=0?'+':''}$${pnl.toFixed(2)}</span>
     ${pctClose<100?`<div style="font-size:10px;color:var(--text2);margin-top:4px">Sobre $${margenParcial.toFixed(2)} (${pctClose}% del margen)</div>`:''}`;
+  mcpCalcFees();
+}
+
+// Calculate from bruto field
+function mcpCalcBruto(){
+  document.getElementById('mcp-precio').value='';
+  mcpCalc();
+  mcpCalcFees();
+}
+
+// Live fee preview
+function mcpCalcFees(){
+  const resEl=document.getElementById('mcp-fees-result');
+  if(!resEl)return;
+  const t=D.trades.find(x=>x.id===mcpTradeId);
+  if(!t)return;
+
+  const tradingFee = parseFloat(document.getElementById('mcp-trading-fee').value)||0;
+  const fundingFee = parseFloat(document.getElementById('mcp-funding-fee').value)||0;
+  const realizedPnl= parseFloat(document.getElementById('mcp-realized-pnl').value);
+  const feesTotal  = tradingFee + fundingFee;
+
+  // Compute bruto: from price calc or manual
+  const brutoInput = parseFloat(document.getElementById('mcp-pnl-bruto').value);
+  let pnlBruto = null;
+  if(!isNaN(brutoInput)&&brutoInput!==0){
+    pnlBruto = brutoInput;
+  } else {
+    const precio=parseFloat(document.getElementById('mcp-precio').value);
+    if(precio&&t.entrada){
+      const pct=calcPct(t.entrada,precio,t.pos,t.lev);
+      pnlBruto=t.margen*pct/100;
+    }
+  }
+
+  // Also add existing partial brutos
+  const partialsBruto = (t.partialCloses||[]).reduce((s,c)=>s+(c.pnl_bruto??c.pnl??0),0);
+  const totalBruto = (pnlBruto||0) + partialsBruto;
+
+  if(!isNaN(realizedPnl)&&realizedPnl!==0){
+    resEl.innerHTML=`<div style="font-size:12px;font-weight:900;color:${realizedPnl>=0?'#00c853':'#ff3d57'}">Resultado final: ${realizedPnl>=0?'+':''}$${realizedPnl.toFixed(2)}</div><div style="font-size:10px;color:#00aaff;margin-top:2px">✓ Usando Realized PnL del exchange (prioridad máxima)</div>`;
+  } else if(pnlBruto!==null){
+    const neto = totalBruto - feesTotal;
+    resEl.innerHTML=`<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;text-align:center;margin-top:4px">
+      <div><div style="font-size:8px;color:var(--text2)">BRUTO TOTAL</div><div style="font-size:13px;font-weight:900;color:${totalBruto>=0?'#00c853':'#ff3d57'}">${totalBruto>=0?'+':''}$${totalBruto.toFixed(2)}</div></div>
+      <div><div style="font-size:8px;color:var(--text2)">FEES</div><div style="font-size:13px;font-weight:900;color:#ff3d57">${feesTotal>0?'-$'+feesTotal.toFixed(2):'$0'}</div></div>
+      <div><div style="font-size:8px;color:var(--text2)">NETO</div><div style="font-size:14px;font-weight:900;color:${neto>=0?'#00c853':'#ff3d57'}">${neto>=0?'+':''}$${neto.toFixed(2)}</div></div>
+    </div>`;
+  } else {
+    resEl.innerHTML='';
+  }
 }
 
 function saveMCP(){
   const t=D.trades.find(x=>x.id===mcpTradeId);
   if(!t)return;
-  const precio=parseFloat(document.getElementById('mcp-precio').value)||t.actual||0;
-  const pctClose=mcpFullClose?100:parseFloat(document.getElementById('mcp-pct').value)||100;
-  const salida=document.getElementById('mcp-salida').value;
-  const obs=document.getElementById('mcp-obs').value;
-  const mcpPatron=document.getElementById('mcp-patron').value||null;
-  const pct=precio&&t.entrada?calcPct(t.entrada,precio,t.pos,t.lev):t.resultado;
-  
-  // Store close time for duration calc
-  const now=new Date();
-  const pad=n=>String(n).padStart(2,'0');
+
+  const precio     = parseFloat(document.getElementById('mcp-precio').value)||t.actual||0;
+  const pctClose   = mcpFullClose?100:parseFloat(document.getElementById('mcp-pct').value)||100;
+  const salida     = document.getElementById('mcp-salida').value;
+  const obs        = document.getElementById('mcp-obs').value;
+  const mcpPatron  = document.getElementById('mcp-patron').value||null;
+  const tradingFee = parseFloat(document.getElementById('mcp-trading-fee').value)||0;
+  const fundingFee = parseFloat(document.getElementById('mcp-funding-fee').value)||0;
+  const feesTotal  = tradingFee + fundingFee;
+  const realizedPnlInput = parseFloat(document.getElementById('mcp-realized-pnl').value);
+  const brutoInput = parseFloat(document.getElementById('mcp-pnl-bruto').value);
+
+  // Compute pct for p10 check (from price if available)
+  const pct = precio&&t.entrada ? calcPct(t.entrada,precio,t.pos,t.lev) : null;
+
+  // Close timestamp
+  const now=new Date(); const pad=n=>String(n).padStart(2,'0');
   const mcpFechaVal=document.getElementById('mcp-fecha').value;
   const mcpHoraVal=document.getElementById('mcp-hora').value;
   const closedHora=mcpFechaVal?(mcpFechaVal+'T'+(mcpHoraVal||'12:00')):`${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
 
-  if(mcpFullClose||pctClose===100){
-    // Full close
-    const remainingMargen=t.margen; // save BEFORE restoring original
-    t.open=false;
-    t.actual=precio||t.actual;
-    if(salida)t.salida=salida;
-    if(obs)t.obs=obs;
-    if(mcpPatron)t.patron=mcpPatron;
-    t.closedHora=closedHora;
-    t.fechaCierre=closedHora.slice(0,10); // fecha de cierre — no pisar t.fecha (apertura)
-    if(pct>=10)t.p10=true;
-
-    if(t.partialCloses&&t.partialCloses.length){
-      // Add final close as a partial with the REMAINING margin
-      const finalPnl=remainingMargen*pct/100;
-      t.partialCloses.push({pct,pctClose:100,pnl:finalPnl,precio,closedHora});
-
-      // Restore original margin for display
-      const margenOrig=t.margenOriginal||remainingMargen;
-      t.margen=margenOrig;
-
-      // Weighted result = totalPnl / margenOriginal * 100
-      const totalPnl=t.partialCloses.reduce((s,c)=>s+c.pnl,0);
-      t.resultado=totalPnl/margenOrig*100;
-
-      const n=t.partialCloses.length;
-      const obsUser=obs||salida||'—';
-      t.obs=`${n} cierres · R% ponderado: ${t.resultado>=0?'+':''}${t.resultado.toFixed(1)}% · P&L total: ${totalPnl>=0?'+':''}$${totalPnl.toFixed(2)} · Última salida: ${obsUser}`;
-    } else {
-      // No partials — simple close
-      t.resultado=pct||t.resultado;
-      if(t.margenOriginal)t.margen=t.margenOriginal;
-    }
+  // Compute pnl_bruto for this event
+  let pnlBrutoEste;
+  if(!isNaN(brutoInput)&&brutoInput!==0){
+    pnlBrutoEste = brutoInput; // manual from exchange
+  } else if(pct!==null){
+    const margenParcial = mcpFullClose ? t.margen : t.margen*(pctClose/100);
+    pnlBrutoEste = margenParcial * pct / 100;
   } else {
-    // Partial close — record it, keep trade open with remaining margin
-    if(!t.partialCloses)t.partialCloses=[];
-    // Save original margin before first reduction
-    if(!t.margenOriginal)t.margenOriginal=t.margen;
-    const pnlEste=t.margen*(pctClose/100)*pct/100;
-    t.partialCloses.push({pct,pctClose,pnl:pnlEste,precio,closedHora,salida,obs});
-    // reduce remaining margin
-    t.margen=parseFloat((t.margen*(1-pctClose/100)).toFixed(2));
-    // update actual price
-    t.actual=precio;
-    // Add note
-    const totalClosed=t.partialCloses.reduce((s,c)=>s+c.pctClose,0);
-    const totalPnlSoFar=t.partialCloses.reduce((s,c)=>s+c.pnl,0);
-    t.obs=`${totalClosed}% cerrado · P&L hasta acá: ${totalPnlSoFar>=0?'+':''}$${totalPnlSoFar.toFixed(2)} · quedan $${t.margen}`;
+    pnlBrutoEste = 0;
   }
-  
+
+  if(mcpFullClose || pctClose===100){
+    // ── FULL CLOSE ──────────────────────────────────────────────────────────
+    const remainingMargen = t.margen;
+    t.open       = false;
+    t.actual     = precio||t.actual;
+    if(salida)   t.salida    = salida;
+    if(obs)      t.obs       = obs;
+    if(mcpPatron)t.patron    = mcpPatron;
+    t.closedHora = closedHora;
+    t.fechaCierre= closedHora.slice(0,10);
+    if(pct!==null&&pct>=10) t.p10=true;
+
+    // Save fee metadata
+    if(tradingFee>0) t.tradingFees = (t.tradingFees||0)+tradingFee;
+    if(fundingFee>0) t.fundingFees = (t.fundingFees||0)+fundingFee;
+    t.feesTotal = (t.tradingFees||0)+(t.fundingFees||0);
+
+    // Record this close event in partialCloses (always, even for full close — for audit trail)
+    if(!t.partialCloses) t.partialCloses=[];
+    t.partialCloses.push({pct:pct||0, pctClose:100, pnl:pnlBrutoEste, pnl_bruto:pnlBrutoEste, precio, closedHora, salida, obs});
+
+    // Restore original margin for display
+    const margenOrig = t.margenOriginal||remainingMargen;
+    t.margen = margenOrig;
+
+    // ── FINAL PnL CALCULATION ────────────────────────────────────────────────
+    // pnl_bruto_total = SUM of all partial pnl_bruto (never "last partial only")
+    const pnlBrutoTotal = t.partialCloses.reduce((s,c)=>s+(c.pnl_bruto??c.pnl??0),0);
+    t.pnlBruto = pnlBrutoTotal;
+
+    let pnlNeto;
+    if(!isNaN(realizedPnlInput)&&realizedPnlInput!==0){
+      // Exchange realized PnL has priority
+      pnlNeto = realizedPnlInput;
+      t.realizedPnlExchange = realizedPnlInput;
+    } else {
+      // pnl_neto = bruto_total - fees
+      pnlNeto = pnlBrutoTotal - t.feesTotal;
+    }
+
+    // resultado = pnl_neto expressed as % of original margin
+    t.resultado = margenOrig>0 ? pnlNeto/margenOrig*100 : 0;
+    t.pnlNeto   = pnlNeto;
+
+    // Build obs summary
+    const n=t.partialCloses.length;
+    t.obs = [
+      `${n>1?n+' cierres · ':''}PnL neto: ${pnlNeto>=0?'+':''}$${pnlNeto.toFixed(2)}`,
+      pnlBrutoTotal!==pnlNeto ? `bruto: ${pnlBrutoTotal>=0?'+':''}$${pnlBrutoTotal.toFixed(2)}` : null,
+      t.feesTotal>0 ? `fees: -$${t.feesTotal.toFixed(2)}` : null,
+      !isNaN(realizedPnlInput)&&realizedPnlInput!==0 ? `Realized PnL exchange usado` : null,
+      obs||salida||null
+    ].filter(Boolean).join(' · ');
+
+  } else {
+    // ── PARTIAL CLOSE ────────────────────────────────────────────────────────
+    if(!t.partialCloses) t.partialCloses=[];
+    if(!t.margenOriginal) t.margenOriginal=t.margen;
+
+    t.partialCloses.push({pct:pct||0, pctClose, pnl:pnlBrutoEste, pnl_bruto:pnlBrutoEste, precio, closedHora, salida, obs});
+
+    // Reduce remaining margin
+    t.margen = parseFloat((t.margen*(1-pctClose/100)).toFixed(2));
+    t.actual  = precio||t.actual;
+
+    // Update obs with running bruto total
+    const totalBruto = t.partialCloses.reduce((s,c)=>s+(c.pnl_bruto??c.pnl??0),0);
+    const totalClosed= t.partialCloses.reduce((s,c)=>s+(c.pctClose||0),0);
+    t.obs=`${totalClosed}% cerrado · PnL bruto acumulado: ${totalBruto>=0?'+':''}$${totalBruto.toFixed(2)} · quedan $${t.margen}`;
+  }
+
   persist(D);
-  // ── Auto-learning: update momentum stats on full close ──
   if(mcpFullClose||pctClose===100){ updateMomentumStats(t); }
-  closeMCP();updateKPIs();updateOpenCount();renderOpenTrades();
+  closeMCP(); updateKPIs(); updateOpenCount(); renderOpenTrades();
   if(mcpFullClose||pctClose===100) setTimeout(()=>switchTab('historial'),300);
 }
 
@@ -6474,30 +6583,61 @@ function closePromedio(){
       <div style="background:var(--surface2);border-radius:10px;padding:12px 14px;margin-bottom:14px" id="mcp-summary"></div>
       <!-- Historial de cierres parciales anteriores -->
       <div id="mcp-prev-closes" style="display:none;margin-bottom:12px"></div>
-      <div class="row2" style="margin-bottom:8px">
-        <div class="field">
-          <label>% a cerrar</label>
-          <!-- Quick buttons -->
-          <div style="display:flex;gap:6px;margin-bottom:8px" id="mcp-pct-btns">
-            <button onclick="setPct(25)" class="btn btn-dark btn-sm" style="flex:1;margin:0;font-size:12px">25%</button>
-            <button onclick="setPct(50)" class="btn btn-dark btn-sm" style="flex:1;margin:0;font-size:12px">50%</button>
-            <button onclick="setPct(75)" class="btn btn-dark btn-sm" style="flex:1;margin:0;font-size:12px">75%</button>
-            <button onclick="setPct(100)" class="btn btn-dark btn-sm" style="flex:1;margin:0;font-size:12px">100%</button>
+
+      <!-- CIERRE PARCIAL: % + precio O PnL bruto directo -->
+      <div id="mcp-partial-fields">
+        <div class="row2" style="margin-bottom:8px">
+          <div class="field">
+            <label>% a cerrar</label>
+            <div style="display:flex;gap:6px;margin-bottom:8px" id="mcp-pct-btns">
+              <button onclick="setPct(25)" class="btn btn-dark btn-sm" style="flex:1;margin:0;font-size:12px">25%</button>
+              <button onclick="setPct(50)" class="btn btn-dark btn-sm" style="flex:1;margin:0;font-size:12px">50%</button>
+              <button onclick="setPct(75)" class="btn btn-dark btn-sm" style="flex:1;margin:0;font-size:12px">75%</button>
+              <button onclick="setPct(100)" class="btn btn-dark btn-sm" style="flex:1;margin:0;font-size:12px">100%</button>
+            </div>
+            <input type="number" id="mcp-pct" placeholder="% personalizado (ej: 33)" min="1" max="100" step="1" oninput="mcpCalc()" style="font-size:14px;padding:9px 12px">
           </div>
-          <input type="number" id="mcp-pct" placeholder="% personalizado (ej: 33)" min="1" max="100" step="1" oninput="mcpCalc()" style="font-size:14px;padding:9px 12px">
+          <div class="field">
+            <label>Precio de cierre</label>
+            <input type="text" inputmode="decimal" id="mcp-precio" placeholder="Opcional" autocomplete="off" oninput="mcpCalc()">
+          </div>
         </div>
-        <div class="field">
-          <label>Precio de cierre</label>
-          <input type="text" inputmode="decimal" id="mcp-precio" placeholder="Opcional" autocomplete="off" oninput="mcpCalc()">
+        <!-- PnL bruto directo (alternativa al precio) -->
+        <div class="field" style="margin-bottom:8px">
+          <label>PnL bruto del exchange <span style="color:var(--text2);font-size:9px;font-weight:600">$ — alternativa al precio</span></label>
+          <input type="text" inputmode="decimal" id="mcp-pnl-bruto" placeholder="ej: 18.50 (sin fees)" autocomplete="off" oninput="mcpCalcBruto()">
         </div>
       </div>
-      <div id="mcp-result" style="background:var(--input-bg);border:1.5px solid var(--border);border-radius:8px;padding:12px;text-align:center;margin-bottom:14px;font-size:13px;color:var(--text2)">
-        Ingresá precio para calcular
+
+      <div id="mcp-result" style="background:var(--input-bg);border:1.5px solid var(--border);border-radius:8px;padding:12px;text-align:center;margin-bottom:10px;font-size:13px;color:var(--text2)">
+        Ingresá precio o PnL bruto para calcular
       </div>
-      <div class="row2" style="margin-bottom:0">
+
+      <div class="row2" style="margin-bottom:8px">
         <div class="field"><label>Fecha de cierre</label><input type="date" id="mcp-fecha"></div>
         <div class="field"><label>Hora de cierre</label><input type="time" id="mcp-hora"></div>
       </div>
+
+      <!-- FEES + REALIZED PnL — solo en cierre total -->
+      <div id="mcp-fees-section" style="display:none;background:rgba(0,170,255,.06);border:1px solid rgba(0,170,255,.2);border-radius:10px;padding:12px;margin-bottom:10px">
+        <div style="font-size:10px;font-weight:800;color:#00aaff;text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">💸 Fees del exchange (opcional)</div>
+        <div class="row2" style="margin-bottom:8px">
+          <div class="field" style="margin:0">
+            <label>Trading fees $</label>
+            <input type="text" inputmode="decimal" id="mcp-trading-fee" placeholder="ej: 1.20" autocomplete="off" oninput="mcpCalcFees()">
+          </div>
+          <div class="field" style="margin:0">
+            <label>Funding fees $</label>
+            <input type="text" inputmode="decimal" id="mcp-funding-fee" placeholder="ej: 0.35" autocomplete="off" oninput="mcpCalcFees()">
+          </div>
+        </div>
+        <div class="field" style="margin-bottom:0">
+          <label>Realized PnL del exchange $ <span style="color:#00aaff;font-size:9px;font-weight:700">← tiene prioridad si lo cargás</span></label>
+          <input type="text" inputmode="decimal" id="mcp-realized-pnl" placeholder="ej: 32.80 (ya incluye fees)" autocomplete="off" oninput="mcpCalcFees()">
+        </div>
+        <div id="mcp-fees-result" style="margin-top:8px;font-size:11px;color:var(--text2);text-align:center"></div>
+      </div>
+
       <div class="field">
         <label>Motivo de salida</label>
         <select id="mcp-salida"></select>
