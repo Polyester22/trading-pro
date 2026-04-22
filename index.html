@@ -1758,12 +1758,42 @@ async function fetchTickerChanges(tickers){
         fetch('https://api.binance.com/api/v3/klines?symbol='+sym+'&interval=4h&limit=2').then(r=>r.json())
       ]);
       const c24=parseFloat(stats.priceChangePercent)||0;
-      // kline format: [openTime, open, high, low, close, ...]
       const c1h=k1h&&k1h.length>=1?(parseFloat(k1h[k1h.length-1][4])-parseFloat(k1h[0][1]))/parseFloat(k1h[0][1])*100:0;
       const c4h=k4h&&k4h.length>=1?(parseFloat(k4h[k4h.length-1][4])-parseFloat(k4h[0][1]))/parseFloat(k4h[0][1])*100:0;
-      tickerChangeCache[tk]={change1h:c1h,change4h:c4h,change24h:c24,fetchedAt:now};
+      // Preserve previous 1H value before overwriting (for trailing detection)
+      const prev=tickerChangeCache[tk];
+      const prev1h=prev?prev.change1h:null;
+      tickerChangeCache[tk]={change1h:c1h,change4h:c4h,change24h:c24,fetchedAt:now,prev1h};
     }catch(e){ /* ignore per-ticker errors */ }
   }));
+}
+
+// ── Trailing alert: fires when 1H drops vs previous reading on a winning trade ──
+function trailingAlertHTML(trade, livePct){
+  const tc = tickerChangeCache[trade.ticker];
+  if(!tc || tc.prev1h === null || tc.prev1h === undefined) return '';
+  const isLong = trade.pos === 'Long';
+
+  // Only relevant when trade is winning and has some profit (price moved in our favor)
+  if(livePct === null || livePct < 2) return '';
+
+  const c1h     = tc.change1h;
+  const prev1h  = tc.prev1h;
+  const dropped = isLong  ? (c1h < prev1h - 0.15)  // 1H fell vs previous reading
+                          : (c1h > prev1h + 0.15);  // Short: 1H rose (bad)
+  if(!dropped) return '';
+
+  const diff    = Math.abs(c1h - prev1h).toFixed(2);
+  const dirStr  = isLong ? `bajó de ${prev1h>=0?'+':''}${prev1h.toFixed(2)}% a ${c1h>=0?'+':''}${c1h.toFixed(2)}%`
+                         : `subió de ${prev1h>=0?'+':''}${prev1h.toFixed(2)}% a ${c1h>=0?'+':''}${c1h.toFixed(2)}%`;
+
+  return `<div style="background:rgba(255,61,87,.12);border:1.5px solid rgba(255,61,87,.5);border-radius:8px;padding:8px 12px;margin-top:8px;display:flex;align-items:center;gap:8px" onclick="event.stopPropagation()">
+    <span style="font-size:18px;flex-shrink:0">🚨</span>
+    <div style="flex:1">
+      <div style="font-size:11px;font-weight:900;color:#ff3d57;margin-bottom:2px">ALERTA TRAILING — 1H ${dirStr}</div>
+      <div style="font-size:10px;color:var(--text2)">La 1H bajó ${diff}% respecto a la lectura anterior → evaluá cerrar posición</div>
+    </div>
+  </div>`;
 }
 
 // ── Semáforo específico para el ticker del trade en curso ──────────────
@@ -2028,6 +2058,7 @@ function renderOpenTrades(){
       </div>
       ${t.obs?`<div style="margin-top:8px;font-size:11px;color:var(--text2);font-style:italic;padding:0 2px">${t.obs}</div>`:''}
       ${tickerSemaphoreHTML(t, tickerChangeCache[t.ticker]||null)}
+      ${trailingAlertHTML(t, livePct)}
       ${(()=>{
         const tp = getMomentumTP(t.ticker, t.pos);
         if(!tp) return '';
