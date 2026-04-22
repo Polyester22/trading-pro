@@ -5303,14 +5303,13 @@ function renderTPProbBlock(trade, livePct){
   const prior = stats._priors[tier];
   const rawP  = getTPProbs(tier, stats);
 
-  // Pure price move (no leverage) — signed: positive = in favor, negative = against
+  // Pure price move (no leverage) — signed: positive = favorable for trader, negative = against
+  // livePct already has direction applied by calcPct (SHORT: price drop = positive livePct)
+  // So we just strip leverage — no additional sign flip needed
   const lev     = trade.lev || 1;
   // ── CONTEXT SIGNALS ──
   const isLong = trade.pos === 'Long';
-  // For LONG: favorable when price rises (livePct > 0)
-  // For SHORT: favorable when price falls (livePct < 0, so we flip sign)
-  const rawSignedPrice = livePct !== null ? livePct / lev : 0;
-  const cmPrice = isLong ? rawSignedPrice : -rawSignedPrice;
+  const cmPrice = livePct !== null ? livePct / lev : 0;
   // cmPriceAbs used for MFE zone calcs (always positive for statistical lookups)
   const cmPriceAbs = Math.abs(cmPrice);
 
