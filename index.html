@@ -4336,13 +4336,16 @@ function saveMomentumStats(stats){
   try{ localStorage.setItem(MSTATS_KEY, JSON.stringify(stats)); }catch(e){}
 }
 
+// Thresholds aligned with getMomentumTP: fuerte=6+, medio=4-5, debil=0-3
 function getTier(score){
-  if(score >= 7) return 'fuerte';
+  if(score >= 6) return 'fuerte';
   if(score >= 4) return 'medio';
   return 'debil';
 }
 
 // Calcular el context score de un trade al momento del cierre/apertura
+// calcContextScore — unified with getMomentumTP so both show the same tier
+// Returns 0–7 score on the same scale as getMomentumTP
 function calcContextScore(tc, pos){
   if(!tc) return null;
   const isLong = pos === 'Long';
@@ -4356,21 +4359,23 @@ function calcContextScore(tc, pos){
   const alts  = md.filter(c=>c.id!=='bitcoin'&&c.id!=='ethereum'&&c.price_change_percentage_24h!=null);
   const amp   = alts.length ? Math.round(alts.filter(c=>(c.price_change_percentage_24h||0)>0).length/alts.length*100) : 50;
 
+  // Exact same scoring as getMomentumTP
   let score = 0;
   if(isLong){
-    if(Math.abs(c1h) > 1)  score += 2;   // 1H significativo
-    if(Math.abs(c4h) > 3)  score += 2;   // 4H fuerte
-    if(isLong ? rs > 0 : rs < 0) score += 2; // RS a favor
-    if(amp > 60 && isLong) score += 2;   // amplitud alcista
-    if(isLong ? accel > 0.05 : accel < -0.05) score += 2; // acelerando
+    if(c4h  > 0) score += 2;
+    if(c1h  > 0) score += 1;
+    if(c24  > 0) score += 1;
+    if(rs   > 0) score += 1;
+    if(accel > 0.05) score += 1;
+    if(amp  >= 60) score += 1;
   } else {
-    if(c1h < -1)  score += 2;
-    if(c4h < -3)  score += 2;
-    if(rs   < 0)  score += 2;
-    if(amp  < 40) score += 2;
+    if(rs   < 0) score += 2;
+    if(c1h  < 0) score += 2;
     if(accel < -0.05) score += 2;
+    if(c24  < 0) score += 1;
+    if(c4h  < 0) score += 1;
   }
-  return Math.min(10, score); // 0–10
+  return Math.min(7, score); // 0–7, same as getMomentumTP
 }
 
 // Llamar esto al cerrar un trade (saveMCP lo invoca)
@@ -4804,7 +4809,7 @@ function renderTPProbBlock(trade, livePct){
     ${genericBlock}
 
     <div style="font-size:10px;font-weight:800;color:${exhL.col};padding:7px 10px;background:${exhL.bg};border:1px solid ${exhL.border};border-radius:7px;margin-bottom:5px">${decision}</div>
-    <div style="font-size:8px;color:var(--text2);opacity:.7">Score mkt: ${contextScore}/10 · ${nStr}${effStr} · MFE/MAE = % precio sin apalancamiento</div>
+    <div style="font-size:8px;color:var(--text2);opacity:.7">Score mkt: ${contextScore}/7 · ${nStr}${effStr} · MFE/MAE = % precio sin apalancamiento</div>
   </div>`;
 }
 // what-if replaced by renderKpiProjection
