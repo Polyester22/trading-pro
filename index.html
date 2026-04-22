@@ -4729,13 +4729,18 @@ function renderTPProbBlock(trade, livePct){
       </div>
     </div>`;
 
-  // Generic tier probs: hidden if < 5 trades, renamed to "Alcance histórico del setup"
-  const MIN_TRADES = 5;
-  const genericBlock = rawP.n >= MIN_TRADES ? `
+  // "Alcance histórico del setup" — siempre visible, usa priors si no hay datos propios
+  const ownDataNote = rawP.n >= 5
+    ? `${rawP.n} trades propios · contexto ${tier}`
+    : rawP.n > 0
+      ? `${rawP.n} trade${rawP.n>1?'s':''} propio${rawP.n>1?'s':''} + priors calibrados`
+      : `priors calibrados (aún sin trades propios en este contexto)`;
+
+  const genericBlock = `
     <details style="margin-bottom:8px">
       <summary style="font-size:9px;font-weight:700;color:var(--text2);cursor:pointer;text-transform:uppercase;letter-spacing:.5px;list-style:none">▶ 📊 Alcance histórico del setup</summary>
       <div style="margin-top:8px;padding:8px 10px;background:var(--card);border-radius:8px">
-        <div style="font-size:9px;color:var(--text2);margin-bottom:7px">Basado en ${nStr} con este contexto (${tier}) · estás en <strong style="color:${mfeZ.col}">${cmPrice.toFixed(2)}%</strong> precio</div>
+        <div style="font-size:9px;color:var(--text2);margin-bottom:7px">${ownDataNote} · estás en <strong style="color:${mfeZ.col}">${cmPrice.toFixed(2)}%</strong> precio</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px">
           <div style="background:var(--surface2);border-radius:6px;padding:6px 8px;text-align:center">
             <div style="font-size:8px;color:var(--text2);margin-bottom:2px">TP típico</div>
@@ -4750,8 +4755,7 @@ function renderTPProbBlock(trade, livePct){
         </div>
         ${probBar(adjP.p3,'#00c853','🎯 3%')}${probBar(adjP.p5,'#ff6b00','🚀 5%')}${probBar(adjP.p8,'#ff3d57','💣 8%')}${probBar(adjP.p12,'#9999b8','⚡ 12%+')}
       </div>
-    </details>` :
-    `<div style="font-size:9px;color:var(--text2);margin-bottom:8px;padding:5px 8px;background:rgba(153,153,184,.08);border-radius:6px">⚠️ Muestra insuficiente (${rawP.n} trades propios) — usando priors calibrados</div>`;
+    </details>`;
 
   return `<div style="background:var(--surface2);border:1px solid ${exhScore>=80?'rgba(255,61,87,.5)':exhScore>=60?'rgba(255,107,0,.4)':exhScore>=35?'rgba(255,209,0,.4)':'var(--border)'};border-radius:8px;padding:10px 12px;margin-top:8px" onclick="event.stopPropagation()">
 
