@@ -1864,6 +1864,78 @@ function tickerSemaphoreHTML(t, tc){
 }
 
 // ══ TP SUGERIDO POR MOMENTUM ══
+// ══ DYNAMIC TP: derived from ticker historical data ══════════════════════════
+// Returns { tp1, tp2, runner, source, hasData }
+// tp1 = nivel con probabilidad relevante (~40–60%)
+// tp2 = avg MFE del tier actual
+// runner = p90
+// All values are pure price % (no leverage)
+function getTickerDynamicTP(ticker, pos, tier){
+  const stats  = loadMomentumStats();
+  const s      = stats[tier];
+  const prior  = stats._priors[tier];
+  const n      = s.count || 0;
+
+  // ── Fallback estándar (sin historial suficiente) ──────────────────────────
+  const FALLBACK = {
+    fuerte: { tp1: 5,   tp2: 7.5,  runner: 12,  label: 'Usando valores estimados (sin historial suficiente)' },
+    medio:  { tp1: 4,   tp2: 4.5,  runner: 8,   label: 'Usando valores estimados (sin historial suficiente)' },
+    debil:  { tp1: 3,   tp2: 2.5,  runner: 5,   label: 'Usando valores estimados (sin historial suficiente)' },
+  };
+
+  // ── Requisito mínimo: 5 trades propios con MFE registrado ────────────────
+  const hasMFE  = s.maxMoves && s.maxMoves.length >= 5;
+
+  if(!hasMFE){
+    const fb = FALLBACK[tier];
+    return {
+      tp1:    fb.tp1,
+      tp2:    fb.tp2,
+      runner: fb.runner,
+      source: fb.label,
+      hasData: false,
+      n: n
+    };
+  }
+
+  // ── TP dinámico desde datos propios ──────────────────────────────────────
+  // TP1: primer nivel donde probabilidad cae ~40–60%
+  //   Usamos la probabilidad ajustada → buscamos el menor TP con P >= 45%
+  //   Candidatos: avg, p50, un punto entre avg y p75
+  const rawP = getTPProbs(tier, stats);
+  const avg  = s.avgMax  || prior.avgMax;
+  const p75  = s.p75MFE  || avg * 1.3;
+  const p90  = s.p90MFE  || avg * 1.6;
+
+  // TP1: nivel con ~50% de probabilidad acumulada
+  //   Buscamos entre 3% y avg donde P >= ~50%.
+  //   Como tenemos prob en niveles fijos (3,5,8,12), interpolamos:
+  //   P(>3)=rawP.p3, P(>5)=rawP.p5, P(>8)=rawP.p8
+  //   TP1 es el nivel más bajo con prob ≥ 45%
+  let tp1;
+  if(rawP.p3 >= 0.45){
+    // Si 3% ya tiene ≥45%, usar avg entre 3 y nivel de p5
+    tp1 = rawP.p5 >= 0.45 ? Math.max(3, rawP.p5 >= 0.5 ? avg * 0.5 : avg * 0.6) : 3;
+    tp1 = Math.max(2.5, Math.min(tp1, avg * 0.7));
+  } else {
+    tp1 = avg * 0.5; // fallback: 50% del avg MFE
+  }
+  tp1 = Math.max(2.5, parseFloat(tp1.toFixed(1)));
+
+  // TP2 = avg MFE del tier
+  const tp2 = Math.max(tp1 + 1.5, parseFloat(avg.toFixed(1)));
+
+  // Runner = p90
+  const runner = Math.max(tp2 + 2, parseFloat(p90.toFixed(1)));
+
+  const nOwn = s.maxMoves.length;
+  const source = nOwn >= 10
+    ? `Priors calibrados — ${nOwn} trades propios`
+    : `${nOwn} trades propios + priors calibrados`;
+
+  return { tp1, tp2, runner, source, hasData: true, n: nOwn, avg, p75, p90 };
+}
+
 function getMomentumTP(ticker, pos){
   const tc = tickerChangeCache[ticker] || null;
   const isLong = pos === 'Long';
@@ -1906,50 +1978,56 @@ function getMomentumTP(ticker, pos){
   const acelerando = isLong ? accel > 0.08 : accel < -0.08;
   const rsStrong   = isLong ? rs > 1.5 : rs < -1.5;
 
-  // Clasificar
-  let level, tpLabel, tpDetail, tpColor, tpBg, tpBorder, estrategia;
+  // ── Clasificar tier ───────────────────────────────────────────────────────
+  let level, tpColor, tpBg, tpBorder;
   if(score >= 6 && acelerando){
-    level     = 'FUERTE';
-    tpColor   = '#00c853';
-    tpBg      = 'rgba(0,200,83,.08)';
-    tpBorder  = 'rgba(0,200,83,.35)';
-    if(isLong){
-      tpLabel   = '🔥 Momentum fuerte — extendé el TP';
-      tpDetail  = 'TP1 8–10% · TP2 15–20% · dejar runner';
-      estrategia= 'Cerrar 50% en TP1, dejar correr el resto. Si la 1H deja de acelerar → cerrar todo.';
-    } else {
-      tpLabel   = '🔥 Short fuerte — extendé el TP';
-      tpDetail  = 'TP1 -8–10% · TP2 -15–20% · dejar runner';
-      estrategia= 'Cerrar 50% en TP1, dejar correr el resto. Si la 1H rebota → cerrar todo.';
-    }
+    level    = 'FUERTE';
+    tpColor  = '#00c853';
+    tpBg     = 'rgba(0,200,83,.08)';
+    tpBorder = 'rgba(0,200,83,.35)';
   } else if(score >= 4){
-    level     = 'MEDIO';
-    tpColor   = '#ffd100';
-    tpBg      = 'rgba(255,209,0,.08)';
-    tpBorder  = 'rgba(255,209,0,.35)';
-    if(isLong){
-      tpLabel   = '🟡 Momentum medio — TP limpio';
-      tpDetail  = 'TP único: 8–12%';
-      estrategia= 'No te cases con el trade. Salir limpio sin esperar más.';
-    } else {
-      tpLabel   = '🟡 Short medio — TP limpio';
-      tpDetail  = 'TP único: -8–12%';
-      estrategia= 'No te cases. Salir limpio sin esperar más caída.';
-    }
+    level    = 'MEDIO';
+    tpColor  = '#ffd100';
+    tpBg     = 'rgba(255,209,0,.08)';
+    tpBorder = 'rgba(255,209,0,.35)';
   } else {
-    level     = 'DÉBIL';
-    tpColor   = '#ff6b00';
-    tpBg      = 'rgba(255,107,0,.08)';
-    tpBorder  = 'rgba(255,107,0,.35)';
-    if(isLong){
-      tpLabel   = '⚠️ Momentum débil — scalp rápido';
-      tpDetail  = 'TP: 5–8% máximo';
-      estrategia= 'No esperes más. Salir sin dudar en el primer objetivo.';
-    } else {
-      tpLabel   = '⚠️ Short débil — scalp rápido';
-      tpDetail  = 'TP: -5–8% máximo';
-      estrategia= 'No esperes más. Salir en el primer objetivo sin dudar.';
-    }
+    level    = 'DÉBIL';
+    tpColor  = '#ff6b00';
+    tpBg     = 'rgba(255,107,0,.08)';
+    tpBorder = 'rgba(255,107,0,.35)';
+  }
+
+  const tierKey = level === 'FUERTE' ? 'fuerte' : level === 'MEDIO' ? 'medio' : 'debil';
+
+  // ── TPs dinámicos del ticker ──────────────────────────────────────────────
+  const dtp   = getTickerDynamicTP(ticker, pos, tierKey);
+  const sign  = isLong ? '+' : '-';
+  const tp1s  = sign + dtp.tp1.toFixed(1) + '%';
+  const tp2s  = sign + dtp.tp2.toFixed(1) + '%';
+  const runS  = sign + dtp.runner.toFixed(1) + '%';
+  const sourceLabel = dtp.hasData
+    ? `Priors calibrados · ${dtp.n} trades`
+    : 'Usando valores estimados (sin historial suficiente)';
+
+  let tpLabel, tpDetail, estrategia;
+  if(level === 'FUERTE'){
+    tpLabel    = isLong ? '🔥 Momentum fuerte — extendé el TP' : '🔥 Short fuerte — extendé el TP';
+    tpDetail   = `TP1 ${tp1s} · TP2 ${tp2s} · runner ${runS}`;
+    estrategia = isLong
+      ? `Cerrar 50% en TP1 (${tp1s}), dejar correr el resto. Si la 1H deja de acelerar → cerrar todo.`
+      : `Cerrar 50% en TP1 (${tp1s}), dejar correr el resto. Si la 1H rebota → cerrar todo.`;
+  } else if(level === 'MEDIO'){
+    tpLabel    = isLong ? '🟡 Momentum medio — TP limpio' : '🟡 Short medio — TP limpio';
+    tpDetail   = `TP único: ${tp1s} → ${tp2s}`;
+    estrategia = isLong
+      ? `No te cases con el trade. Salir limpio en ${tp1s}–${tp2s}.`
+      : `No te cases. Salir limpio en ${tp1s}–${tp2s} sin esperar más caída.`;
+  } else {
+    tpLabel    = isLong ? '⚠️ Momentum débil — scalp rápido' : '⚠️ Short débil — scalp rápido';
+    tpDetail   = `TP: ${tp1s} máximo`;
+    estrategia = isLong
+      ? `No esperes más. Salir sin dudar en el primer objetivo (${tp1s}).`
+      : `No esperes más. Salir en el primer objetivo (${tp1s}) sin dudar.`;
   }
 
   // Alerta trailing si acelerando
@@ -1957,15 +2035,19 @@ function getMomentumTP(ticker, pos){
     ? '<div style="font-size:9px;color:#00aaff;margin-top:3px;font-weight:700">💡 Trailing: si la 1H baja respecto a la anterior → cerrar posición</div>'
     : '';
 
-  return {level, tpLabel, tpDetail, estrategia, tpColor, tpBg, tpBorder, trailingNote, score, acelerando};
+  return {level, tpLabel, tpDetail, estrategia, tpColor, tpBg, tpBorder, trailingNote, score, acelerando,
+          dtp, sourceLabel, tierKey};
 }
 
-// ══ P&L TOGGLE: leveraged ↔ raw price ══
-const pnlToggleState = {}; // {tradeId: 'lev'|'price'}, default 'lev'
+// ══ P&L TOGGLE: leveraged ↔ raw price (GLOBAL — afecta todos los trades) ══
+let pnlGlobalMode = 'lev'; // 'lev' | 'price'
+const pnlToggleState = new Proxy({}, {
+  get: (_, id) => pnlGlobalMode,
+  set: () => true
+});
 function togglePnlView(id, event){
   event.stopPropagation();
-  pnlToggleState[id] = pnlToggleState[id] === 'price' ? 'lev' : 'price';
-  // Re-render just the pill for this trade (full renderOpenTrades is fine too)
+  pnlGlobalMode = pnlGlobalMode === 'price' ? 'lev' : 'price';
   renderOpenTrades();
 }
 
@@ -2018,8 +2100,8 @@ function renderOpenTrades(){
             ${t.timing?`<span class="timing-badge ${timingClass}">${t.timing}</span>`:''}
           </div>
         </div>
-        <!-- Right: result pill — tap to toggle lev% ↔ price% -->
-        <div onclick="togglePnlView('${t.id}', event)" style="background:${bgResult};border:1.5px solid ${borderResult};border-radius:10px;padding:10px 14px;text-align:right;flex-shrink:0;display:flex;flex-direction:column;justify-content:center;min-width:90px;cursor:pointer;user-select:none" title="Tocá para alternar % apalancado / % precio">
+        <!-- Right: result pill — tap to toggle lev% ↔ price% (GLOBAL) -->
+        <div onclick="togglePnlView('${t.id}', event)" style="background:${bgResult};border:1.5px solid ${borderResult};border-radius:10px;padding:10px 14px;text-align:right;flex-shrink:0;display:flex;flex-direction:column;justify-content:center;min-width:90px;cursor:pointer;user-select:none" title="Tocá para alternar % apalancado / % precio — cambia todos los trades">
           <div style="font-size:9px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">${livePrice?'<span class="live-dot"></span>Live':'Resultado'}</div>
           ${(()=>{
             const showPrice = pnlToggleState[t.id] === 'price';
@@ -4694,6 +4776,13 @@ function renderTPProbBlock(trade, livePct){
   const mfeLive = trade.maxMovePct    != null ? `+${trade.maxMovePct.toFixed(2)}%`    : '—';
   const maeLive = trade.maxAdversePct != null ? `-${trade.maxAdversePct.toFixed(2)}%` : '—';
 
+  // ── DYNAMIC TPs — same source as getMomentumTP block above ───────────────
+  const dtp = getTickerDynamicTP(trade.ticker, trade.pos, tier);
+  const sign = isLong ? '+' : '-';
+  const tp1Str  = sign + dtp.tp1.toFixed(1) + '%';
+  const tp2Str  = sign + dtp.tp2.toFixed(1) + '%';
+  const runStr  = sign + dtp.runner.toFixed(1) + '%';
+
   // Context chips — shown FIRST, before stats
   const contextChips = tc ? `<div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:8px">
     <span style="font-size:9px;font-weight:800;padding:2px 7px;border-radius:4px;background:${acCls==='fast'?'rgba(0,200,83,.15)':acCls==='slow'?'rgba(255,61,87,.12)':'rgba(153,153,184,.1)'};color:${acCls==='fast'?'#00c853':acCls==='slow'?'#ff3d57':'#9999b8'}">${acCls==='fast'?'🔥 Acelerando':acCls==='slow'?'⚠️ Frenando':'→ Estable'}</span>
@@ -4765,22 +4854,28 @@ function renderTPProbBlock(trade, livePct){
       </div>
     </div>`;
 
-  // "Alcance histórico del setup" — siempre visible, usa priors si no hay datos propios
+  // "Alcance histórico del setup" — unificado con los mismos TPs del bloque superior
   const ownDataNote = rawP.n >= 5
     ? `${rawP.n} trades propios · contexto ${tier}`
     : rawP.n > 0
       ? `${rawP.n} trade${rawP.n>1?'s':''} propio${rawP.n>1?'s':''} + priors calibrados`
       : `priors calibrados (aún sin trades propios en este contexto)`;
 
+  // Prob bars usando los mismos niveles de TP dinámico
+  const tp1Pct = adjP.p3 * (dtp.tp1 / 3); // escalar linealmente desde p3 base
+  const tp2Pct = adjP.p5 * (dtp.tp2 / 5);
+  const runPct = adjP.p8 * (dtp.runner / 8);
+
   const genericBlock = `
     <details style="margin-bottom:8px">
       <summary style="font-size:9px;font-weight:700;color:var(--text2);cursor:pointer;text-transform:uppercase;letter-spacing:.5px;list-style:none">▶ 📊 Alcance histórico del setup</summary>
       <div style="margin-top:8px;padding:8px 10px;background:var(--card);border-radius:8px">
         <div style="font-size:9px;color:var(--text2);margin-bottom:7px">${ownDataNote} · estás en <strong style="color:${mfeZ.col}">${cmPrice.toFixed(2)}%</strong> precio</div>
+        ${!dtp.hasData ? `<div style="font-size:9px;color:#ffd100;background:rgba(255,209,0,.08);border:1px solid rgba(255,209,0,.3);border-radius:6px;padding:5px 8px;margin-bottom:8px">⚠️ ${dtp.source}</div>` : ''}
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px">
           <div style="background:var(--surface2);border-radius:6px;padding:6px 8px;text-align:center">
             <div style="font-size:8px;color:var(--text2);margin-bottom:2px">TP típico</div>
-            <div style="font-size:13px;font-weight:900;color:#ff6b00">${avg.toFixed(1)}%</div>
+            <div style="font-size:13px;font-weight:900;color:#ff6b00">${dtp.tp2.toFixed(1)}%</div>
             <div style="font-size:8px;color:var(--text2)">avg MFE</div>
           </div>
           <div style="background:var(--surface2);border-radius:6px;padding:6px 8px;text-align:center">
@@ -4789,7 +4884,12 @@ function renderTPProbBlock(trade, livePct){
             <div style="font-size:8px;color:var(--text2)">${mfeZ.toP75>0?`falta +${mfeZ.toP75.toFixed(1)}% p75`:mfeZ.toP90>0?`falta +${mfeZ.toP90.toFixed(1)}% p90`:'superó p90'}</div>
           </div>
         </div>
-        ${probBar(adjP.p3,'#00c853','🎯 3%')}${probBar(adjP.p5,'#ff6b00','🚀 5%')}${probBar(adjP.p8,'#ff3d57','💣 8%')}${probBar(adjP.p12,'#9999b8','⚡ 12%+')}
+        <div style="font-size:9px;font-weight:800;color:var(--text2);margin-bottom:5px;text-transform:uppercase;letter-spacing:.3px">Probabilidades por nivel de TP</div>
+        ${probBar(Math.min(1,adjP.p3),'#00c853',`🎯 TP1 ${tp1Str}`)}
+        ${probBar(Math.min(1,adjP.p5),'#ff6b00',`🚀 TP2 ${tp2Str}`)}
+        ${probBar(Math.min(1,adjP.p8),'#ff3d57',`💣 Runner ${runStr}`)}
+        ${probBar(Math.min(1,adjP.p12),'#9999b8',`⚡ p90 ≥${dtp.runner.toFixed(1)}%`)}
+        <div style="font-size:8px;color:var(--text2);margin-top:6px;opacity:.8">Los mismos niveles TP1/TP2/Runner mostrados arriba como decisión.</div>
       </div>
     </details>`;
 
@@ -4828,9 +4928,9 @@ function renderTPProbBlock(trade, livePct){
       </div>
       <div style="display:flex;justify-content:space-between;font-size:8px;font-weight:700">
         <span style="color:var(--text2)">0</span>
-        <span style="color:#ff6b00">avg ${avg.toFixed(1)}%</span>
+        <span style="color:#ff6b00">TP2 ${dtp.tp2.toFixed(1)}%</span>
         <span style="color:#ffd100">p75 ${p75.toFixed(1)}%</span>
-        <span style="color:#ff3d57">p90 ${p90.toFixed(1)}%</span>
+        <span style="color:#ff3d57">runner ${dtp.runner.toFixed(1)}%</span>
       </div>
       ${mfeZ.toP75>0?`<div style="font-size:9px;color:#ffd100;margin-top:2px;font-weight:700">→ falta +${mfeZ.toP75.toFixed(1)}% para p75</div>`:mfeZ.toP90>0?`<div style="font-size:9px;color:#ff3d57;margin-top:2px;font-weight:700">→ falta +${mfeZ.toP90.toFixed(1)}% para p90</div>`:`<div style="font-size:9px;color:#ff3d57;margin-top:2px;font-weight:700">⚠️ Ya superó p90 — zona extrema</div>`}
     </div>
