@@ -5283,14 +5283,15 @@ function buildDecision(exhScore, exhL, mfeZ, acCls, condProbNext, livePct, contr
 function renderTPProbBlock(trade, livePct){
   const tc = tickerChangeCache[trade.ticker] || null;
   const contextScore = calcContextScore(tc, trade.pos);
-  if(contextScore === null) return '';
+  // If no ticker data, still render with fallback tier (don't bail out)
+  const hasTickerData = contextScore !== null;
 
-  if(trade.entryContextScore === undefined){
+  if(trade.entryContextScore === undefined && hasTickerData){
     trade.entryContextScore = contextScore;
     persist(D);
   }
 
-  const tier  = getTier(contextScore);
+  const tier  = hasTickerData ? getTier(contextScore) : (trade.entryContextScore != null ? getTier(trade.entryContextScore) : 'debil');
   const stats = loadMomentumStats();
   const s     = stats[tier];
   const prior = stats._priors[tier];
@@ -5298,6 +5299,8 @@ function renderTPProbBlock(trade, livePct){
 
   // Pure price move (no leverage) — signed: positive = in favor, negative = against
   const lev     = trade.lev || 1;
+  // ── CONTEXT SIGNALS ──
+  const isLong = trade.pos === 'Long';
   // For LONG: favorable when price rises (livePct > 0)
   // For SHORT: favorable when price falls (livePct < 0, so we flip sign)
   const rawSignedPrice = livePct !== null ? livePct / lev : 0;
@@ -5305,8 +5308,6 @@ function renderTPProbBlock(trade, livePct){
   // cmPriceAbs used for MFE zone calcs (always positive for statistical lookups)
   const cmPriceAbs = Math.abs(cmPrice);
 
-  // ── CONTEXT SIGNALS ──
-  const isLong = trade.pos === 'Long';
   const c1h    = tc?.change1h  ?? null;
   const c4h    = tc?.change4h  ?? null;
   const c24    = tc?.change24h ?? null;
@@ -5338,8 +5339,8 @@ function renderTPProbBlock(trade, livePct){
   const exhL     = exhaustionLabel(exhScore);
   const decision = buildDecision(exhScore, exhL, mfeZ, acCls, condProbNext, livePct, contraBias, tier);
 
-  const tierLabel = tier==='fuerte'?'🔥 Momentum fuerte':tier==='medio'?'🟡 Momentum medio':'⚠️ Momentum débil';
-  const tierColor = tier==='fuerte'?'#00c853':tier==='medio'?'#ffd100':'#ff6b00';
+  const tierLabel = !hasTickerData ? '⚪ Sin precios — actualizá' : tier==='fuerte'?'🔥 Momentum fuerte':tier==='medio'?'🟡 Momentum medio':'⚠️ Momentum débil';
+  const tierColor = !hasTickerData ? 'var(--text2)' : tier==='fuerte'?'#00c853':tier==='medio'?'#ffd100':'#ff6b00';
 
   const mfeLive = trade.maxMovePct    != null ? `+${trade.maxMovePct.toFixed(2)}%`    : '—';
   const maeLive = trade.maxAdversePct != null ? `-${trade.maxAdversePct.toFixed(2)}%` : '—';
@@ -5471,9 +5472,10 @@ function renderTPProbBlock(trade, livePct){
 
     <!-- COLLAPSED HEADER (always visible) -->
     <div onclick="(function(){var el=document.getElementById('${innerBlockId}');var open=el.style.display!=='none';el.style.display=open?'none':'block';document.getElementById('${blockId}').querySelector('.cont-arrow').textContent=open?'▼':'▲'})()" style="padding:9px 12px;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:8px">
-      <div style="display:flex;align-items:center;gap:8px;min-width:0">
+      <div style="display:flex;align-items:center;gap:6px;min-width:0;flex-wrap:wrap">
         <span style="font-size:11px;font-weight:900;color:var(--text);white-space:nowrap">📊 Continuación</span>
         <span style="font-size:10px;font-weight:800;padding:2px 8px;border-radius:5px;background:${exhL.bg};border:1px solid ${exhL.border};color:${exhL.col};white-space:nowrap">${exhScore}/100 — ${exhL.label.replace(/^[^ ]+ /,'')}</span>
+        ${hasTickerData ? `<span style="font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;color:${tierColor};background:${tierColor==='#00c853'?'rgba(0,200,83,.12)':tierColor==='#ffd100'?'rgba(255,209,0,.1)':'rgba(255,107,0,.1)'};white-space:nowrap">${tierLabel}</span>` : ''}
         ${cmPrice < 0 ? `<span style="font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;background:rgba(255,61,87,.12);color:#ff3d57;white-space:nowrap">⚠️ En contra</span>` : ''}
       </div>
       <span class="cont-arrow" style="color:var(--text2);font-size:11px;flex-shrink:0">▼</span>
@@ -5541,7 +5543,7 @@ function renderTPProbBlock(trade, livePct){
       ${genericBlock}
 
       <div style="font-size:10px;font-weight:800;color:${exhL.col};padding:7px 10px;background:${exhL.bg};border:1px solid ${exhL.border};border-radius:7px;margin-bottom:5px">${decision}</div>
-      <div style="font-size:8px;color:var(--text2);opacity:.7">Score mkt: ${contextScore}/7 · ${nStr}${effStr} · MFE/MAE = % precio sin apalancamiento</div>
+      <div style="font-size:8px;color:var(--text2);opacity:.7">Score mkt: ${contextScore!=null?contextScore+'/7':'sin datos'} · ${nStr}${effStr} · MFE/MAE = % precio sin apalancamiento</div>
     </div>
   </div>`;
 }
