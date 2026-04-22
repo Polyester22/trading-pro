@@ -477,8 +477,35 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
     </div>
     <!-- PARTIAL CLOSES EDITOR — shown only in edit mode when trade has partial closes -->
     <div id="f-partial-closes-row" style="display:none">
-      <div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">📉 Cierres parciales</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px">📉 Cierres parciales</div>
+        <button type="button" onclick="addPartialCloseRow()" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:5px 10px;font-family:'Nunito',sans-serif;font-size:11px;font-weight:700;color:var(--text);cursor:pointer">+ Agregar cierre</button>
+      </div>
       <div id="f-partial-closes-list"></div>
+    </div>
+    <!-- FEES + PnL OVERRIDE — shown only in edit mode for closed trades -->
+    <div id="f-fees-edit-row" style="display:none;background:rgba(0,170,255,.06);border:1px solid rgba(0,170,255,.2);border-radius:10px;padding:12px;margin-bottom:10px">
+      <div style="font-size:10px;font-weight:800;color:#00aaff;text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px">💸 Fees &amp; PnL (edición)</div>
+      <div class="row2" style="margin-bottom:8px">
+        <div class="field" style="margin:0">
+          <label>Trading fees $</label>
+          <input type="text" inputmode="decimal" id="f-edit-trading-fee" placeholder="ej: 1.20" autocomplete="off">
+        </div>
+        <div class="field" style="margin:0">
+          <label>Funding fees $</label>
+          <input type="text" inputmode="decimal" id="f-edit-funding-fee" placeholder="ej: 0.35" autocomplete="off">
+        </div>
+      </div>
+      <div class="row2">
+        <div class="field" style="margin:0">
+          <label>PnL bruto $ <span style="color:var(--text2);font-size:9px;font-weight:600">del exchange</span></label>
+          <input type="text" inputmode="decimal" id="f-edit-pnl-bruto" placeholder="ej: 18.50" autocomplete="off">
+        </div>
+        <div class="field" style="margin:0">
+          <label>PnL neto $ <span style="color:#00aaff;font-size:9px;font-weight:600">← override final</span></label>
+          <input type="text" inputmode="decimal" id="f-edit-pnl-neto" placeholder="ej: 16.95" autocomplete="off">
+        </div>
+      </div>
     </div>
     <div class="field">
       <label>🧠 Estado mental al entrar <span style="color:var(--text2);font-size:9px;font-weight:600">opcional</span></label>
@@ -3775,36 +3802,66 @@ function renderPartialClosesEditor(t){
   const row=document.getElementById('f-partial-closes-row');
   const list=document.getElementById('f-partial-closes-list');
   if(!row||!list)return;
-  if(!t.partialCloses||!t.partialCloses.length){row.style.display='none';return;}
+  // Always show in edit mode
   row.style.display='block';
+  if(!t.partialCloses||!t.partialCloses.length){
+    list.innerHTML='<div style="font-size:12px;color:var(--text2);padding:8px 4px;font-style:italic">Sin cierres parciales — usá "+ Agregar cierre" para añadir.</div>';
+    return;
+  }
   list.innerHTML=t.partialCloses.map((c,i)=>
-    '<div style="background:var(--surface2);border-radius:9px;padding:10px 12px;margin-bottom:8px" id="pc-row-'+i+'">' +
+    '<div style="background:var(--surface2);border-radius:9px;padding:10px 12px;margin-bottom:8px;border:1px solid var(--border)" id="pc-row-'+i+'">' +
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">' +
-        '<div style="font-size:12px;font-weight:800;color:#ff6b00">Cierre '+(i+1)+' · '+c.pctClose+'%</div>' +
-        '<button onclick="deletePartialClose(&apos;'+t.id+'&apos;,'+i+')" style="background:none;border:none;color:#ff3d57;cursor:pointer;font-size:13px;font-weight:700">✕ Eliminar</button>' +
+        '<div style="font-size:12px;font-weight:800;color:#ff6b00">Cierre '+(i+1)+' · '+c.pctClose+'% del margen</div>' +
+        '<button onclick="deletePartialClose(&apos;'+t.id+'&apos;,'+i+')" style="background:none;border:none;color:#ff3d57;cursor:pointer;font-size:13px;font-weight:700;padding:2px 6px">✕</button>' +
+      '</div>' +
+      '<div class="row2" style="margin-bottom:8px">' +
+        '<div class="field" style="margin:0"><label>Resultado %</label>' +
+          '<input type="number" step="any" value="'+(c.pct||0).toFixed(2)+'" oninput="updatePartialClose(&apos;'+t.id+'&apos;,'+i+',&apos;pct&apos;,this.value)" style="font-size:13px;padding:8px 10px"></div>' +
+        '<div class="field" style="margin:0"><label>% del margen</label>' +
+          '<input type="number" step="any" min="1" max="100" value="'+(c.pctClose||100)+'" oninput="updatePartialClose(&apos;'+t.id+'&apos;,'+i+',&apos;pctClose&apos;,this.value)" style="font-size:13px;padding:8px 10px"></div>' +
+      '</div>' +
+      '<div class="row2" style="margin-bottom:8px">' +
+        '<div class="field" style="margin:0"><label>Precio cierre</label>' +
+          '<input type="text" inputmode="decimal" value="'+(c.precio||'')+'" oninput="updatePartialClose(&apos;'+t.id+'&apos;,'+i+',&apos;precio&apos;,this.value)" style="font-size:13px;padding:8px 10px"></div>' +
+        '<div class="field" style="margin:0"><label>PnL bruto $</label>' +
+          '<input type="number" step="any" value="'+(c.pnl_bruto!=null?c.pnl_bruto.toFixed(2):c.pnl!=null?c.pnl.toFixed(2):'')+'" oninput="updatePartialClose(&apos;'+t.id+'&apos;,'+i+',&apos;pnl_bruto&apos;,this.value)" style="font-size:13px;padding:8px 10px"></div>' +
       '</div>' +
       '<div class="row2">' +
-        '<div class="field" style="margin:0"><label>Resultado %</label>' +
-          '<input type="number" step="any" value="'+(c.pct||0).toFixed(2)+'" onchange="updatePartialClose(&apos;'+t.id+'&apos;,'+i+',&apos;pct&apos;,this.value)" style="font-size:13px;padding:8px 10px"></div>' +
-        '<div class="field" style="margin:0"><label>Precio cierre</label>' +
-          '<input type="text" inputmode="decimal" value="'+(c.precio||'')+'" onchange="updatePartialClose(&apos;'+t.id+'&apos;,'+i+',&apos;precio&apos;,this.value)" style="font-size:13px;padding:8px 10px"></div>' +
+        '<div class="field" style="margin:0"><label>Fecha y hora</label>' +
+          '<input type="datetime-local" value="'+(c.closedHora||'')+'" oninput="updatePartialClose(&apos;'+t.id+'&apos;,'+i+',&apos;closedHora&apos;,this.value)" style="font-size:13px;padding:8px 10px"></div>' +
+        '<div class="field" style="margin:0"><label>Motivo</label>' +
+          '<input type="text" value="'+(c.salida||'')+'" oninput="updatePartialClose(&apos;'+t.id+'&apos;,'+i+',&apos;salida&apos;,this.value)" placeholder="TP / SL..." style="font-size:13px;padding:8px 10px"></div>' +
       '</div>' +
-      '<div class="field" style="margin-top:8px"><label>Fecha y hora</label>' +
-        '<input type="datetime-local" value="'+(c.closedHora||'')+'" onchange="updatePartialClose(&apos;'+t.id+'&apos;,'+i+',&apos;closedHora&apos;,this.value)" style="font-size:13px;padding:8px 10px"></div>' +
     '</div>'
   ).join('');
+}
+
+function addPartialCloseRow(){
+  if(!editingId)return;
+  const t=D.trades.find(x=>x.id===editingId);
+  if(!t)return;
+  if(!t.partialCloses)t.partialCloses=[];
+  t.partialCloses.push({pct:0, pctClose:50, pnl:0, pnl_bruto:0, precio:0, closedHora:'', salida:''});
+  persist(D);
+  renderPartialClosesEditor(t);
 }
 
 function updatePartialClose(tradeId, idx, field, value){
   const t=D.trades.find(x=>x.id===tradeId);
   if(!t||!t.partialCloses||!t.partialCloses[idx])return;
-  if(field==='pct')t.partialCloses[idx].pct=parseFloat(value)||0;
-  else if(field==='precio')t.partialCloses[idx].precio=parseFloat(value)||0;
-  else if(field==='closedHora')t.partialCloses[idx].closedHora=value;
-  // Recalculate pnl for this close
   const c=t.partialCloses[idx];
-  const margenBase=t.margenOriginal||t.margen;
-  c.pnl=margenBase*(c.pctClose/100)*(c.pct/100);
+  if(field==='pct')        c.pct        = parseFloat(value)||0;
+  else if(field==='pctClose') c.pctClose = parseFloat(value)||0;
+  else if(field==='precio')   c.precio   = parseFloat(value)||0;
+  else if(field==='pnl_bruto'){ c.pnl_bruto = parseFloat(value)||0; c.pnl = c.pnl_bruto; }
+  else if(field==='closedHora') c.closedHora = value;
+  else if(field==='salida')     c.salida     = value;
+  // Recalculate pnl if not manually set
+  if(field!=='pnl_bruto'){
+    const margenBase=t.margenOriginal||t.margen;
+    const auto = margenBase*(c.pctClose/100)*(c.pct/100);
+    if(c.pnl_bruto==null||c.pnl_bruto===0) { c.pnl=auto; }
+  }
   persist(D);
 }
 
@@ -4768,17 +4825,27 @@ function saveTrade(){
     p10:document.getElementById('f-10p').checked,obs:document.getElementById('f-obs').value,estado:document.getElementById('f-estado').value||null,semaforo:document.getElementById('f-semaforo').value||null,resultado,
     ...mfePreserved, ...maePreserved,
     ...(closedHoraFinal?{closedHora:closedHoraFinal}:{})};
-  // ── Preserve PnL fields & execution history from existing trade (NEVER overwrite from form) ──
+  // ── Preserve PnL fields & execution history from existing trade ──
+  // Use form values if explicitly filled, otherwise preserve existing
   if(existingTrade){
-    if(existingTrade.partialCloses?.length)    t.partialCloses         = existingTrade.partialCloses;
-    if(existingTrade.margenOriginal!=null)     t.margenOriginal        = existingTrade.margenOriginal;
-    if(existingTrade.pnlNeto!=null)            t.pnlNeto               = existingTrade.pnlNeto;
-    if(existingTrade.pnlBruto!=null)           t.pnlBruto              = existingTrade.pnlBruto;
-    if(existingTrade.feesTotal!=null)          t.feesTotal             = existingTrade.feesTotal;
-    if(existingTrade.tradingFees!=null)        t.tradingFees           = existingTrade.tradingFees;
-    if(existingTrade.fundingFees!=null)        t.fundingFees           = existingTrade.fundingFees;
-    if(existingTrade.realizedPnlExchange!=null)t.realizedPnlExchange   = existingTrade.realizedPnlExchange;
-    if(existingTrade.fechaCierre)              t.fechaCierre           = existingTrade.fechaCierre;
+    // Fees: use form values if filled, else keep existing
+    const _tf = parseFloat(document.getElementById('f-edit-trading-fee')?.value);
+    const _ff = parseFloat(document.getElementById('f-edit-funding-fee')?.value);
+    const _pb = parseFloat(document.getElementById('f-edit-pnl-bruto')?.value);
+    const _pn = parseFloat(document.getElementById('f-edit-pnl-neto')?.value);
+    t.tradingFees  = !isNaN(_tf) ? _tf : (existingTrade.tradingFees ?? null);
+    t.fundingFees  = !isNaN(_ff) ? _ff : (existingTrade.fundingFees ?? null);
+    t.feesTotal    = ((t.tradingFees||0) + (t.fundingFees||0)) || (existingTrade.feesTotal ?? null);
+    t.pnlBruto     = !isNaN(_pb) ? _pb : (existingTrade.pnlBruto ?? null);
+    // pnlNeto: explicit form override takes priority, else existing
+    t.pnlNeto      = !isNaN(_pn) ? _pn : (existingTrade.pnlNeto ?? null);
+    // If pnlBruto set and no explicit pnlNeto override, compute from fees
+    if(t.pnlBruto!=null && isNaN(_pn))
+      t.pnlNeto = t.pnlBruto - (t.feesTotal||0);
+    if(existingTrade.realizedPnlExchange!=null) t.realizedPnlExchange = existingTrade.realizedPnlExchange;
+    if(existingTrade.partialCloses?.length)    t.partialCloses       = existingTrade.partialCloses;
+    if(existingTrade.margenOriginal!=null)     t.margenOriginal      = existingTrade.margenOriginal;
+    if(existingTrade.fechaCierre)              t.fechaCierre         = existingTrade.fechaCierre;
   }
   if(editingId){const i=D.trades.findIndex(x=>x.id===editingId);D.trades[i]=t;}else{D.trades.push(t);}
   persist(D);
@@ -4809,8 +4876,19 @@ function loadTradeForEdit(id){
     const chInput=document.getElementById('f-closedhora');
     if(chRow){chRow.style.display='block';}
     if(chInput){chInput.value=t.closedHora||'';}
-    // Show partial closes editor if any
+    // Show partial closes editor always in edit mode
     renderPartialClosesEditor(t);
+    // Show fees section for all trades in edit mode (useful even for open trades)
+    const feesRow=document.getElementById('f-fees-edit-row');
+    if(feesRow) feesRow.style.display='block';
+    const tfEl=document.getElementById('f-edit-trading-fee');
+    const ffEl=document.getElementById('f-edit-funding-fee');
+    const pbEl=document.getElementById('f-edit-pnl-bruto');
+    const pnEl=document.getElementById('f-edit-pnl-neto');
+    if(tfEl) tfEl.value = t.tradingFees!=null ? t.tradingFees.toFixed(2) : '';
+    if(ffEl) ffEl.value = t.fundingFees!=null ? t.fundingFees.toFixed(2) : '';
+    if(pbEl) pbEl.value = t.pnlBruto!=null ? t.pnlBruto.toFixed(2) : '';
+    if(pnEl) pnEl.value = t.pnlNeto!=null ? t.pnlNeto.toFixed(2) : '';
     document.getElementById('f-fecha').value=t.fecha;
     document.getElementById('f-ticker').value=t.ticker;
     document.getElementById('f-pos').value=t.pos;
@@ -4853,6 +4931,8 @@ function resetForm(){
   const _chRow=document.getElementById('f-closedhora-row');if(_chRow)_chRow.style.display='none';
   const _chInp=document.getElementById('f-closedhora');if(_chInp)_chInp.value='';
   const _pcRow=document.getElementById('f-partial-closes-row');if(_pcRow)_pcRow.style.display='none';
+  const _feesRow=document.getElementById('f-fees-edit-row');if(_feesRow)_feesRow.style.display='none';
+  ['f-edit-trading-fee','f-edit-funding-fee','f-edit-pnl-bruto','f-edit-pnl-neto'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
   setNowDatetime();
   applyLive(null);
   document.getElementById('result-note').textContent='Ingresá precios, R% o P&L$ — se calculan entre sí.';
@@ -5358,10 +5438,10 @@ function renderTPProbBlock(trade, livePct){
   const runStr  = sign + dtp.runner.toFixed(1) + '%';
 
   // Context chips — shown FIRST, before stats
-  const contextChips = tc ? `<div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:8px">
-    <span style="font-size:9px;font-weight:800;padding:2px 7px;border-radius:4px;background:${acCls==='fast'?'rgba(0,200,83,.15)':acCls==='slow'?'rgba(255,61,87,.12)':'rgba(153,153,184,.1)'};color:${acCls==='fast'?'#00c853':acCls==='slow'?'#ff3d57':'#9999b8'}">${acCls==='fast'?'🔥 Acelerando':acCls==='slow'?'⚠️ Frenando':'→ Estable'}</span>
-    ${contraBias ? `<span style="font-size:9px;font-weight:800;padding:2px 7px;border-radius:4px;background:rgba(255,61,87,.12);color:#ff3d57">🚫 Contra el ${trade.pos}</span>` : `<span style="font-size:9px;font-weight:800;padding:2px 7px;border-radius:4px;background:rgba(0,200,83,.12);color:#00c853">✅ A favor del ${trade.pos}</span>`}
-    ${livePct !== null && livePct < 0 ? `<span style="font-size:9px;font-weight:800;padding:2px 7px;border-radius:4px;background:rgba(255,61,87,.12);color:#ff3d57">📉 En pérdida</span>` : livePct !== null && livePct > 3 ? `<span style="font-size:9px;font-weight:800;padding:2px 7px;border-radius:4px;background:rgba(0,200,83,.12);color:#00c853">✅ En ganancia</span>` : ''}
+  const contextChips = tc ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
+    <span style="font-size:11px;font-weight:800;padding:3px 9px;border-radius:5px;background:${acCls==='fast'?'rgba(0,200,83,.15)':acCls==='slow'?'rgba(255,61,87,.12)':'rgba(153,153,184,.1)'};color:${acCls==='fast'?'#00c853':acCls==='slow'?'#ff3d57':'#9999b8'}">${acCls==='fast'?'🔥 Acelerando':acCls==='slow'?'⚠️ Frenando':'→ Estable'}</span>
+    ${contraBias ? `<span style="font-size:11px;font-weight:800;padding:3px 9px;border-radius:5px;background:rgba(255,61,87,.12);color:#ff3d57">🚫 Contra el ${trade.pos}</span>` : `<span style="font-size:11px;font-weight:800;padding:3px 9px;border-radius:5px;background:rgba(0,200,83,.12);color:#00c853">✅ A favor del ${trade.pos}</span>`}
+    ${livePct !== null && livePct < 0 ? `<span style="font-size:11px;font-weight:800;padding:3px 9px;border-radius:5px;background:rgba(255,61,87,.12);color:#ff3d57">📉 En pérdida</span>` : livePct !== null && livePct > 3 ? `<span style="font-size:11px;font-weight:800;padding:3px 9px;border-radius:5px;background:rgba(0,200,83,.12);color:#00c853">✅ En ganancia</span>` : ''}
   </div>` : '';
 
   const { p75, p90, avg } = mfeZ;
@@ -5480,8 +5560,8 @@ function renderTPProbBlock(trade, livePct){
       <div style="display:flex;align-items:center;gap:6px;min-width:0;flex-wrap:wrap">
         <span style="font-size:11px;font-weight:900;color:var(--text);white-space:nowrap">📊 Continuación</span>
         <span style="font-size:10px;font-weight:800;padding:2px 8px;border-radius:5px;background:${exhL.bg};border:1px solid ${exhL.border};color:${exhL.col};white-space:nowrap">${exhScore}/100 — ${exhL.label.replace(/^[^ ]+ /,'')}</span>
-        ${hasTickerData ? `<span style="font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;color:${tierColor};background:${tierColor==='#00c853'?'rgba(0,200,83,.12)':tierColor==='#ffd100'?'rgba(255,209,0,.1)':'rgba(255,107,0,.1)'};white-space:nowrap">${tierLabel}</span>` : ''}
-        ${cmPrice < 0 ? `<span style="font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;background:rgba(255,61,87,.12);color:#ff3d57;white-space:nowrap">⚠️ En contra</span>` : ''}
+        ${hasTickerData ? `<span style="font-size:11px;font-weight:800;padding:3px 9px;border-radius:5px;color:${tierColor};background:${tierColor==='#00c853'?'rgba(0,200,83,.12)':tierColor==='#ffd100'?'rgba(255,209,0,.1)':'rgba(255,107,0,.1)'};white-space:nowrap">${tierLabel}</span>` : ''}
+        ${cmPrice < 0 ? `<span style="font-size:11px;font-weight:800;padding:3px 9px;border-radius:5px;background:rgba(255,61,87,.12);color:#ff3d57;white-space:nowrap">⚠️ En contra</span>` : ''}
       </div>
       <span class="cont-arrow" style="color:var(--text2);font-size:11px;flex-shrink:0">▼</span>
     </div>
