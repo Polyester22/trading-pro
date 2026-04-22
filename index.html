@@ -1930,6 +1930,15 @@ function getMomentumTP(ticker, pos){
   return {level, tpLabel, tpDetail, estrategia, tpColor, tpBg, tpBorder, trailingNote, score, acelerando};
 }
 
+// ══ P&L TOGGLE: leveraged ↔ raw price ══
+const pnlToggleState = {}; // {tradeId: 'lev'|'price'}, default 'lev'
+function togglePnlView(id, event){
+  event.stopPropagation();
+  pnlToggleState[id] = pnlToggleState[id] === 'price' ? 'lev' : 'price';
+  // Re-render just the pill for this trade (full renderOpenTrades is fine too)
+  renderOpenTrades();
+}
+
 function renderOpenTrades(){
   const open=D.trades.filter(t=>t.open).sort((a,b)=>b.fecha.localeCompare(a.fecha));
   // Fetch ticker-specific price changes in background
@@ -1979,11 +1988,23 @@ function renderOpenTrades(){
             ${t.timing?`<span class="timing-badge ${timingClass}">${t.timing}</span>`:''}
           </div>
         </div>
-        <!-- Right: result pill -->
-        <div style="background:${bgResult};border:1.5px solid ${borderResult};border-radius:10px;padding:10px 14px;text-align:right;flex-shrink:0;display:flex;flex-direction:column;justify-content:center;min-width:90px">
+        <!-- Right: result pill — tap to toggle lev% ↔ price% -->
+        <div onclick="togglePnlView('${t.id}', event)" style="background:${bgResult};border:1.5px solid ${borderResult};border-radius:10px;padding:10px 14px;text-align:right;flex-shrink:0;display:flex;flex-direction:column;justify-content:center;min-width:90px;cursor:pointer;user-select:none" title="Tocá para alternar % apalancado / % precio">
           <div style="font-size:9px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">${livePrice?'<span class="live-dot"></span>Live':'Resultado'}</div>
-          <div style="font-size:24px;font-weight:900;line-height:1;color:${pctColor}">${livePct!==null?(livePct>=0?'+':'')+livePct.toFixed(2)+'%':'—'}</div>
-          <div style="font-size:14px;font-weight:800;color:${pctColor};margin-top:3px">${livePnl!==null?(livePnl>=0?'+':'')+'$'+Math.abs(livePnl).toFixed(2):'—'}</div>
+          ${(()=>{
+            const showPrice = pnlToggleState[t.id] === 'price';
+            const pricePct  = (t.entrada && priceForCalc && t.entrada > 0)
+              ? (priceForCalc - t.entrada) / t.entrada * 100 * (t.pos==='Short' ? -1 : 1)
+              : null;
+            const displayPct = showPrice ? pricePct : livePct;
+            const tag        = showPrice ? 'precio' : `x${t.lev||1}`;
+            const tagColor   = showPrice ? '#00aaff' : 'var(--text2)';
+            return `<div style="font-size:24px;font-weight:900;line-height:1;color:${pctColor}">${displayPct!==null?(displayPct>=0?'+':'')+displayPct.toFixed(2)+'%':'—'}</div>
+            <div style="display:flex;justify-content:flex-end;align-items:center;gap:5px;margin-top:3px">
+              <span style="font-size:10px;font-weight:800;color:${tagColor};background:${showPrice?'rgba(0,170,255,.12)':'rgba(153,153,184,.1)'};border-radius:4px;padding:1px 5px">${tag}</span>
+              <span style="font-size:14px;font-weight:800;color:${pctColor}">${livePnl!==null?(livePnl>=0?'+':'')+'$'+Math.abs(livePnl).toFixed(2):'—'}</span>
+            </div>`;
+          })()}
         </div>
       </div>
       <!-- PRICES ROW -->
@@ -4708,12 +4729,25 @@ function renderTPProbBlock(trade, livePct){
       </div>
     </div>`;
 
-  // Generic tier probs: hidden if < 5 trades
+  // Generic tier probs: hidden if < 5 trades, renamed to "Alcance histórico del setup"
   const MIN_TRADES = 5;
   const genericBlock = rawP.n >= MIN_TRADES ? `
     <details style="margin-bottom:8px">
-      <summary style="font-size:9px;font-weight:700;color:var(--text2);cursor:pointer;text-transform:uppercase;letter-spacing:.5px;list-style:none">▶ Prob. generales por tier (${nStr})</summary>
-      <div style="margin-top:6px">
+      <summary style="font-size:9px;font-weight:700;color:var(--text2);cursor:pointer;text-transform:uppercase;letter-spacing:.5px;list-style:none">▶ 📊 Alcance histórico del setup</summary>
+      <div style="margin-top:8px;padding:8px 10px;background:var(--card);border-radius:8px">
+        <div style="font-size:9px;color:var(--text2);margin-bottom:7px">Basado en ${nStr} con este contexto (${tier}) · estás en <strong style="color:${mfeZ.col}">${cmPrice.toFixed(2)}%</strong> precio</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px">
+          <div style="background:var(--surface2);border-radius:6px;padding:6px 8px;text-align:center">
+            <div style="font-size:8px;color:var(--text2);margin-bottom:2px">TP típico</div>
+            <div style="font-size:13px;font-weight:900;color:#ff6b00">${avg.toFixed(1)}%</div>
+            <div style="font-size:8px;color:var(--text2)">avg MFE</div>
+          </div>
+          <div style="background:var(--surface2);border-radius:6px;padding:6px 8px;text-align:center">
+            <div style="font-size:8px;color:var(--text2);margin-bottom:2px">Posición actual</div>
+            <div style="font-size:13px;font-weight:900;color:${mfeZ.col}">${cmPrice.toFixed(2)}%</div>
+            <div style="font-size:8px;color:var(--text2)">${mfeZ.toP75>0?`falta +${mfeZ.toP75.toFixed(1)}% p75`:mfeZ.toP90>0?`falta +${mfeZ.toP90.toFixed(1)}% p90`:'superó p90'}</div>
+          </div>
+        </div>
         ${probBar(adjP.p3,'#00c853','🎯 3%')}${probBar(adjP.p5,'#ff6b00','🚀 5%')}${probBar(adjP.p8,'#ff3d57','💣 8%')}${probBar(adjP.p12,'#9999b8','⚡ 12%+')}
       </div>
     </details>` :
