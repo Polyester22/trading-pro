@@ -662,7 +662,8 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
           <th onclick="sortBy('resultado')">R%<span class="sort-icon" id="sort-resultado">↕</span></th>
           <th onclick="sortBy('maxMovePct')" title="Maximum Favorable Excursion">MFE<span class="sort-icon" id="sort-maxMovePct">↕</span></th>
           <th title="Eficiencia de captura">Efic%</th>
-          <th onclick="sortBy('pnlNeto')" title="PnL neto · % sobre margen">Neto $<span class="sort-icon" id="sort-pnlNeto">↕</span></th>
+          <th onclick="sortBy('pnlNeto')" title="PnL neto (principal)">Neto $<span class="sort-icon" id="sort-pnlNeto">↕</span></th>
+          <th title="% neto sobre margen">%/Mrg</th>
           <th onclick="sortBy('margen')" title="Margen comprometido">Mrg $<span class="sort-icon" id="sort-margen">↕</span></th>
           <th onclick="sortBy('lev')">Apal.<span class="sort-icon" id="sort-lev">↕</span></th>
           <th onclick="sortBy('temp')">Temp.<span class="sort-icon" id="sort-temp">↕</span></th>
@@ -678,12 +679,12 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
           <th><button id="flt-fecha-btn" onclick="openDateRange()" style="background:var(--input-bg);border:1px solid var(--border);border-radius:5px;color:var(--text2);cursor:pointer;font-size:11px;font-weight:700;padding:4px 6px;width:100%;text-align:left">📅 Rango</button></th>
           <th><select id="flt-ticker" onchange="renderHistorial()"><option value="">Todos</option></select></th>
           <th><select id="flt-pos" onchange="renderHistorial()"><option value="">Todos</option><option value="Long">Long</option><option value="Short">Short</option></select></th>
-          <th></th><th></th><th></th><th></th><th></th><th></th>
+          <th></th><th></th><th></th><th></th><th></th>
           <th><select id="flt-temp" onchange="renderHistorial()"><option value="">Todas</option><option value="1m">1m</option><option value="5m">5m</option><option value="15m">15m</option><option value="1h">1h</option><option value="4h">4h</option><option value="1d">1d</option></select></th>
           <th><select id="flt-estrat" onchange="renderHistorial()"><option value="">Todas</option></select></th>
           <th><select id="flt-salida" onchange="renderHistorial()"><option value="">Todas</option></select></th>
           <th><select id="flt-timing" onchange="renderHistorial()"><option value="">Todos</option><option value="A tiempo">A tiempo</option><option value="Retest">Retest</option><option value="Antes">Antes</option><option value="Tarde">Tarde</option></select></th>
-          <th></th><th></th><th></th>
+          <th></th><th></th>
           <th><button onclick="clearFilters()" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:11px;font-weight:700">✕</button></th>
         </tr>
       </thead>
@@ -2900,7 +2901,9 @@ function renderHistorial(){
     const margenBase = (!t.open&&t.margenOriginal) ? t.margenOriginal : margenDisplay;
     const pctSobreMargen = margenBase>0 ? (pnlNeto/margenBase*100) : resultado;
     const pctSobreMargenStr = (pctSobreMargen>=0?'+':'')+pctSobreMargen.toFixed(1)+'%';
-    // Neto cell (principal) — % sobre margen se muestra debajo del monto $
+    // Neto cell (principal)
+    const netoCell = `<span style="font-weight:900">${parseFloat(pnl)>=0?'+':''}$${pnl}</span>`;
+    // Detail toggle: bruto + fees (hidden by default, shown via global toggle)
     const hasDetail = t.pnlBruto!=null && (t.feesTotal>0||t.realizedPnlExchange!=null);
     const detailCell = hasDetail
       ? `<span class="pnl-detail-row" style="display:none;font-size:9px;color:var(--text2);line-height:1.4;white-space:nowrap">
@@ -2925,11 +2928,8 @@ function renderHistorial(){
       <td class="${rc}">${isLive?'<span class="live-dot"></span>':''}${resultado>=0?'+':''}${resultado.toFixed(2)}%</td>
       <td style="font-size:11px;font-weight:700;color:#00aaff">${t.maxMovePct!=null?(t.resultado>=0?'+':'-')+parseFloat(t.maxMovePct).toFixed(1)+'%':'<span style="color:var(--text2)">—</span>'}</td>
       <td style="font-size:11px;font-weight:700;color:${(()=>{if(t.maxMovePct==null||t.maxMovePct==0)return'var(--text2)';const lev=t.lev||1;const e=Math.min(100,Math.round(Math.abs(t.resultado)/lev/t.maxMovePct*100));return e>=70?'#00c853':e>=40?'#ffd100':'#ff3d57';})()}">${(()=>{if(t.maxMovePct==null||t.maxMovePct==0)return'—';const lev=t.lev||1;return Math.min(100,Math.round(Math.abs(t.resultado)/lev/t.maxMovePct*100))+'%';})()}</td>
-      <td class="${pnlCol}" style="vertical-align:top">
-        <div style="font-weight:900">${parseFloat(pnl)>=0?'+':''}$${pnl}</div>
-        <div style="font-size:10px;font-weight:700;color:${pctSobreMargen>=0?'#00c853':'#ff3d57'}">${pctSobreMargenStr}</div>
-        ${detailCell}
-      </td>
+      <td class="${pnlCol}" style="vertical-align:top">${netoCell}${detailCell}</td>
+      <td style="font-size:11px;font-weight:700;color:${pctSobreMargen>=0?'#00c853':'#ff3d57'}">${pctSobreMargenStr}</td>
       <td style="font-size:11px;font-weight:600;color:var(--text2)">$${margenDisplay||'—'}</td>
       <td style="font-size:11px;color:var(--text2)">${t.lev||1}x</td>
       <td style="font-size:11px;color:var(--text2)">${t.temp||'—'}</td>
@@ -5296,9 +5296,14 @@ function renderTPProbBlock(trade, livePct){
   const prior = stats._priors[tier];
   const rawP  = getTPProbs(tier, stats);
 
-  // Pure price move (no leverage)
+  // Pure price move (no leverage) — signed: positive = in favor, negative = against
   const lev     = trade.lev || 1;
-  const cmPrice = livePct !== null ? Math.abs(livePct) / lev : 0;
+  // For LONG: favorable when price rises (livePct > 0)
+  // For SHORT: favorable when price falls (livePct < 0, so we flip sign)
+  const rawSignedPrice = livePct !== null ? livePct / lev : 0;
+  const cmPrice = isLong ? rawSignedPrice : -rawSignedPrice;
+  // cmPriceAbs used for MFE zone calcs (always positive for statistical lookups)
+  const cmPriceAbs = Math.abs(cmPrice);
 
   // ── CONTEXT SIGNALS ──
   const isLong = trade.pos === 'Long';
@@ -5317,16 +5322,16 @@ function renderTPProbBlock(trade, livePct){
               ((c1h||0) > 0.5  && (c4h||0) > 1)
   ) : false;
 
-  const mfeZ = mfeZoneState(cmPrice, s, prior);
-  const adjP = adjustProbs(rawP, cmPrice);
+  const mfeZ = mfeZoneState(cmPriceAbs, s, prior);
+  const adjP = adjustProbs(rawP, cmPriceAbs);
 
-  // Conditional probs: P(reach target | already at cmPrice)
-  const condP75 = conditionalProb(cmPrice, mfeZ.p75, tier, trade.pos);
-  const condP90 = conditionalProb(cmPrice, mfeZ.p90, tier, trade.pos);
+  // Conditional probs: P(reach target | already at cmPriceAbs)
+  const condP75 = conditionalProb(cmPriceAbs, mfeZ.p75, tier, trade.pos);
+  const condP90 = conditionalProb(cmPriceAbs, mfeZ.p90, tier, trade.pos);
   const condProbNext = condP90?.prob ?? condP75?.prob ?? null;
 
   const exhScore = calcExhaustionScore({
-    cmPrice, p75: mfeZ.p75, p90: mfeZ.p90,
+    cmPrice: cmPriceAbs, p75: mfeZ.p75, p90: mfeZ.p90,
     condProbNext, acCls, livePct,
     contraBias, momentumTier: tier
   });
@@ -5435,7 +5440,7 @@ function renderTPProbBlock(trade, livePct){
     <details style="margin-bottom:8px">
       <summary style="font-size:9px;font-weight:700;color:var(--text2);cursor:pointer;text-transform:uppercase;letter-spacing:.5px;list-style:none">▶ 📊 Alcance histórico del setup</summary>
       <div style="margin-top:8px;padding:8px 10px;background:var(--card);border-radius:8px">
-        <div style="font-size:9px;color:var(--text2);margin-bottom:7px">${ownDataNote} · estás en <strong style="color:${mfeZ.col}">${cmPrice.toFixed(2)}%</strong> precio</div>
+        <div style="font-size:9px;color:var(--text2);margin-bottom:7px">${ownDataNote} · estás en <strong style="color:${cmPrice<0?'#ff3d57':mfeZ.col}">${cmPrice>=0?'+':''}${cmPrice.toFixed(2)}%</strong> precio</div>
         ${!dtp.hasData ? `<div style="font-size:9px;color:#ffd100;background:rgba(255,209,0,.08);border:1px solid rgba(255,209,0,.3);border-radius:6px;padding:5px 8px;margin-bottom:8px">⚠️ ${dtp.source}</div>` : ''}
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px">
           <div style="background:var(--surface2);border-radius:6px;padding:6px 8px;text-align:center">
@@ -5445,8 +5450,8 @@ function renderTPProbBlock(trade, livePct){
           </div>
           <div style="background:var(--surface2);border-radius:6px;padding:6px 8px;text-align:center">
             <div style="font-size:8px;color:var(--text2);margin-bottom:2px">Posición actual</div>
-            <div style="font-size:13px;font-weight:900;color:${mfeZ.col}">${cmPrice.toFixed(2)}%</div>
-            <div style="font-size:8px;color:var(--text2)">${mfeZ.toP75>0?`falta +${mfeZ.toP75.toFixed(1)}% p75`:mfeZ.toP90>0?`falta +${mfeZ.toP90.toFixed(1)}% p90`:'superó p90'}</div>
+            <div style="font-size:13px;font-weight:900;color:${cmPrice<0?'#ff3d57':mfeZ.col}">${cmPrice>=0?'+':''}${cmPrice.toFixed(2)}%</div>
+            <div style="font-size:8px;color:var(--text2)">${cmPrice<0?'en contra del trade':mfeZ.toP75>0?`falta +${mfeZ.toP75.toFixed(1)}% p75`:mfeZ.toP90>0?`falta +${mfeZ.toP90.toFixed(1)}% p90`:'superó p90'}</div>
           </div>
         </div>
         <div style="font-size:9px;font-weight:800;color:var(--text2);margin-bottom:5px;text-transform:uppercase;letter-spacing:.3px">Probabilidades por nivel de TP</div>
@@ -5458,54 +5463,86 @@ function renderTPProbBlock(trade, livePct){
       </div>
     </details>`;
 
-  return `<div style="background:var(--surface2);border:1px solid ${exhScore>=80?'rgba(255,61,87,.5)':exhScore>=60?'rgba(255,107,0,.4)':exhScore>=35?'rgba(255,209,0,.4)':'var(--border)'};border-radius:8px;padding:10px 12px;margin-top:8px" onclick="event.stopPropagation()">
+  // ── Unique ID for toggle per trade ──
+  const blockId = `cont-block-${trade.id}`;
+  const innerBlockId = `cont-inner-${trade.id}`;
 
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-      <div style="font-size:11px;font-weight:900;color:var(--text)">📊 Probabilidad de continuación</div>
-      <div style="font-size:9px;font-weight:700;color:${tierColor}">${tierLabel}</div>
+  return `<div style="background:var(--surface2);border:1px solid ${exhScore>=80?'rgba(255,61,87,.5)':exhScore>=60?'rgba(255,107,0,.4)':exhScore>=35?'rgba(255,209,0,.4)':'var(--border)'};border-radius:8px;margin-top:8px" onclick="event.stopPropagation()" id="${blockId}">
+
+    <!-- COLLAPSED HEADER (always visible) -->
+    <div onclick="(function(){var el=document.getElementById('${innerBlockId}');var open=el.style.display!=='none';el.style.display=open?'none':'block';document.getElementById('${blockId}').querySelector('.cont-arrow').textContent=open?'▼':'▲'})()" style="padding:9px 12px;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:8px">
+      <div style="display:flex;align-items:center;gap:8px;min-width:0">
+        <span style="font-size:11px;font-weight:900;color:var(--text);white-space:nowrap">📊 Continuación</span>
+        <span style="font-size:10px;font-weight:800;padding:2px 8px;border-radius:5px;background:${exhL.bg};border:1px solid ${exhL.border};color:${exhL.col};white-space:nowrap">${exhScore}/100 — ${exhL.label.replace(/^[^ ]+ /,'')}</span>
+        ${cmPrice < 0 ? `<span style="font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;background:rgba(255,61,87,.12);color:#ff3d57;white-space:nowrap">⚠️ En contra</span>` : ''}
+      </div>
+      <span class="cont-arrow" style="color:var(--text2);font-size:11px;flex-shrink:0">▼</span>
     </div>
 
-    ${contextChips}
+    <!-- EXPANDED CONTENT (hidden by default) -->
+    <div id="${innerBlockId}" style="display:none;padding:0 12px 10px">
+      <div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <div style="font-size:10px;font-weight:700;color:var(--text2)">${tierLabel}</div>
+        </div>
+      </div>
 
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:10px">
-      <div style="background:var(--card);border-radius:6px;padding:5px 7px;text-align:center">
-        <div style="font-size:8px;color:var(--text2);font-weight:700;margin-bottom:1px">MFE precio</div>
-        <div style="font-size:12px;font-weight:900;color:#00aaff">${mfeLive}</div>
+      ${contextChips}
+
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:10px">
+        <div style="background:var(--card);border-radius:6px;padding:5px 7px;text-align:center">
+          <div style="font-size:8px;color:var(--text2);font-weight:700;margin-bottom:1px">MFE precio</div>
+          <div style="font-size:12px;font-weight:900;color:#00aaff">${mfeLive}</div>
+        </div>
+        <div style="background:var(--card);border-radius:6px;padding:5px 7px;text-align:center">
+          <div style="font-size:8px;color:var(--text2);font-weight:700;margin-bottom:1px">MAE precio</div>
+          <div style="font-size:12px;font-weight:900;color:#ff3d57">${maeLive}</div>
+        </div>
+        <div style="background:var(--card);border-radius:6px;padding:5px 7px;text-align:center">
+          <div style="font-size:8px;color:var(--text2);font-weight:700;margin-bottom:1px">Percentil</div>
+          <div style="font-size:10px;font-weight:900;color:${cmPrice<0?'#ff3d57':pctColor}">${cmPrice<0?'—':pctLabel}</div>
+        </div>
       </div>
-      <div style="background:var(--card);border-radius:6px;padding:5px 7px;text-align:center">
-        <div style="font-size:8px;color:var(--text2);font-weight:700;margin-bottom:1px">MAE precio</div>
-        <div style="font-size:12px;font-weight:900;color:#ff3d57">${maeLive}</div>
+
+      <div style="margin-bottom:10px">
+        <div style="position:relative;height:12px;background:var(--border);border-radius:6px;overflow:hidden;margin-bottom:3px">
+          ${cmPrice >= 0 ? `
+          <div style="position:absolute;left:0;top:0;bottom:0;width:${Math.min(100,avg/p90*100)}%;background:rgba(0,200,83,.3);border-radius:6px 0 0 6px"></div>
+          <div style="position:absolute;left:${Math.min(99,avg/p90*100)}%;top:0;bottom:0;width:${Math.max(0,Math.min(99,p75/p90*100)-Math.min(99,avg/p90*100))}%;background:rgba(255,107,0,.3)"></div>
+          <div style="position:absolute;left:${Math.min(99,p75/p90*100)}%;top:0;bottom:0;right:0;background:rgba(255,61,87,.25)"></div>
+          <div style="position:absolute;left:${Math.min(97,avg/p90*100)}%;top:0;bottom:0;width:2px;background:#ff6b00;opacity:.9"></div>
+          <div style="position:absolute;left:${Math.min(97,p75/p90*100)}%;top:0;bottom:0;width:2px;background:#ffd100"></div>
+          <div style="position:absolute;left:${Math.min(96,cmPriceAbs/p90*100)}%;top:50%;transform:translate(-50%,-50%);width:12px;height:12px;border-radius:50%;background:${mfeZ.col};border:2px solid var(--card);box-shadow:0 0 5px ${mfeZ.col};transition:left .5s"></div>
+          ` : `
+          <div style="position:absolute;left:0;top:0;bottom:0;right:0;background:rgba(255,61,87,.08);border-radius:6px"></div>
+          <div style="position:absolute;left:${Math.min(97,avg/p90*100)}%;top:0;bottom:0;width:2px;background:#ff6b00;opacity:.5"></div>
+          <div style="position:absolute;left:${Math.min(97,p75/p90*100)}%;top:0;bottom:0;width:2px;background:#ffd100;opacity:.5"></div>
+          <div style="position:absolute;left:4%;top:50%;transform:translate(-50%,-50%);width:12px;height:12px;border-radius:50%;background:#ff3d57;border:2px solid var(--card);box-shadow:0 0 5px #ff3d57"></div>
+          `}
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:8px;font-weight:700">
+          <span style="color:var(--text2)">0</span>
+          <span style="color:#ff6b00">TP2 ${dtp.tp2.toFixed(1)}%</span>
+          <span style="color:#ffd100">p75 ${p75.toFixed(1)}%</span>
+          <span style="color:#ff3d57">runner ${dtp.runner.toFixed(1)}%</span>
+        </div>
+        ${cmPrice < 0
+          ? `<div style="font-size:9px;color:#ff3d57;margin-top:2px;font-weight:700">⚠️ En contra del trade — ${cmPrice.toFixed(2)}% desde entrada</div>`
+          : mfeZ.toP75>0
+            ? `<div style="font-size:9px;color:#ffd100;margin-top:2px;font-weight:700">→ falta +${mfeZ.toP75.toFixed(1)}% para p75</div>`
+            : mfeZ.toP90>0
+              ? `<div style="font-size:9px;color:#ff3d57;margin-top:2px;font-weight:700">→ falta +${mfeZ.toP90.toFixed(1)}% para p90</div>`
+              : `<div style="font-size:9px;color:#ff3d57;margin-top:2px;font-weight:700">⚠️ Ya superó p90 — zona extrema</div>`
+        }
       </div>
-      <div style="background:var(--card);border-radius:6px;padding:5px 7px;text-align:center">
-        <div style="font-size:8px;color:var(--text2);font-weight:700;margin-bottom:1px">Percentil</div>
-        <div style="font-size:10px;font-weight:900;color:${pctColor}">${pctLabel}</div>
-      </div>
+
+      ${condBlock}
+      ${exhBlock}
+      ${genericBlock}
+
+      <div style="font-size:10px;font-weight:800;color:${exhL.col};padding:7px 10px;background:${exhL.bg};border:1px solid ${exhL.border};border-radius:7px;margin-bottom:5px">${decision}</div>
+      <div style="font-size:8px;color:var(--text2);opacity:.7">Score mkt: ${contextScore}/7 · ${nStr}${effStr} · MFE/MAE = % precio sin apalancamiento</div>
     </div>
-
-    <div style="margin-bottom:10px">
-      <div style="position:relative;height:12px;background:var(--border);border-radius:6px;overflow:hidden;margin-bottom:3px">
-        <div style="position:absolute;left:0;top:0;bottom:0;width:${Math.min(100,avg/p90*100)}%;background:rgba(0,200,83,.3);border-radius:6px 0 0 6px"></div>
-        <div style="position:absolute;left:${Math.min(99,avg/p90*100)}%;top:0;bottom:0;width:${Math.max(0,Math.min(99,p75/p90*100)-Math.min(99,avg/p90*100))}%;background:rgba(255,107,0,.3)"></div>
-        <div style="position:absolute;left:${Math.min(99,p75/p90*100)}%;top:0;bottom:0;right:0;background:rgba(255,61,87,.25)"></div>
-        <div style="position:absolute;left:${Math.min(97,avg/p90*100)}%;top:0;bottom:0;width:2px;background:#ff6b00;opacity:.9"></div>
-        <div style="position:absolute;left:${Math.min(97,p75/p90*100)}%;top:0;bottom:0;width:2px;background:#ffd100"></div>
-        <div style="position:absolute;left:${Math.min(96,cmPrice/p90*100)}%;top:50%;transform:translate(-50%,-50%);width:12px;height:12px;border-radius:50%;background:${mfeZ.col};border:2px solid var(--card);box-shadow:0 0 5px ${mfeZ.col};transition:left .5s"></div>
-      </div>
-      <div style="display:flex;justify-content:space-between;font-size:8px;font-weight:700">
-        <span style="color:var(--text2)">0</span>
-        <span style="color:#ff6b00">TP2 ${dtp.tp2.toFixed(1)}%</span>
-        <span style="color:#ffd100">p75 ${p75.toFixed(1)}%</span>
-        <span style="color:#ff3d57">runner ${dtp.runner.toFixed(1)}%</span>
-      </div>
-      ${mfeZ.toP75>0?`<div style="font-size:9px;color:#ffd100;margin-top:2px;font-weight:700">→ falta +${mfeZ.toP75.toFixed(1)}% para p75</div>`:mfeZ.toP90>0?`<div style="font-size:9px;color:#ff3d57;margin-top:2px;font-weight:700">→ falta +${mfeZ.toP90.toFixed(1)}% para p90</div>`:`<div style="font-size:9px;color:#ff3d57;margin-top:2px;font-weight:700">⚠️ Ya superó p90 — zona extrema</div>`}
-    </div>
-
-    ${condBlock}
-    ${exhBlock}
-    ${genericBlock}
-
-    <div style="font-size:10px;font-weight:800;color:${exhL.col};padding:7px 10px;background:${exhL.bg};border:1px solid ${exhL.border};border-radius:7px;margin-bottom:5px">${decision}</div>
-    <div style="font-size:8px;color:var(--text2);opacity:.7">Score mkt: ${contextScore}/7 · ${nStr}${effStr} · MFE/MAE = % precio sin apalancamiento</div>
   </div>`;
 }
 // what-if replaced by renderKpiProjection
@@ -5717,6 +5754,7 @@ function saveMCP(){
     t.open       = false;
     t.actual     = precio||t.actual;
     if(salida)   t.salida    = salida;
+    if(obs)      t.obs       = obs;
     if(mcpPatron)t.patron    = mcpPatron;
     t.closedHora = closedHora;
     t.fechaCierre= closedHora.slice(0,10);
@@ -5728,21 +5766,8 @@ function saveMCP(){
     t.feesTotal = (t.tradingFees||0)+(t.fundingFees||0);
 
     // Record this close event in partialCloses (always, even for full close — for audit trail)
-    // pctClose = the remaining open % being closed now
-    const alreadyClosed = (t.partialCloses||[]).reduce((s,c)=>s+(c.pctClose||0),0);
-    const thisClosePct = Math.min(100, 100 - alreadyClosed); // what % is being closed now
     if(!t.partialCloses) t.partialCloses=[];
-    t.partialCloses.push({
-      pct: pct||0,
-      pctClose: thisClosePct,
-      pnl: pnlBrutoEste,
-      pnl_bruto: pnlBrutoEste,
-      precio,
-      closedHora,
-      salida,
-      obs,
-      isFinalClose: true
-    });
+    t.partialCloses.push({pct:pct||0, pctClose:100, pnl:pnlBrutoEste, pnl_bruto:pnlBrutoEste, precio, closedHora, salida, obs});
 
     // Restore original margin for display
     const margenOrig = t.margenOriginal||remainingMargen;
@@ -5767,17 +5792,15 @@ function saveMCP(){
     t.resultado = margenOrig>0 ? pnlNeto/margenOrig*100 : 0;
     t.pnlNeto   = pnlNeto;
 
-    // Build obs: user note + PnL summary (never erase user obs)
+    // Build obs summary
     const n=t.partialCloses.length;
-    const pnlSummary = [
+    t.obs = [
       `${n>1?n+' cierres · ':''}PnL neto: ${pnlNeto>=0?'+':''}$${pnlNeto.toFixed(2)}`,
       pnlBrutoTotal!==pnlNeto ? `bruto: ${pnlBrutoTotal>=0?'+':''}$${pnlBrutoTotal.toFixed(2)}` : null,
       t.feesTotal>0 ? `fees: -$${t.feesTotal.toFixed(2)}` : null,
-      !isNaN(realizedPnlInput)&&realizedPnlInput!==0 ? `Realized PnL exchange` : null,
+      !isNaN(realizedPnlInput)&&realizedPnlInput!==0 ? `Realized PnL exchange usado` : null,
+      obs||salida||null
     ].filter(Boolean).join(' · ');
-    // Preserve user obs; append summary after separator
-    const userObs = obs || (t.obs && !t.obs.startsWith('PnL neto') && !t.obs.includes('cierres ·') ? t.obs : '');
-    t.obs = [userObs, pnlSummary].filter(Boolean).join(' | ');
 
   } else {
     // ── PARTIAL CLOSE ────────────────────────────────────────────────────────
