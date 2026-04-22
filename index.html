@@ -5308,33 +5308,41 @@ function classifyTradeDuration(trade, totalMins){
   else if(calcAvgMins(g2) !== null){ avgMins = calcAvgMins(g2); dataSource = trade.estrategia; }
   else if(calcAvgMins(g3) !== null){ avgMins = calcAvgMins(g3); dataSource = `${trade.estrategia} (global)`; }
 
-  if(avgMins === null || totalMins === 0){
-    return { stage:'sin_datos', label:'⏱ Sin historial de duración', color:'#9999b8', bg:'rgba(153,153,184,.1)', border:'rgba(153,153,184,.2)', avgMins:null, totalMins, ratio:null, dataSource:'' };
+  // Formateador de tiempo reutilizable
+  function fmtMins(m){ return m < 60 ? m+'m' : m < 1440 ? (Math.floor(m/60)+'h '+(m%60)+'m') : (Math.floor(m/1440)+'d '+Math.floor((m%1440)/60)+'h'); }
+
+  if(totalMins === 0){
+    return { stage:'sin_datos', label:'⏱ Sin tiempo registrado', color:'#9999b8', bg:'rgba(153,153,184,.1)', border:'rgba(153,153,184,.2)', avgMins:null, totalMins, ratio:null, dataSource:'', timeStr:'—' };
+  }
+  const _timeStr = fmtMins(totalMins);
+  if(avgMins === null){
+    return { stage:'sin_datos', label:`⏱ ${_timeStr} abierto — sin benchmark histórico`, color:'#9999b8', bg:'rgba(153,153,184,.1)', border:'rgba(153,153,184,.2)', avgMins:null, totalMins, ratio:null, dataSource:'sin historial', timeStr:_timeStr };
   }
 
   const ratio = totalMins / avgMins;
-  const avgStr = avgMins < 60 ? `${Math.round(avgMins)}m` : `${(avgMins/60).toFixed(1)}h`;
+  const avgStr = avgMins < 60 ? `${Math.round(avgMins)}m` : avgMins < 1440 ? `${(avgMins/60).toFixed(1)}h` : `${Math.floor(avgMins/1440)}d ${Math.floor((avgMins%1440)/60)}h`;
+  const timeStr = fmtMins(totalMins);
 
   let stage, label, color, bg, border;
   if(ratio < 0.4){
     stage = 'temprano';
-    label = `⚡ Temprano — ${Math.round(ratio*100)}% de la duración típica (avg ${avgStr})`;
+    label = `⚡ Temprano — ${timeStr} de ${avgStr} típico`;
     color = '#00aaff'; bg = 'rgba(0,170,255,.1)'; border = 'rgba(0,170,255,.25)';
   } else if(ratio <= 1.5){
     stage = 'ventana';
-    label = `✅ En ventana — ${Math.round(ratio*100)}% del tiempo típico (avg ${avgStr})`;
+    label = `✅ En ventana — ${timeStr} de ${avgStr} típico`;
     color = '#00c853'; bg = 'rgba(0,200,83,.08)'; border = 'rgba(0,200,83,.25)';
   } else if(ratio <= 2.5){
     stage = 'extendido';
-    label = `⚠️ Extendido — ${Math.round(ratio*100)}% del tiempo típico (avg ${avgStr})`;
+    label = `⚠️ Extendido — ${timeStr} vs ${avgStr} típico`;
     color = '#ffd100'; bg = 'rgba(255,209,0,.08)'; border = 'rgba(255,209,0,.3)';
   } else {
     stage = 'extendido';
-    label = `🔴 Muy extendido — ${Math.round(ratio*100)}% del tiempo típico (avg ${avgStr})`;
+    label = `🔴 Muy extendido — ${timeStr} vs ${avgStr} típico`;
     color = '#ff3d57'; bg = 'rgba(255,61,87,.08)'; border = 'rgba(255,61,87,.3)';
   }
 
-  return { stage, label, color, bg, border, avgMins, totalMins, ratio, dataSource };
+  return { stage, label, color, bg, border, avgMins, totalMins, ratio, dataSource, timeStr, avgStr };
 }
 
 // ══ SESIÓN DE MERCADO — contexto horario como modificador ════════════════════
@@ -5420,13 +5428,18 @@ function exhaustionLabel(score){
 
 // ── SINGLE DECISION — context-first hierarchy ──
 // Priority: context signals > statistical signals
-function buildDecision(exhScore, exhL, mfeZ, acCls, condProbNext, livePct, contraBias, momentumTier){
+function buildDecision(exhScore, exhL, mfeZ, acCls, condProbNext, livePct, contraBias, momentumTier, durStage, sessConf){
   const isDecel   = acCls === 'slow';
   const isAccel   = acCls === 'fast';
   const inLoss    = livePct !== null && livePct < 0;
   const probStr   = condProbNext !== null ? ` (solo ${condProbNext}% lo logra)` : '';
   const weakMom   = momentumTier === 'debil';
   const midMom    = momentumTier === 'medio';
+  // Sufijo de contexto: aparece al final del mensaje de decisión cuando reduce confianza
+  const ctxSuffix = (durStage==='extendido'&&sessConf<0.85) ? ' · timing fuera de ventana + sesión débil'
+    : durStage==='extendido' ? ' · trade fuera de ventana típica'
+    : sessConf<0.85 ? ' · sesión de baja actividad'
+    : '';
 
   // ── CONTEXT OVERRIDE: momentum+bias against trade + in loss ──
   if(contraBias && weakMom && inLoss)
@@ -5460,10 +5473,10 @@ function buildDecision(exhScore, exhL, mfeZ, acCls, condProbNext, livePct, contr
   if(weakMom)    return `🟡 Recorrido disponible — momentum débil, esperá confirmación antes de mantener`;
   if(mfeZ.zone === 'bajo'){
     const distStr = mfeZ.toP75 > 0 ? `, falta +${mfeZ.toP75.toFixed(1)}% para p75` : '';
-    return `🟢 Dejar correr — mucho recorrido disponible${distStr}`;
+    return `🟢 Dejar correr — mucho recorrido disponible${distStr}${ctxSuffix}`;
   }
-  if(isAccel) return `🟢 Mantener — acelerando con recorrido disponible`;
-  return `🟢 Observar — probabilidad positiva, esperá señal más clara`;
+  if(isAccel) return `🟢 Mantener — acelerando con recorrido disponible${ctxSuffix}`;
+  return `🟢 Observar — probabilidad positiva, esperá señal más clara${ctxSuffix}`;
 }
 
 // ── RENDER THE FULL BLOCK ──
@@ -5534,7 +5547,24 @@ function renderTPProbBlock(trade, livePct){
     durationStage: durCtx.stage
   });
   const exhL     = exhaustionLabel(exhScore);
-  const decision = buildDecision(exhScore, exhL, mfeZ, acCls, condProbNext, livePct, contraBias, tier);
+  const decision = buildDecision(exhScore, exhL, mfeZ, acCls, condProbNext, livePct, contraBias, tier, durCtx.stage, sessCtx.confidence);
+
+  // ── CONFIDENCE SCORE: combina score base + modificadores de sesión y duración ──
+  // Base: inverso del agotamiento (0=muy agotado → conf baja, 100=fresco → conf alta)
+  let confScore = Math.round((1 - exhScore / 100) * 100);
+  // Modificador sesión: penaliza si liquidez baja
+  confScore = Math.round(confScore * sessCtx.confidence);
+  // Modificador duración: penaliza si extendido, bonifica si temprano
+  if(durCtx.stage === 'extendido') confScore = Math.round(confScore * 0.80);
+  else if(durCtx.stage === 'temprano') confScore = Math.min(100, Math.round(confScore * 1.08));
+  confScore = Math.max(0, Math.min(100, confScore));
+  const confLabel = confScore >= 70 ? 'Alta' : confScore >= 45 ? 'Media' : 'Baja';
+  const confColor = confScore >= 70 ? '#00c853' : confScore >= 45 ? '#ffd100' : '#ff3d57';
+
+  // ── Etiqueta de continuación matizada por confianza ──
+  const rawContLabel = exhL.label.replace(/^[^ ]+ /, ''); // quitar emoji
+  const confSuffix   = confScore < 45 ? ' (baja confianza)' : confScore < 70 ? ' (confianza media)' : '';
+  const continuationLabel = rawContLabel + confSuffix;
 
   const tierLabel = !hasTickerData ? '⚪ Sin precios — actualizá' : tier==='fuerte'?'🔥 Momentum fuerte':tier==='medio'?'🟡 Momentum medio':'⚠️ Momentum débil';
   const tierColor = !hasTickerData ? 'var(--text2)' : tier==='fuerte'?'#00c853':tier==='medio'?'#ffd100':'#ff6b00';
@@ -5554,7 +5584,7 @@ function renderTPProbBlock(trade, livePct){
     ${tc ? `<span style="font-size:11px;font-weight:800;padding:3px 9px;border-radius:5px;background:${acCls==='fast'?'rgba(0,200,83,.15)':acCls==='slow'?'rgba(255,61,87,.12)':'rgba(153,153,184,.1)'};color:${acCls==='fast'?'#00c853':acCls==='slow'?'#ff3d57':'#9999b8'}">${acCls==='fast'?'🔥 Acelerando':acCls==='slow'?'⚠️ Frenando':'→ Estable'}</span>` : ''}
     ${tc ? (contraBias ? `<span style="font-size:11px;font-weight:800;padding:3px 9px;border-radius:5px;background:rgba(255,61,87,.12);color:#ff3d57">🚫 Contra el ${trade.pos}</span>` : `<span style="font-size:11px;font-weight:800;padding:3px 9px;border-radius:5px;background:rgba(0,200,83,.12);color:#00c853">✅ A favor del ${trade.pos}</span>`) : ''}
     ${livePct !== null && livePct < 0 ? `<span style="font-size:11px;font-weight:800;padding:3px 9px;border-radius:5px;background:rgba(255,61,87,.12);color:#ff3d57">📉 En pérdida</span>` : livePct !== null && livePct > 3 ? `<span style="font-size:11px;font-weight:800;padding:3px 9px;border-radius:5px;background:rgba(0,200,83,.12);color:#00c853">✅ En ganancia</span>` : ''}
-    ${durCtx.stage !== 'sin_datos' ? `<span style="font-size:10px;font-weight:800;padding:3px 9px;border-radius:5px;background:${durCtx.bg};color:${durCtx.color};border:1px solid ${durCtx.border}" title="${durCtx.dataSource}">${durCtx.stage==='temprano'?'⚡ Temprano':durCtx.stage==='ventana'?'✅ En ventana':'⚠️ Extendido'}</span>` : ''}
+    <span style="font-size:10px;font-weight:800;padding:3px 9px;border-radius:5px;background:${durCtx.bg};color:${durCtx.color};border:1px solid ${durCtx.border}" title="${durCtx.dataSource||'sin benchmark'}">${durCtx.stage==='temprano'?'⚡ Temprano':durCtx.stage==='ventana'?'✅ En ventana':durCtx.stage==='extendido'?'⚠️ Extendido':'⏱ '+durCtx.timeStr}</span>
     <span style="font-size:10px;font-weight:800;padding:3px 9px;border-radius:5px;background:${sessCtx.activity==='alta'?'rgba(0,200,83,.1)':sessCtx.activity==='media'?'rgba(255,209,0,.08)':'rgba(153,153,184,.1)'};color:${sessCtx.activity==='alta'?'#00c853':sessCtx.activity==='media'?'#ffd100':'#9999b8'}" title="${sessCtx.note}">${sessCtx.label}</span>
   </div>`;
 
@@ -5667,28 +5697,75 @@ function renderTPProbBlock(trade, livePct){
   const blockId = `cont-block-${trade.id}`;
   const innerBlockId = `cont-inner-${trade.id}`;
 
+  // ── SEÑAL PRINCIPAL: la más relevante para mostrar en el header ──────────
+  // Prioridad: contra-bias > en pérdida > extendido > momentum > neutro
+  let primarySignal, primaryColor, primaryBg;
+  if(contraBias){
+    primarySignal = `🚫 ${isLong?'Mercado bajando':'Mercado subiendo'} — contra el ${trade.pos}`;
+    primaryColor = '#ff3d57'; primaryBg = 'rgba(255,61,87,.12)';
+  } else if(livePct !== null && livePct < -2){
+    primarySignal = `📉 En pérdida (${livePct.toFixed(1)}%)`;
+    primaryColor = '#ff3d57'; primaryBg = 'rgba(255,61,87,.12)';
+  } else if(durCtx.stage === 'extendido'){
+    primarySignal = `⏱ ${durCtx.label}`;
+    primaryColor = durCtx.color; primaryBg = durCtx.bg;
+  } else if(acCls === 'slow'){
+    primarySignal = `⚠️ Frenando — momentum desacelerando`;
+    primaryColor = '#ffd100'; primaryBg = 'rgba(255,209,0,.08)';
+  } else if(acCls === 'fast' && !contraBias){
+    primarySignal = `🔥 Acelerando — momentum activo`;
+    primaryColor = '#00c853'; primaryBg = 'rgba(0,200,83,.1)';
+  } else if(livePct !== null && livePct > 3){
+    primarySignal = `✅ En ganancia (${livePct>=0?'+':''}${livePct.toFixed(1)}%)`;
+    primaryColor = '#00c853'; primaryBg = 'rgba(0,200,83,.1)';
+  } else {
+    primarySignal = hasTickerData ? tierLabel : '⚪ Sin precios';
+    primaryColor = tierColor; primaryBg = tierColor==='#00c853'?'rgba(0,200,83,.1)':tierColor==='#ffd100'?'rgba(255,209,0,.08)':'rgba(255,107,0,.08)';
+  }
+
   return `<div style="background:var(--surface2);border:1px solid ${exhScore>=80?'rgba(255,61,87,.5)':exhScore>=60?'rgba(255,107,0,.4)':exhScore>=35?'rgba(255,209,0,.4)':'var(--border)'};border-radius:8px;margin-top:8px" onclick="event.stopPropagation()" id="${blockId}">
 
-    <!-- COLLAPSED HEADER (always visible) -->
-    <div onclick="(function(){var el=document.getElementById('${innerBlockId}');var open=el.style.display!=='none';el.style.display=open?'none':'block';document.getElementById('${blockId}').querySelector('.cont-arrow').textContent=open?'▼':'▲'})()" style="padding:9px 12px;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:8px">
-      <div style="display:flex;align-items:center;gap:6px;min-width:0;flex-wrap:wrap">
-        <span style="font-size:11px;font-weight:900;color:var(--text);white-space:nowrap">📊 Continuación</span>
-        <span style="font-size:10px;font-weight:800;padding:2px 8px;border-radius:5px;background:${exhL.bg};border:1px solid ${exhL.border};color:${exhL.col};white-space:nowrap">${exhScore}/100 — ${exhL.label.replace(/^[^ ]+ /,'')}</span>
-        ${hasTickerData ? `<span style="font-size:11px;font-weight:800;padding:3px 9px;border-radius:5px;color:${tierColor};background:${tierColor==='#00c853'?'rgba(0,200,83,.12)':tierColor==='#ffd100'?'rgba(255,209,0,.1)':'rgba(255,107,0,.1)'};white-space:nowrap">${tierLabel}</span>` : ''}
-        ${cmPrice < 0 ? `<span style="font-size:11px;font-weight:800;padding:3px 9px;border-radius:5px;background:rgba(255,61,87,.12);color:#ff3d57;white-space:nowrap">⚠️ En contra</span>` : ''}
+    <!-- COLLAPSED HEADER: señal principal + confianza matizada -->
+    <div onclick="(function(){var el=document.getElementById('${innerBlockId}');var open=el.style.display!=='none';el.style.display=open?'none':'block';document.getElementById('${blockId}').querySelector('.cont-arrow').textContent=open?'▼':'▲'})()" style="padding:9px 12px;cursor:pointer">
+      <!-- Línea 1: label de continuación (prominente) + confianza -->
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:5px">
+        <div style="display:flex;align-items:center;gap:6px;min-width:0">
+          <span style="font-size:12px;font-weight:900;padding:3px 10px;border-radius:6px;background:${exhL.bg};border:1.5px solid ${exhL.border};color:${exhL.col};white-space:nowrap">${exhL.label} ${confSuffix?'<span style="font-size:9px;opacity:.85">'+confSuffix.trim()+'</span>':''}</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:5px;flex-shrink:0">
+          <span style="font-size:9px;font-weight:800;color:${confColor}">Conf. ${confLabel} ${confScore}%</span>
+          <span class="cont-arrow" style="color:var(--text2);font-size:11px">▼</span>
+        </div>
       </div>
-      <span class="cont-arrow" style="color:var(--text2);font-size:11px;flex-shrink:0">▼</span>
+      <!-- Línea 2: señal principal del contexto -->
+      <div style="font-size:10px;font-weight:800;padding:2px 8px;border-radius:5px;background:${primaryBg};color:${primaryColor};display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${primarySignal}</div>
     </div>
 
     <!-- EXPANDED CONTENT (hidden by default) -->
     <div id="${innerBlockId}" style="display:none;padding:0 12px 10px">
       <div style="border-top:1px solid var(--border);padding-top:10px;margin-bottom:8px">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-          <div style="font-size:10px;font-weight:700;color:var(--text2)">${tierLabel}</div>
+
+        <!-- DECISIÓN FINAL: prominente, al tope del panel expandido -->
+        <div style="font-size:12px;font-weight:900;color:${exhL.col};padding:10px 12px;background:${exhL.bg};border:1.5px solid ${exhL.border};border-radius:8px;margin-bottom:10px;line-height:1.4">${decision}</div>
+
+        <!-- Confianza con breakdown -->
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+          <div style="flex:1;height:5px;background:var(--border);border-radius:3px;overflow:hidden">
+            <div style="height:100%;width:${confScore}%;background:${confColor};border-radius:3px;transition:width .5s"></div>
+          </div>
+          <span style="font-size:10px;font-weight:800;color:${confColor};flex-shrink:0">Confianza ${confScore}% — ${confLabel}</span>
         </div>
+        ${sessCtx.confidence < 0.85 || durCtx.stage === 'extendido' ? `<div style="font-size:9px;color:#ffd100;background:rgba(255,209,0,.07);border:1px solid rgba(255,209,0,.2);border-radius:6px;padding:5px 9px;margin-bottom:8px">⚠️ ${sessCtx.confidence<0.85?sessCtx.note:''}${sessCtx.confidence<0.85&&durCtx.stage==='extendido'?' · ':''}${durCtx.stage==='extendido'?'Trade fuera de ventana típica — reduce confianza':''}</div>` : ''}
       </div>
 
-      ${contextChips}
+      <!-- SEÑALES SECUNDARIAS: compactas, en pills -->
+      <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:10px">
+        ${tc ? `<span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;background:${acCls==='fast'?'rgba(0,200,83,.12)':acCls==='slow'?'rgba(255,61,87,.1)':'rgba(153,153,184,.08)'};color:${acCls==='fast'?'#00c853':acCls==='slow'?'#ff3d57':'#9999b8'}">${acCls==='fast'?'🔥 Acelerando':acCls==='slow'?'⚠️ Frenando':'→ Estable'}</span>` : ''}
+        ${tc ? `<span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;background:${contraBias?'rgba(255,61,87,.1)':'rgba(0,200,83,.1)'};color:${contraBias?'#ff3d57':'#00c853'}">${contraBias?`🚫 Contra ${trade.pos}`:`✅ A favor ${trade.pos}`}</span>` : ''}
+        <span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;background:${durCtx.bg};color:${durCtx.color}">${durCtx.label}</span>
+        <span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;background:${sessCtx.activity==='alta'?'rgba(0,200,83,.08)':sessCtx.activity==='media'?'rgba(255,209,0,.07)':'rgba(153,153,184,.08)'};color:${sessCtx.activity==='alta'?'#00c853':sessCtx.activity==='media'?'#ffd100':'#9999b8'}">${sessCtx.label}</span>
+        ${hasTickerData?`<span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;background:${tierColor==='#00c853'?'rgba(0,200,83,.08)':tierColor==='#ffd100'?'rgba(255,209,0,.07)':'rgba(255,107,0,.08)'};color:${tierColor}">${tierLabel}</span>`:''}
+      </div>
 
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:10px">
         <div style="background:var(--card);border-radius:6px;padding:5px 7px;text-align:center">
@@ -5741,27 +5818,21 @@ function renderTPProbBlock(trade, livePct){
       ${exhBlock}
       ${genericBlock}
 
-      <!-- CONTEXTO: DURACIÓN + SESIÓN como modificadores (no señal principal) -->
-      <div style="margin-bottom:8px;padding:8px 10px;background:rgba(0,0,0,.08);border:1px solid var(--border);border-radius:8px">
-        <div style="font-size:9px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:7px">📅 Contexto — modificadores</div>
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">
-          <span style="font-size:10px;color:var(--text2)">Duración del trade</span>
-          <span style="font-size:11px;font-weight:800;color:${durCtx.color}">${durCtx.stage==='sin_datos'?'Sin datos históricos':durCtx.label}</span>
+      <!-- Detalles de duración (compactos, solo si hay datos) -->
+      ${durCtx.avgMins !== null ? `<div style="margin-bottom:8px;padding:7px 10px;background:rgba(0,0,0,.06);border-radius:7px;display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <div style="font-size:9px;font-weight:700;color:var(--text2);margin-bottom:2px">Duración del trade</div>
+          <div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden;width:120px;margin-top:3px">
+            <div style="height:100%;width:${Math.min(100,Math.round((durCtx.ratio||0)*50))}%;background:${durCtx.color};border-radius:2px"></div>
+          </div>
         </div>
-        ${durCtx.stage !== 'sin_datos' && durCtx.avgMins !== null ? `<div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden;margin-bottom:4px">
-          <div style="height:100%;width:${Math.min(100, (durCtx.ratio||0)*50)}%;background:${durCtx.color};border-radius:2px;transition:width .5s"></div>
+        <div style="text-align:right">
+          <div style="font-size:10px;font-weight:800;color:${durCtx.color}">${durCtx.timeStr} / ${durCtx.avgStr} típico</div>
+          <div style="font-size:8px;color:var(--text2)">${durCtx.dataSource}</div>
         </div>
-        <div style="font-size:8px;color:var(--text2)">Avg ${durCtx.avgMins < 60 ? Math.round(durCtx.avgMins)+'m' : (durCtx.avgMins/60).toFixed(1)+'h'} · actual ${durCtx.totalMins < 60 ? durCtx.totalMins+'m' : (durCtx.totalMins/60).toFixed(1)+'h'} · fuente: ${durCtx.dataSource}</div>` : '<div style="font-size:8px;color:var(--text2)">Cargá fechahora y hora de cierre en tus trades para habilitar</div>'}
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:7px;margin-bottom:2px">
-          <span style="font-size:10px;color:var(--text2)">Sesión de mercado</span>
-          <span style="font-size:11px;font-weight:800;color:${sessCtx.activity==='alta'?'#00c853':sessCtx.activity==='media'?'#ffd100':'#9999b8'}">${sessCtx.label} · ${sessCtx.activity==='alta'?'Activa':sessCtx.activity==='media'?'Normal':'Baja actividad'}</span>
-        </div>
-        <div style="font-size:8px;color:var(--text2)">${sessCtx.note} · confianza ${Math.round(sessCtx.confidence*100)}%</div>
-        ${sessCtx.confidence < 0.85 ? `<div style="font-size:8px;color:#ffd100;margin-top:3px;font-weight:700">⚠️ Sesión de baja actividad — señales menos confiables</div>` : ''}
-      </div>
+      </div>` : `<div style="margin-bottom:8px;font-size:9px;color:var(--text2);padding:6px 10px;background:rgba(0,0,0,.06);border-radius:7px">⏱ ${durCtx.label} — <span style="opacity:.7">registrá fechahora de entrada y cierre para benchmark</span></div>`}
 
-      <div style="font-size:10px;font-weight:800;color:${exhL.col};padding:7px 10px;background:${exhL.bg};border:1px solid ${exhL.border};border-radius:7px;margin-bottom:5px">${decision}</div>
-      <div style="font-size:8px;color:var(--text2);opacity:.7">Score mkt: ${contextScore!=null?contextScore+'/7':'sin datos'} · ${nStr}${effStr} · MFE/MAE = % precio sin apalancamiento</div>
+      <div style="font-size:8px;color:var(--text2);opacity:.7;margin-bottom:8px">Score mkt: ${contextScore!=null?contextScore+'/7':'sin datos'} · ${nStr}${effStr} · MFE/MAE = % precio sin apalancamiento</div>
     </div>
   </div>`;
 }
