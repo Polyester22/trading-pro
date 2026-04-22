@@ -338,37 +338,54 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
         <span style="font-size:18px">🔍</span>
         <div>
           <div style="font-size:12px;font-weight:800;color:var(--text)">Analizador de ticker</div>
-          <div style="font-size:10px;color:var(--text2)" id="analyzer-subtitle">Long / Short / No entrar — en tiempo real</div>
+          <div style="font-size:10px;color:var(--text2)" id="analyzer-subtitle">Dirección · TF · TP/SL — sin sesgos</div>
         </div>
       </div>
       <span id="analyzer-arrow" style="color:var(--text2);font-size:12px">▼</span>
     </div>
     <div class="analyzer-body" id="analyzer-body">
-      <!-- Input row -->
-      <div style="display:flex;gap:8px;margin-bottom:10px">
+
+      <!-- MODO AUTO: solo ticker -->
+      <div style="display:flex;gap:8px;margin-bottom:8px">
         <div style="flex:1;position:relative">
-          <input type="text" id="an-ticker" placeholder="BTC, ETH, UNI…" autocomplete="off"
+          <input type="text" id="an-ticker" placeholder="BTC, ETH, SOL…" autocomplete="off"
             oninput="onAnTickerInput()" onfocus="showAnDrop()" onblur="hideAnDrop()"
-            style="width:100%;background:var(--input-bg);border:1.5px solid var(--border);border-radius:8px;color:var(--text);font-family:'Nunito',sans-serif;font-size:15px;font-weight:700;padding:10px 14px;outline:none;text-transform:uppercase">
+            style="width:100%;background:var(--input-bg);border:1.5px solid var(--border);border-radius:8px;color:var(--text);font-family:'Nunito',sans-serif;font-size:16px;font-weight:800;padding:11px 14px;outline:none;text-transform:uppercase"
+            onkeydown="if(event.key==='Enter')runTickerAnalysis()">
           <div id="an-ticker-drop" class="ticker-dropdown"></div>
         </div>
-        <select id="an-pos" style="background:var(--input-bg);border:1.5px solid var(--border);border-radius:8px;color:var(--text);font-family:'Nunito',sans-serif;font-size:13px;font-weight:700;padding:10px 10px;outline:none;-webkit-appearance:none;width:90px">
-          <option value="Long">Long</option>
-          <option value="Short">Short</option>
-        </select>
-        <select id="an-tf" style="background:var(--input-bg);border:1.5px solid var(--border);border-radius:8px;color:var(--text);font-family:'Nunito',sans-serif;font-size:13px;font-weight:700;padding:10px 10px;outline:none;-webkit-appearance:none;width:80px">
-          <option value="1m">1m</option>
-          <option value="5m" selected>5m</option>
-          <option value="15m">15m</option>
-          <option value="1h">1h</option>
-          <option value="4h">4h</option>
-        </select>
+        <button onclick="runTickerAnalysis()" id="an-btn" class="btn btn-orange" style="margin:0;padding:11px 18px;font-size:14px;white-space:nowrap;flex-shrink:0">
+          🔍 Analizar
+        </button>
       </div>
-      <button onclick="runTickerAnalysis()" id="an-btn" class="btn btn-orange" style="margin-bottom:10px;padding:12px">
-        🔍 Analizar
-      </button>
+
+      <!-- Toggle modo manual -->
+      <div style="margin-bottom:10px">
+        <button onclick="toggleAnManual()" id="an-manual-toggle"
+          style="background:none;border:none;font-family:'Nunito',sans-serif;font-size:11px;font-weight:700;color:var(--text2);cursor:pointer;padding:0;display:flex;align-items:center;gap:5px">
+          <span id="an-manual-arrow">▶</span> Modo manual (forzar dirección y timeframe)
+        </button>
+        <div id="an-manual-fields" style="display:none;margin-top:8px;padding:10px 12px;background:rgba(255,209,0,.06);border:1px solid rgba(255,209,0,.2);border-radius:8px">
+          <div style="font-size:9px;font-weight:800;color:#ffd100;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">⚠️ Modo manual — el análisis valida tu hipótesis, no es neutral</div>
+          <div style="display:flex;gap:8px">
+            <select id="an-pos" style="flex:1;background:var(--input-bg);border:1.5px solid var(--border);border-radius:8px;color:var(--text);font-family:'Nunito',sans-serif;font-size:13px;font-weight:700;padding:9px 10px;outline:none;-webkit-appearance:none">
+              <option value="Long">Long</option>
+              <option value="Short">Short</option>
+            </select>
+            <select id="an-tf" style="flex:1;background:var(--input-bg);border:1.5px solid var(--border);border-radius:8px;color:var(--text);font-family:'Nunito',sans-serif;font-size:13px;font-weight:700;padding:9px 10px;outline:none;-webkit-appearance:none">
+              <option value="1m">1m</option>
+              <option value="5m">5m</option>
+              <option value="15m" selected>15m</option>
+              <option value="1h">1h</option>
+              <option value="4h">4h</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
       <!-- Result area -->
       <div id="an-result"></div>
+
       <!-- Saved analyses log -->
       <div id="an-log-wrap" style="display:none">
         <div style="font-size:10px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">📋 Análisis guardados</div>
@@ -2134,8 +2151,9 @@ function togglePnlView(id, event){
 
 // ══ TICKER ANALYZER ══════════════════════════════════════════════════════════
 
-let analyzerOpen = false;
-let analyzerLog  = JSON.parse(localStorage.getItem('tpro_an_log') || '[]');
+let analyzerOpen  = false;
+let analyzerManual = false;
+let analyzerLog   = JSON.parse(localStorage.getItem('tpro_an_log') || '[]');
 
 function toggleAnalyzer(){
   analyzerOpen = !analyzerOpen;
@@ -2143,8 +2161,14 @@ function toggleAnalyzer(){
   document.getElementById('analyzer-arrow').textContent = analyzerOpen ? '▲' : '▼';
 }
 
+function toggleAnManual(){
+  analyzerManual = !analyzerManual;
+  document.getElementById('an-manual-fields').style.display = analyzerManual ? 'block' : 'none';
+  document.getElementById('an-manual-arrow').textContent    = analyzerManual ? '▼' : '▶';
+}
+
 function onAnTickerInput(){
-  const val = (document.getElementById('an-ticker').value || '').toUpperCase();
+  const val  = (document.getElementById('an-ticker').value || '').toUpperCase();
   const drop = document.getElementById('an-ticker-drop');
   const known = Object.keys(TICKER_MAP);
   const hist  = [...new Set(D.trades.map(t=>t.ticker))];
@@ -2158,10 +2182,63 @@ function showAnDrop(){ onAnTickerInput(); }
 function hideAnDrop(){ setTimeout(()=>{ document.getElementById('an-ticker-drop').classList.remove('open'); }, 200); }
 function pickAnTicker(t){ document.getElementById('an-ticker').value = t; document.getElementById('an-ticker-drop').classList.remove('open'); }
 
+// ── AUTO-DETECT best direction & timeframe from market data ──────────────────
+function autoDetectDirection(tc){
+  const c1h  = tc.change1h  || 0;
+  const c4h  = tc.change4h  || 0;
+  const c24  = tc.change24h || 0;
+  const btc1h = _cgCache?.pd?.bitcoin?.usd_1h_change || 0;
+  const rs    = c1h - btc1h;
+  const accel = c1h - (c24 / 24);
+  const md    = _cgCache?.md || [];
+  const alts  = md.filter(c=>c.id!=='bitcoin'&&c.id!=='ethereum'&&c.price_change_percentage_24h!=null);
+  const amp   = alts.length ? Math.round(alts.filter(c=>(c.price_change_percentage_24h||0)>0).length/alts.length*100) : 50;
+
+  // Score Long
+  let sLong = 0;
+  if(c4h > 0) sLong += 2;
+  if(c1h > 0) sLong += 1;
+  if(c24 > 0) sLong += 1;
+  if(rs  > 0) sLong += 1;
+  if(accel > 0.05) sLong += 1;
+  if(amp >= 60) sLong += 1;
+  sLong = Math.min(7, sLong);
+
+  // Score Short
+  let sShort = 0;
+  if(rs    < 0) sShort += 2;
+  if(c1h   < 0) sShort += 2;
+  if(accel < -0.05) sShort += 2;
+  if(c24   < 0) sShort += 1;
+  if(c4h   < 0) sShort += 1;
+  sShort = Math.min(7, sShort);
+
+  // Pick direction
+  let pos, score;
+  if(sLong > sShort && sLong >= 3){
+    pos = 'Long'; score = sLong;
+  } else if(sShort > sLong && sShort >= 3){
+    pos = 'Short'; score = sShort;
+  } else {
+    // Tie or both low — pick best or NO TRADE
+    pos = sLong >= sShort ? 'Long' : 'Short';
+    score = Math.max(sLong, sShort);
+  }
+
+  // Suggest timeframe based on acceleration / volatility
+  const absAccel = Math.abs(accel);
+  const abs1h    = Math.abs(c1h);
+  let tf;
+  if(absAccel > 0.3 || abs1h > 2)      tf = '5m';   // fast move → scalp
+  else if(absAccel > 0.1 || abs1h > 1) tf = '15m';
+  else if(abs1h > 0.5)                  tf = '1h';
+  else                                   tf = '4h';   // slow/flat → higher TF
+
+  return { pos, score, sLong, sShort, tf, c1h, c4h, c24, rs, accel, amp, btc1h };
+}
+
 async function runTickerAnalysis(){
   const ticker = (document.getElementById('an-ticker').value || '').trim().toUpperCase();
-  const pos    = document.getElementById('an-pos').value;
-  const tf     = document.getElementById('an-tf').value;
   if(!ticker){ alert('Ingresá un ticker'); return; }
   if(!location.protocol.startsWith('https')){
     document.getElementById('an-result').innerHTML =
@@ -2171,34 +2248,43 @@ async function runTickerAnalysis(){
   const btn = document.getElementById('an-btn');
   btn.disabled = true; btn.innerHTML = '⟳ Analizando…';
 
-  // 1. Fetch ticker data (reuse cache)
-  try {
-    await fetchTickerChanges([ticker]);
-    // Also ensure BTC/ETH are fetched for context
-    await fetchTickerChanges(['BTC','ETH']);
-    // Ensure CoinGecko global data for amplitude
+  try{
+    await fetchTickerChanges([ticker, 'BTC', 'ETH']);
     if(!_cgCache || (Date.now()-_cgCacheTime) > 90000){
       try{ await fetchCoinGeckoData(); }catch(e){}
     }
   } catch(e){
     document.getElementById('an-result').innerHTML =
-      '<div style="font-size:12px;color:#ff3d57;padding:10px;text-align:center">❌ Error fetching datos. Reintentá.</div>';
+      '<div style="font-size:12px;color:#ff3d57;padding:10px;text-align:center">❌ Error de conexión. Reintentá.</div>';
     btn.disabled=false; btn.innerHTML='🔍 Analizar'; return;
   }
 
   const tc = tickerChangeCache[ticker] || null;
   if(!tc){
     document.getElementById('an-result').innerHTML =
-      '<div style="font-size:12px;color:#ff3d57;padding:10px;text-align:center">❌ No se encontraron datos para <strong>${ticker}</strong>. Verificá el símbolo.</div>';
+      `<div style="font-size:12px;color:#ff3d57;padding:10px;text-align:center">❌ No se encontraron datos para <strong>${ticker}</strong>. Verificá el símbolo.</div>`;
     btn.disabled=false; btn.innerHTML='🔍 Analizar'; return;
   }
 
   btn.disabled=false; btn.innerHTML='🔍 Analizar';
-  document.getElementById('an-result').innerHTML = buildAnalysisHTML(ticker, pos, tf, tc);
+
+  // Auto or manual mode
+  const isManual = analyzerManual;
+  let pos, tf;
+  if(isManual){
+    pos = document.getElementById('an-pos').value;
+    tf  = document.getElementById('an-tf').value;
+  } else {
+    const auto = autoDetectDirection(tc);
+    pos = auto.pos;
+    tf  = auto.tf;
+  }
+
+  document.getElementById('an-result').innerHTML = buildAnalysisHTML(ticker, pos, tf, tc, isManual);
   renderAnLog();
 }
 
-function buildAnalysisHTML(ticker, pos, tf, tc){
+function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
   const isLong = pos === 'Long';
   const c1h  = tc.change1h  || 0;
   const c4h  = tc.change4h  || 0;
@@ -2210,107 +2296,126 @@ function buildAnalysisHTML(ticker, pos, tf, tc){
   const alts  = md.filter(c=>c.id!=='bitcoin'&&c.id!=='ethereum'&&c.price_change_percentage_24h!=null);
   const amp   = alts.length ? Math.round(alts.filter(c=>(c.price_change_percentage_24h||0)>0).length/alts.length*100) : 50;
 
-  // ── Context score (same as calcContextScore) ──────────────────────────
-  let score = 0;
-  if(isLong){
-    if(c4h>0)score+=2; if(c1h>0)score+=1; if(c24>0)score+=1;
-    if(rs>0)score+=1; if(accel>0.05)score+=1; if(amp>=60)score+=1;
-  } else {
-    if(rs<0)score+=2; if(c1h<0)score+=2; if(accel<-0.05)score+=2;
-    if(c24<0)score+=1; if(c4h<0)score+=1;
-  }
+  // Auto-detect scores for both sides (to show in output)
+  const auto = autoDetectDirection(tc);
+
+  // Context score for the chosen direction
+  let score = isLong ? auto.sLong : auto.sShort;
   score = Math.min(7, score);
   const tier = getTier(score);
 
-  // ── Dynamic TPs ────────────────────────────────────────────────────────
-  const dtp = getTickerDynamicTP(ticker, pos, tier);
+  // ── Dynamic TPs ───────────────────────────────────────────────────────────
+  const dtp  = getTickerDynamicTP(ticker, pos, tier);
   const sign = isLong ? '+' : '-';
 
-  // ── SL suggestion: based on historical avg MAE or tier fallback ───────
-  const stats = loadMomentumStats();
-  const s = stats[tier];
+  // ── SL suggestion ────────────────────────────────────────────────────────
+  const stats  = loadMomentumStats();
+  const s      = stats[tier];
   const avgMAE = s.avgMAE || (tier==='fuerte'?3:tier==='medio'?2:1.5);
   const slPct  = parseFloat((avgMAE * 1.2).toFixed(1));
 
-  // ── Historical EV for this ticker/pos ──────────────────────────────────
+  // ── Historical EV ─────────────────────────────────────────────────────────
   const closed = D.trades.filter(t=>!t.open);
   const tkPos  = closed.filter(t=>t.ticker===ticker&&t.pos===pos);
-  const tkAll  = closed.filter(t=>t.ticker===ticker);
-  const tkEV   = tkPos.length>=2 ? tkPos.reduce((s,t)=>s+t.resultado,0)/tkPos.length : null;
+  const tkEV   = tkPos.length>=2 ? tkPos.reduce((a,t)=>a+t.resultado,0)/tkPos.length : null;
   const tkWR   = tkPos.length>=2 ? tkPos.filter(t=>t.resultado>0).length/tkPos.length*100 : null;
   const tkN    = tkPos.length;
 
-  // ── Percentile zone (entry-level, cmPrice=0) ──────────────────────────
+  // ── MFE zone at entry ────────────────────────────────────────────────────
   const prior = stats._priors[tier];
   const mfeZ  = mfeZoneState(0, s, prior);
-  const pctPosition = 0; // at entry, we're at P0
-  const pctZone = 'temprano';
-  const pctColor = '#00c853';
 
-  // ── Exhaustion at entry ────────────────────────────────────────────────
-  const acCls = accel > 0.08 ? 'fast' : accel < -0.08 ? 'slow' : 'flat';
+  // ── Exhaustion at entry ───────────────────────────────────────────────────
+  const acCls      = accel > 0.08 ? 'fast' : accel < -0.08 ? 'slow' : 'flat';
   const contraBias = isLong ? (c1h < -0.5 && c4h < -1) : (c1h > 0.5 && c4h > 1);
-  const exhEntry = calcExhaustionScore({
-    cmPrice: 0, p75: mfeZ.p75, p90: mfeZ.p90,
-    condProbNext: null, acCls, livePct: 0,
-    contraBias, momentumTier: tier
+  const exhEntry   = calcExhaustionScore({
+    cmPrice:0, p75:mfeZ.p75, p90:mfeZ.p90,
+    condProbNext:null, acCls, livePct:0, contraBias, momentumTier:tier
   });
   const exhL = exhaustionLabel(exhEntry);
 
-  // ── CONFIDENCE score 0–100 ────────────────────────────────────────────
-  // Based on: context score (0-7) + no contraBias + accel + hist data
-  let conf = Math.round(score / 7 * 60); // up to 60 from context
+  // ── CONFIDENCE ────────────────────────────────────────────────────────────
+  let conf = Math.round(score / 7 * 60);
   if(!contraBias) conf += 15;
   if(acCls==='fast') conf += 10;
   if(tkN >= 3) conf += 10;
   if(dtp.hasData) conf += 5;
   conf = Math.min(100, conf);
+  // Penalise manual mode slightly (no penalty on logic, just visual honesty)
   const confLabel = conf >= 70 ? 'Alta' : conf >= 45 ? 'Media' : 'Baja';
   const confColor = conf >= 70 ? '#00c853' : conf >= 45 ? '#ffd100' : '#ff6b00';
 
-  // ── RECOMMENDATION ────────────────────────────────────────────────────
+  // ── RECOMMENDATION ────────────────────────────────────────────────────────
   let recAction, recColor, recBg, recBorder, recEmoji;
-  const momentumOk = isLong ? (c1h > 0 && c4h > 0) : (c1h < 0 && c4h < 0);
-  const accelOk    = isLong ? accel > 0.05 : accel < -0.05;
+  const accelOk = isLong ? accel > 0.05 : accel < -0.05;
+
+  // In auto mode, also consider whether the auto-chosen direction is clearly dominant
+  const dirClear = !isManual && Math.abs(auto.sLong - auto.sShort) >= 2;
 
   if(contraBias){
-    recAction = 'NO ENTRAR'; recEmoji = '⏸';
-    recColor = '#ffd100'; recBg = 'rgba(255,209,0,.08)'; recBorder = 'rgba(255,209,0,.4)';
-  } else if(score >= 5 && accelOk){
-    recAction = isLong ? 'LONG' : 'SHORT'; recEmoji = isLong ? '✅' : '🔴';
-    recColor = isLong ? '#00c853' : '#ff3d57';
-    recBg = isLong ? 'rgba(0,200,83,.1)' : 'rgba(255,61,87,.1)';
-    recBorder = isLong ? 'rgba(0,200,83,.4)' : 'rgba(255,61,87,.4)';
+    recAction='NO ENTRAR'; recEmoji='⏸';
+    recColor='#ffd100'; recBg='rgba(255,209,0,.08)'; recBorder='rgba(255,209,0,.4)';
+  } else if(score >= 5 && accelOk && (isManual || dirClear)){
+    recAction=isLong?'LONG':'SHORT'; recEmoji=isLong?'✅':'🔴';
+    recColor=isLong?'#00c853':'#ff3d57';
+    recBg=isLong?'rgba(0,200,83,.1)':'rgba(255,61,87,.1)';
+    recBorder=isLong?'rgba(0,200,83,.4)':'rgba(255,61,87,.4)';
+  } else if(score >= 5 && !accelOk){
+    recAction=isLong?'LONG — ESPERAR ACELERACIÓN':'SHORT — ESPERAR ACELERACIÓN'; recEmoji='🟡';
+    recColor='#ffd100'; recBg='rgba(255,209,0,.08)'; recBorder='rgba(255,209,0,.4)';
   } else if(score >= 3){
-    recAction = isLong ? 'LONG CAUTELOSO' : 'SHORT CAUTELOSO'; recEmoji = '🟡';
-    recColor = '#ffd100'; recBg = 'rgba(255,209,0,.08)'; recBorder = 'rgba(255,209,0,.4)';
+    recAction=isLong?'LONG CAUTELOSO':'SHORT CAUTELOSO'; recEmoji='🟡';
+    recColor='#ffd100'; recBg='rgba(255,209,0,.08)'; recBorder='rgba(255,209,0,.4)';
   } else {
-    recAction = 'NO ENTRAR'; recEmoji = '⏸';
-    recColor = '#ff6b00'; recBg = 'rgba(255,107,0,.08)'; recBorder = 'rgba(255,107,0,.3)';
+    recAction='NO ENTRAR'; recEmoji='⏸';
+    recColor='#ff6b00'; recBg='rgba(255,107,0,.08)'; recBorder='rgba(255,107,0,.3)';
   }
 
-  // ── MARKET BIAS ───────────────────────────────────────────────────────
-  const biasOk = isLong ? (amp >= 55 && btc1h > 0) : (amp < 45 && btc1h < 0);
-  const biasNeutral = !biasOk && !contraBias;
+  // ── MARKET BIAS ───────────────────────────────────────────────────────────
+  const biasOk    = isLong ? (amp >= 55 && btc1h > 0) : (amp < 45 && btc1h < 0);
   const biasLabel = contraBias ? 'En contra' : biasOk ? 'A favor' : 'Neutral';
   const biasColor = contraBias ? '#ff3d57' : biasOk ? '#00c853' : '#ffd100';
 
-  // ── JUSTIFICATION bullets ──────────────────────────────────────────────
+  // ── TF rationale ─────────────────────────────────────────────────────────
+  const absAccel = Math.abs(accel);
+  const abs1h    = Math.abs(c1h);
+  const tfReason = absAccel > 0.3 || abs1h > 2 ? 'Movimiento rápido → scalp'
+    : absAccel > 0.1 || abs1h > 1 ? 'Momentum activo → intradía medio'
+    : abs1h > 0.5                  ? 'Momentum lento → intradía largo'
+    :                                 'Mercado lateral → temporalidad alta';
+
+  // ── BULLETS ───────────────────────────────────────────────────────────────
   const bullets = [];
-  if(c1h !== 0 || c4h !== 0)
-    bullets.push(`Momentum 1H ${c1h>=0?'+':''}${c1h.toFixed(1)}% · 4H ${c4h>=0?'+':''}${c4h.toFixed(1)}% · 24H ${c24>=0?'+':''}${c24.toFixed(1)}%`);
-  if(acCls === 'fast')
-    bullets.push(`Aceleración positiva — 1H supera el promedio horario de 24H en ${Math.abs(accel).toFixed(2)}%`);
-  else if(acCls === 'slow')
+  bullets.push(`Momentum 1H ${c1h>=0?'+':''}${c1h.toFixed(1)}% · 4H ${c4h>=0?'+':''}${c4h.toFixed(1)}% · 24H ${c24>=0?'+':''}${c24.toFixed(1)}%`);
+  if(acCls==='fast')
+    bullets.push(`Aceleración activa — precio acelerando ${Math.abs(accel).toFixed(2)}% sobre promedio horario`);
+  else if(acCls==='slow')
     bullets.push(`⚠️ Desaceleración — 1H por debajo del promedio horario de 24H`);
-  bullets.push(`P0 — ${pctZone} (entrada, recorrido total disponible)`);
-  if(rs > 0.5) bullets.push(`Fuerza relativa vs BTC: ${rs>=0?'+':''}${rs.toFixed(1)}% — supera al mercado`);
-  else if(rs < -0.5) bullets.push(`⚠️ Debilidad relativa vs BTC: ${rs.toFixed(1)}%`);
-  if(tkN >= 2) bullets.push(`Historial ${ticker} ${pos}: ${tkN} trades · WR ${tkWR.toFixed(0)}% · EV ${tkEV>=0?'+':''}${tkEV.toFixed(1)}%`);
-  if(!dtp.hasData) bullets.push(`Sin historial MFE propio — usando priors calibrados para TP/SL`);
+  if(rs > 0.5)       bullets.push(`RS vs BTC: ${rs>=0?'+':''}${rs.toFixed(1)}% — supera al mercado`);
+  else if(rs < -0.5) bullets.push(`⚠️ RS vs BTC: ${rs.toFixed(1)}% — debilidad relativa`);
+  if(!isManual)      bullets.push(`TF sugerido: ${tf} — ${tfReason}`);
+  if(tkN >= 2)       bullets.push(`Historial ${ticker} ${pos}: ${tkN} trades · WR ${tkWR.toFixed(0)}% · EV ${tkEV>=0?'+':''}${tkEV.toFixed(1)}%`);
+  if(!dtp.hasData)   bullets.push(`Sin historial MFE propio — usando priors calibrados para TP/SL`);
   const bulletsHTML = bullets.slice(0,4).map(b=>`<div class="an-bullet">${b}</div>`).join('');
 
-  // ── HISTORY block ─────────────────────────────────────────────────────
+  // ── DIRECTION comparison (only in auto mode) ──────────────────────────────
+  const dirCompare = !isManual ? `
+    <div style="display:flex;gap:6px;margin-bottom:10px">
+      <div style="flex:1;background:${auto.sLong>=auto.sShort?'rgba(0,200,83,.1)':'var(--card)'};border:1.5px solid ${auto.sLong>=auto.sShort?'rgba(0,200,83,.4)':'var(--border)'};border-radius:8px;padding:8px;text-align:center">
+        <div style="font-size:9px;color:var(--text2);font-weight:700;margin-bottom:3px">LONG score</div>
+        <div style="font-size:18px;font-weight:900;color:${auto.sLong>=5?'#00c853':auto.sLong>=3?'#ffd100':'#9999b8'}">${auto.sLong}/7</div>
+      </div>
+      <div style="flex:1;background:${auto.sShort>auto.sLong?'rgba(255,61,87,.1)':'var(--card)'};border:1.5px solid ${auto.sShort>auto.sLong?'rgba(255,61,87,.4)':'var(--border)'};border-radius:8px;padding:8px;text-align:center">
+        <div style="font-size:9px;color:var(--text2);font-weight:700;margin-bottom:3px">SHORT score</div>
+        <div style="font-size:18px;font-weight:900;color:${auto.sShort>=5?'#ff3d57':auto.sShort>=3?'#ffd100':'#9999b8'}">${auto.sShort}/7</div>
+      </div>
+      <div style="flex:1;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:8px;text-align:center">
+        <div style="font-size:9px;color:var(--text2);font-weight:700;margin-bottom:3px">TF sugerido</div>
+        <div style="font-size:18px;font-weight:900;color:#ff6b00">${tf}</div>
+      </div>
+    </div>` : `<div style="font-size:9px;color:#ffd100;background:rgba(255,209,0,.07);border:1px solid rgba(255,209,0,.25);border-radius:6px;padding:5px 10px;margin-bottom:10px">⚠️ Modo manual — analizando hipótesis ${pos} · ${tf}</div>`;
+
+  // ── HISTORY block ─────────────────────────────────────────────────────────
   const histHTML = tkN >= 2
     ? `<div class="an-history">
         <div style="font-size:9px;font-weight:800;color:#00aaff;margin-bottom:5px;text-transform:uppercase;letter-spacing:.5px">📊 Historial ${ticker} ${pos}</div>
@@ -2322,16 +2427,17 @@ function buildAnalysisHTML(ticker, pos, tf, tc){
       </div>`
     : `<div class="an-history" style="font-size:11px">📋 Sin historial propio para ${ticker} ${pos} — priors calibrados</div>`;
 
-  // ── TIMESTAMP for save ─────────────────────────────────────────────────
   const now = new Date();
-  const ts = `${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}`;
+  const ts  = `${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}`;
 
   return `
-  <div class="an-rec" style="background:${recBg};border:2px solid ${recBorder}">
+  <div class="an-rec" style="background:${recBg};border:2px solid ${recBorder};margin-bottom:10px">
     <div class="an-action" style="color:${recColor}">${recEmoji} ${recAction}</div>
     <div class="an-conf" style="color:${recColor}">Confianza: <strong>${confLabel}</strong> (${conf}/100)</div>
-    <div style="font-size:10px;color:var(--text2);margin-top:4px">${ticker} · ${pos} · ${tf} · ${ts}</div>
+    <div style="font-size:10px;color:var(--text2);margin-top:4px">${ticker} · ${pos} · ${tf} · ${ts}${isManual?' · <span style="color:#ffd100">manual</span>':' · <span style="color:#00aaff">auto</span>'}</div>
   </div>
+
+  ${dirCompare}
 
   <div class="an-grid">
     <div class="an-cell">
@@ -2340,7 +2446,7 @@ function buildAnalysisHTML(ticker, pos, tf, tc){
     </div>
     <div class="an-cell">
       <div class="an-cell-lbl">Estado movimiento</div>
-      <div class="an-cell-val" style="color:${pctColor}">P0 — ${pctZone}</div>
+      <div class="an-cell-val" style="color:#00c853">P0 — temprano</div>
     </div>
     <div class="an-cell">
       <div class="an-cell-lbl">Score mkt</div>
@@ -2363,11 +2469,11 @@ function buildAnalysisHTML(ticker, pos, tf, tc){
       <div class="an-tp-val" style="color:#ff6b00">${sign}${dtp.tp2.toFixed(1)}%</div>
     </div>
     <div class="an-tp-box" style="border:1px solid rgba(255,61,87,.25)">
-      <div class="an-tp-lbl">Runner / p90</div>
+      <div class="an-tp-lbl">Runner p90</div>
       <div class="an-tp-val" style="color:#ff3d57">${sign}${dtp.runner.toFixed(1)}%</div>
     </div>
     <div class="an-tp-box" style="border:1px solid rgba(153,153,184,.25)">
-      <div class="an-tp-lbl">SL sugerido</div>
+      <div class="an-tp-lbl">SL</div>
       <div class="an-tp-val" style="color:#9999b8">${isLong?'-':'+'}${slPct.toFixed(1)}%</div>
     </div>
   </div>
@@ -2383,18 +2489,16 @@ function buildAnalysisHTML(ticker, pos, tf, tc){
 
 function saveAnalysis(ticker, pos, tf, rec, conf, confLabel){
   const now = new Date();
-  const entry = {
+  analyzerLog.unshift({
     ticker, pos, tf, rec, conf, confLabel,
     ts: now.toISOString(),
     label: `${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}`
-  };
-  analyzerLog.unshift(entry);
+  });
   if(analyzerLog.length > 20) analyzerLog = analyzerLog.slice(0,20);
   localStorage.setItem('tpro_an_log', JSON.stringify(analyzerLog));
   renderAnLog();
-  // Flash feedback
   const btn = document.querySelector('.an-save-btn');
-  if(btn){ btn.textContent = '✅ Guardado'; setTimeout(()=>{ btn.innerHTML='📋 Guardar análisis'; },1500); }
+  if(btn){ btn.textContent='✅ Guardado'; setTimeout(()=>{ btn.innerHTML='📋 Guardar análisis'; },1500); }
 }
 
 function deleteAnalysis(idx){
@@ -2409,21 +2513,17 @@ function renderAnLog(){
   if(!wrap||!el) return;
   if(!analyzerLog.length){ wrap.style.display='none'; return; }
   wrap.style.display = 'block';
-  const recColor = r =>
-    r.includes('NO ENTRAR') ? '#ffd100' :
-    r.includes('LONG')      ? '#00c853' :
-    r.includes('SHORT')     ? '#ff3d57' : '#ff6b00';
+  const rc = r => r.includes('NO ENTRAR')?'#ffd100':r.includes('LONG')?'#00c853':r.includes('SHORT')?'#ff3d57':'#ff6b00';
   el.innerHTML = analyzerLog.map((e,i)=>`
     <div class="an-log-item">
       <div style="flex:1;min-width:0">
-        <div style="font-size:12px;font-weight:900;color:${recColor(e.rec)}">${e.ticker} ${e.pos} — ${e.rec}</div>
+        <div style="font-size:12px;font-weight:900;color:${rc(e.rec)}">${e.ticker} ${e.pos} — ${e.rec}</div>
         <div style="font-size:10px;color:var(--text2)">${e.tf} · ${e.label} · Conf. ${e.confLabel} (${e.conf})</div>
       </div>
       <button onclick="deleteAnalysis(${i})" style="background:none;border:none;color:var(--text2);font-size:16px;cursor:pointer;padding:2px 4px;flex-shrink:0">×</button>
     </div>`).join('');
 }
 
-// Init log on load
 renderAnLog();
 
 function renderOpenTrades(){
