@@ -4809,12 +4809,23 @@ function getFechaValue(){
   if(fh.style.display!=='none'&&fh.value) return fh.value.slice(0,10);
   return document.getElementById('f-fecha').value;
 }
-// Extract full datetime string (YYYY-MM-DDTHH:mm) — falls back to date+T00:00
+// Extract full datetime string (YYYY-MM-DDTHH:mm)
+// - Edit mode: use f-fechahora (datetime-local, explicitly set by user)
+// - Create mode: f-fechahora is hidden → use f-fecha date + current local time
 function getFechaHoraValue(){
   const fh=document.getElementById('f-fechahora');
-  if(fh.style.display!=='none'&&fh.value) return fh.value;
+  if(fh.style.display!=='none'&&fh.value) return fh.value; // edit mode: respect stored value
   const d=document.getElementById('f-fecha').value;
-  return d?d+'T00:00':'';
+  if(!d) return '';
+  // CREATE: stamp with real local device time (not UTC, not 00:00)
+  const now=new Date();
+  const pad=n=>String(n).padStart(2,'0');
+  const todayStr=`${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}`;
+  // Only use current time if the selected date is today — otherwise 00:00 is safer
+  if(d===todayStr){
+    return `${d}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
+  }
+  return d+'T00:00';
 }
 
 function populateSelects(){
