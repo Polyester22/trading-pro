@@ -518,6 +518,22 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
       </div>
       <input type="hidden" id="f-estado" value="">
     </div>
+    <!-- ══ SNAPSHOT DEL ANALIZADOR ══ -->
+    <div class="field" style="margin-bottom:10px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+        <label style="margin-bottom:0">🤖 Snapshot del analizador <span style="color:var(--text2);font-size:9px;font-weight:600">opcional — para estadísticas vs sistema</span></label>
+        <button type="button" onclick="captureAnSnapshot()" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:4px 10px;font-family:'Nunito',sans-serif;font-size:11px;font-weight:700;color:#ff6b00;cursor:pointer;white-space:nowrap" id="snap-capture-btn" title="Forzar re-captura del snapshot para el ticker actual">🔄 Actualizar</button>
+      </div>
+      <div id="snap-display" style="display:none;background:var(--input-bg);border:1.5px solid var(--border);border-radius:8px;padding:10px 12px;font-size:11px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <span style="font-size:10px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.5px">Análisis capturado</span>
+          <button type="button" onclick="clearAnSnapshot()" style="background:none;border:none;color:var(--text2);font-size:13px;cursor:pointer">✕</button>
+        </div>
+        <div id="snap-content" style="display:grid;grid-template-columns:1fr 1fr;gap:4px"></div>
+      </div>
+      <div id="snap-empty" style="font-size:11px;color:var(--text2);padding:4px 0">Se captura automáticamente al escribir el ticker. Requiere HTTPS y datos en caché.</div>
+      <input type="hidden" id="f-an-snapshot" value="">
+    </div>
     <div class="field"><label>Observaciones</label><textarea id="f-obs" placeholder="Notas del trade..." rows="2" style="resize:vertical;font-family:'Nunito',sans-serif;font-size:14px;padding:10px 12px;background:var(--input-bg);border:1.5px solid var(--border);border-radius:8px;color:var(--text);width:100%;outline:none;transition:border-color .2s" onfocus="this.style.borderColor='#ff6b00'" onblur="this.style.borderColor='var(--border)'"></textarea></div>
   </div>
   <button class="btn btn-orange" onclick="saveTrade()" id="btn-save">➕ Agregar Trade</button>
@@ -699,7 +715,6 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
           <th>Fl.</th>
           <th title="Observaciones">Obs</th>
           <th onclick="sortBy('durMins')">Duración<span class="sort-icon" id="sort-durMins">↕</span></th>
-          <th title="Resultado siguiendo sistema">App</th>
           <th></th>
         </tr>
         <tr class="filter-row">
@@ -1194,6 +1209,176 @@ function renderDrawdownByMonth(T){
   '</div>';
 }
 
+// ══ SISTEMA EDGE STATS — compara mis decisiones vs el analizador ══
+function renderSistemaStats(T){
+  var el = document.getElementById('sistema-stats-container');
+  if(!el) return;
+
+  // Only trades with a snapshot
+  var withSnap = T.filter(function(t){ return t.anSnapshot; });
+  if(withSnap.length < 3){
+    el.innerHTML = withSnap.length === 0
+      ? '' // hide silently until first snapshot
+      : '<div class="chart-box" style="cursor:default"><div class="chart-label">🤖 Sistema vs mis decisiones</div><div style="font-size:12px;color:var(--text2);padding:8px">Necesitás al menos 3 trades cerrados con snapshot del analizador. Seguí capturando al entrar.</div></div>';
+    return;
+  }
+
+  // ── Classify each trade ──────────────────────────────────────────────────
+  function classify(t){
+    var snap = t.anSnapshot;
+    var dir  = snap.dirSugerida || ''; // 'LONG','SHORT','LONG CAUTELOSO','SHORT CAUTELOSO','NO ENTRAR'
+    var pos  = t.pos; // 'Long' or 'Short'
+    if(dir === 'NO ENTRAR') return 'neutral'; // system said skip
+    var sysLong  = dir.includes('LONG');
+    var sysShort = dir.includes('SHORT');
+    if(sysLong  && pos === 'Long')  return 'alineado';
+    if(sysShort && pos === 'Short') return 'alineado';
+    if(sysLong  && pos === 'Short') return 'contra';
+    if(sysShort && pos === 'Long')  return 'contra';
+    return 'neutral';
+  }
+
+  withSnap.forEach(function(t){ t._sysClass = classify(t); });
+
+  var alineados = withSnap.filter(function(t){ return t._sysClass === 'alineado'; });
+  var contras   = withSnap.filter(function(t){ return t._sysClass === 'contra'; });
+  var neutrales = withSnap.filter(function(t){ return t._sysClass === 'neutral'; });
+
+  function grp(arr){
+    if(!arr.length) return null;
+    var wins = arr.filter(function(t){ return t.resultado > 0; });
+    var ev   = arr.reduce(function(s,t){ return s + t.resultado; }, 0) / arr.length;
+    var pnl  = arr.reduce(function(s,t){ return s + (t.margen * t.resultado / 100); }, 0);
+    return { n: arr.length, wins: wins.length, wr: wins.length / arr.length * 100, ev: ev, pnl: pnl };
+  }
+
+  var sAlin = grp(alineados);
+  var sCont = grp(contras);
+  var sNeut = grp(neutrales);
+
+  // ── 2. Por nivel de confianza ─────────────────────────────────────────────
+  var altaConf = withSnap.filter(function(t){ return t.anSnapshot.confianza >= 70; });
+  var mediaConf= withSnap.filter(function(t){ return t.anSnapshot.confianza >= 45 && t.anSnapshot.confianza < 70; });
+  var bajaConf = withSnap.filter(function(t){ return t.anSnapshot.confianza < 45; });
+  var sConf = [
+    { label:'🟢 Alta (70+)', s: grp(altaConf), col:'#00c853' },
+    { label:'🟡 Media (45–70)', s: grp(mediaConf), col:'#ffd100' },
+    { label:'🔴 Baja (<45)', s: grp(bajaConf), col:'#ff6b00' }
+  ].filter(function(x){ return x.s && x.s.n >= 1; });
+
+  // ── 3. Por score de mercado ───────────────────────────────────────────────
+  var highScore = withSnap.filter(function(t){ return t.anSnapshot.scoreMkt >= 5; });
+  var midScore  = withSnap.filter(function(t){ return t.anSnapshot.scoreMkt >= 3 && t.anSnapshot.scoreMkt < 5; });
+  var lowScore  = withSnap.filter(function(t){ return t.anSnapshot.scoreMkt < 3; });
+  var sScore = [
+    { label:'🔥 Score ≥5 (fuerte)', s: grp(highScore), col:'#00c853' },
+    { label:'🟡 Score 3–4 (medio)', s: grp(midScore), col:'#ffd100' },
+    { label:'⚠️ Score <3 (débil)', s: grp(lowScore), col:'#ff6b00' }
+  ].filter(function(x){ return x.s && x.s.n >= 1; });
+
+  // ── 4. Por sesgo de mercado ───────────────────────────────────────────────
+  var sA = withSnap.filter(function(t){ return t.anSnapshot.sesgomkt === 'A favor'; });
+  var sE = withSnap.filter(function(t){ return t.anSnapshot.sesgomkt === 'En contra'; });
+  var sN = withSnap.filter(function(t){ return t.anSnapshot.sesgomkt === 'Neutral'; });
+  var sSesgo = [
+    { label:'✅ Sesgo a favor', s: grp(sA), col:'#00c853' },
+    { label:'❌ Sesgo en contra', s: grp(sE), col:'#ff3d57' },
+    { label:'↔ Sesgo neutral', s: grp(sN), col:'#9999b8' }
+  ].filter(function(x){ return x.s && x.s.n >= 1; });
+
+  // ── 5. Por momentum 1H ───────────────────────────────────────────────────
+  var momAligned   = withSnap.filter(function(t){
+    var m = t.anSnapshot.mom1h || 0;
+    return (t.pos === 'Long' && m > 0) || (t.pos === 'Short' && m < 0);
+  });
+  var momOpposed   = withSnap.filter(function(t){
+    var m = t.anSnapshot.mom1h || 0;
+    return (t.pos === 'Long' && m < 0) || (t.pos === 'Short' && m > 0);
+  });
+  var sMom = [
+    { label:'🟢 1H a favor', s: grp(momAligned), col:'#00c853' },
+    { label:'🔴 1H en contra', s: grp(momOpposed), col:'#ff3d57' }
+  ].filter(function(x){ return x.s && x.s.n >= 1; });
+
+  // ── Insight principal ─────────────────────────────────────────────────────
+  var insightHTML = '';
+  if(sAlin && sCont && sAlin.n >= 3 && sCont.n >= 3){
+    var diff = sAlin.ev - sCont.ev;
+    var col  = diff > 0 ? '#00c853' : '#ffd100';
+    var sign = diff >= 0 ? '+' : '';
+    insightHTML = '<div style="background:rgba(255,107,0,.07);border:1px solid rgba(255,107,0,.2);border-radius:10px;padding:10px 12px;margin-bottom:12px;font-size:12px;font-weight:700;color:var(--text);line-height:1.6">' +
+      (diff > 5
+        ? '✅ Seguir el sistema te da <strong style="color:#00c853">'+sign+diff.toFixed(1)+'%</strong> de EV extra por trade vs ir en contra. Edge real detectado.'
+        : diff < -3
+          ? '⚠️ Curiosamente, operás <strong style="color:#ffd100">'+Math.abs(diff).toFixed(1)+'% mejor</strong> cuando vas en contra del sistema. Revisá si el analizador está bien calibrado.'
+          : '→ Sin diferencia significativa todavía entre seguir o ignorar el sistema. Necesitás más muestra (≥10 trades por grupo).'
+      ) + '</div>';
+  } else if(sAlin && sAlin.n >= 3){
+    insightHTML = '<div style="background:rgba(0,200,83,.06);border:1px solid rgba(0,200,83,.2);border-radius:10px;padding:10px 12px;margin-bottom:12px;font-size:12px;font-weight:700;color:var(--text2)">'+sAlin.n+' trades alineados con el sistema: EV '+(sAlin.ev>=0?'+':'')+sAlin.ev.toFixed(1)+'%. Necesitás más trades en contra para comparar.</div>';
+  }
+
+  // ── Helpers de render ─────────────────────────────────────────────────────
+  function statCard(label, s, col){
+    if(!s) return '';
+    var evCol = s.ev >= 0 ? '#00c853' : '#ff3d57';
+    return '<div style="background:var(--surface2);border-radius:10px;padding:12px;border-left:3px solid '+(col||'#ff6b00')+'">' +
+      '<div style="font-size:11px;font-weight:800;color:'+(col||'#ff6b00')+';margin-bottom:8px">'+label+'</div>' +
+      '<div style="font-size:24px;font-weight:900;color:'+evCol+'">'+(s.ev>=0?'+':'')+s.ev.toFixed(1)+'%</div>' +
+      '<div style="font-size:10px;color:var(--text2);margin-top:4px">WR '+s.wr.toFixed(0)+'% · '+s.n+' trade'+(s.n>1?'s':'')+'</div>' +
+      '<div style="font-size:11px;font-weight:800;color:'+(s.pnl>=0?'#00c853':'#ff3d57')+';margin-top:2px">P&L '+(s.pnl>=0?'+':'')+'$'+s.pnl.toFixed(0)+'</div>' +
+    '</div>';
+  }
+
+  function barChart(rows){
+    var maxEV = Math.max.apply(null, rows.map(function(r){ return r.s ? Math.abs(r.s.ev) : 0; }).concat([1]));
+    return rows.filter(function(r){ return r.s && r.s.n >= 1; }).map(function(r){
+      var w = Math.max(Math.abs(r.s.ev)/maxEV*100, 3);
+      var evCol = r.s.ev >= 0 ? '#00c853' : '#ff3d57';
+      return '<div class="bar-row">' +
+        '<div class="bar-name" style="width:130px;font-size:10px;white-space:normal;line-height:1.2">'+r.label+'</div>' +
+        '<div class="bar-track"><div class="bar-fill '+(r.s.ev>=0?'pos':'neg')+'" style="width:'+w+'%">'+(w>25?(r.s.ev>=0?'+':'')+r.s.ev.toFixed(1)+'%':'')+'</div></div>' +
+        '<div style="font-size:10px;font-weight:800;color:'+evCol+';width:45px;text-align:right;flex-shrink:0">'+(r.s.ev>=0?'+':'')+r.s.ev.toFixed(1)+'%</div>' +
+        '<div class="bar-count">'+r.s.n+'t · '+r.s.wr.toFixed(0)+'%WR</div>' +
+      '</div>';
+    }).join('');
+  }
+
+  el.innerHTML = '<div class="chart-box" style="cursor:default;border-color:rgba(0,170,255,.25)">' +
+    '<div class="chart-label" style="color:#00aaff">🤖 Sistema vs mis decisiones ('+withSnap.length+' trades con snapshot)</div>' +
+    insightHTML +
+
+    // ── Bloque 1: Alineado vs Contra ──────────────────────────────────────
+    '<div style="font-size:10px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Alineación con el sistema</div>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">' +
+      statCard('✅ Alineado con el sistema', sAlin, '#00c853') +
+      statCard('❌ En contra del sistema', sCont, '#ff3d57') +
+      (sNeut ? statCard('🟡 Neutral / No trade', sNeut, '#9999b8') : '') +
+    '</div>' +
+
+    // ── Bloque 2: Por confianza ───────────────────────────────────────────
+    '<div style="font-size:10px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Por nivel de confianza</div>' +
+    '<div style="margin-bottom:14px">'+barChart(sConf)+'</div>' +
+
+    // ── Bloque 3: Por score de mercado ────────────────────────────────────
+    '<div style="font-size:10px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Por score de mercado (0–7)</div>' +
+    '<div style="margin-bottom:14px">'+barChart(sScore)+'</div>' +
+
+    // ── Bloque 4: Por sesgo de mercado ────────────────────────────────────
+    '<div style="font-size:10px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Por sesgo de mercado</div>' +
+    '<div style="margin-bottom:14px">'+barChart(sSesgo)+'</div>' +
+
+    // ── Bloque 5: Por momentum 1H ─────────────────────────────────────────
+    '<div style="font-size:10px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Por momentum 1H (alineado con tu posición)</div>' +
+    '<div style="margin-bottom:10px">'+barChart(sMom)+'</div>' +
+
+    '<div style="font-size:10px;color:var(--text2);padding:8px 0;border-top:1px solid var(--border);margin-top:4px">' +
+      '⚠️ Mínimo recomendado: 10 trades por grupo para conclusiones confiables. · ' +
+      '<strong style="color:#00aaff">'+withSnap.length+'</strong> de <strong>'+T.length+'</strong> trades tienen snapshot.' +
+      (withSnap.length < T.length ? ' Capturá el analizador al abrir nuevos trades para aumentar la muestra.' : '') +
+    '</div>' +
+  '</div>';
+}
+
 // Hook all new stats into renderGraficos end
 const _origRenderGraficos=renderGraficos;
 renderGraficos=function(){
@@ -1208,7 +1393,7 @@ renderGraficos=function(){
   renderEstadoStats(T);
   renderSemaforoStats(T);
   renderBestTradeRec(T);
-  renderBacktestStats();
+  renderSistemaStats(T);
 };
 
 // ══ BEST TRADE RECOMMENDATION ══
@@ -2772,10 +2957,6 @@ async function refreshPrices(){
     if(pct!==null&&pct>=10){t.p10=true;changed=true;}
   });
   if(changed){persist(D);updateKPIs();}
-
-  // ── BACKTESTING SNAPSHOTS — graba estado antes de renderizar ──
-  triggerBacktestSnapshots();
-
   renderOpenTrades();
   if(btn){
     btn.innerHTML='✅ Actualizado';
@@ -2978,7 +3159,6 @@ function renderHistorial(){
       <td>${p10flag}</td>
       <td onclick="event.stopPropagation();showObs('${t.id}')" style="text-align:center;cursor:pointer">${t.obs?`<span style="font-size:14px;color:#ff6b00">💬</span>`:`<span style="color:var(--border);font-size:14px">✏️</span>`}</td>
       <td style="font-size:11px;color:var(--text2);white-space:nowrap">${_tdurStr}</td>
-      <td style="white-space:nowrap">${!t.open?btBadgeHTML(t):''}</td>
       <td onclick="event.stopPropagation()"><button class="btn-icon del" onclick="delTrade('${t.id}')">✕</button></td>
     </tr>
 `;
@@ -3718,7 +3898,7 @@ function renderGraficos(){
   <div class="desktop-col-full"><div id="estado-stats-container"></div></div>
   <div class="desktop-col-full"><div id="semaforo-stats-container"></div></div>
   <div class="desktop-col-full"><div id="best-trade-rec-container"></div></div>
-  <div class="desktop-col-full"><div id="backtest-stats-container"></div></div>
+  <div class="desktop-col-full"><div id="sistema-stats-container"></div></div>
 
   <!-- 💸 FEES STATS -->
   ${(()=>{
@@ -4617,10 +4797,20 @@ function updateTickerDropdown(){
   const filtered=val?tickers.filter(t=>t.startsWith(val)):tickers;
   dd.innerHTML=filtered.map(t=>`<div class="ticker-option" onmousedown="selectTicker('${t}')">${t}</div>`).join('');
 }
-function onTickerInput(){document.getElementById('f-ticker').value=document.getElementById('f-ticker').value.toUpperCase();updateTickerDropdown();showTickerDrop();}
+function onTickerInput(){
+  document.getElementById('f-ticker').value=document.getElementById('f-ticker').value.toUpperCase();
+  updateTickerDropdown();showTickerDrop();
+  const ticker = document.getElementById('f-ticker').value.trim();
+  if(ticker.length >= 2) syncAnalizerToTradeTicker(ticker);
+  else clearAnSnapshot();
+}
 function showTickerDrop(){const dd=document.getElementById('ticker-dropdown');if(dd.children.length)dd.classList.add('open');}
 function hideTickerDrop(){setTimeout(()=>document.getElementById('ticker-dropdown').classList.remove('open'),150);}
-function selectTicker(t){document.getElementById('f-ticker').value=t;document.getElementById('ticker-dropdown').classList.remove('open');}
+function selectTicker(t){
+  document.getElementById('f-ticker').value=t;
+  document.getElementById('ticker-dropdown').classList.remove('open');
+  syncAnalizerToTradeTicker(t);
+}
 
 // ══ FILTER DROPDOWNS (HISTORIAL) ══
 function populateFilterDropdowns(){
@@ -4813,9 +5003,23 @@ function onMargenChange(){
   calcResult(false);
 }
 
-function saveTrade(){
+async function saveTrade(){
   const ticker=document.getElementById('f-ticker').value.toUpperCase().trim();
   if(!ticker){alert('Ingresá el ticker');return;}
+
+  // ── Auto-snapshot: siempre del ticker del trade ──────────────────────────
+  // Si no hay caché para este ticker, intentar fetchear antes de guardar
+  if(!tickerChangeCache[ticker] && location.protocol.startsWith('https')){
+    const btn=document.getElementById('btn-save');
+    if(btn){btn.disabled=true;btn.innerHTML='⟳ Obteniendo datos…';}
+    try{ await fetchTickerChanges([ticker,'BTC','ETH']); }catch(e){}
+    if(btn){btn.disabled=false;btn.innerHTML=editingId?'💾 Guardar cambios':'➕ Agregar Trade';}
+  }
+  // Generar snap con datos más frescos disponibles (puede ser null si no hay red/símbolo inválido)
+  const autoSnap = buildSnapshotForTicker(ticker);
+  // Guardar en el campo hidden para que el objeto trade lo levante
+  const snapEl = document.getElementById('f-an-snapshot');
+  if(autoSnap && snapEl) snapEl.value = JSON.stringify(autoSnap);
   const resultado=parseFloat(document.getElementById('f-resultado').value)||0;
   const fechahora=getFechaHoraValue();
   const closedHoraVal=document.getElementById('f-closedhora').value||null;
@@ -4832,7 +5036,9 @@ function saveTrade(){
     open:document.getElementById('f-open').checked,
     p10:document.getElementById('f-10p').checked,obs:document.getElementById('f-obs').value,estado:document.getElementById('f-estado').value||null,semaforo:document.getElementById('f-semaforo').value||null,resultado,
     ...mfePreserved, ...maePreserved,
-    ...(closedHoraFinal?{closedHora:closedHoraFinal}:{})};
+    ...(closedHoraFinal?{closedHora:closedHoraFinal}:{}),
+    ...(()=>{const raw=document.getElementById('f-an-snapshot')?.value||'';try{return raw?{anSnapshot:JSON.parse(raw)}:{};}catch(e){return{};}})()
+  };
   // ── Preserve PnL fields & execution history from existing trade ──
   // Use form values if explicitly filled, otherwise preserve existing
   if(existingTrade){
@@ -4854,6 +5060,8 @@ function saveTrade(){
     if(existingTrade.partialCloses?.length)    t.partialCloses       = existingTrade.partialCloses;
     if(existingTrade.margenOriginal!=null)     t.margenOriginal      = existingTrade.margenOriginal;
     if(existingTrade.fechaCierre)              t.fechaCierre         = existingTrade.fechaCierre;
+    // Preserve existing snapshot if no new one was set in form
+    if(!t.anSnapshot && existingTrade.anSnapshot) t.anSnapshot = existingTrade.anSnapshot;
   }
   if(editingId){const i=D.trades.findIndex(x=>x.id===editingId);D.trades[i]=t;}else{D.trades.push(t);}
   persist(D);
@@ -4918,6 +5126,10 @@ function loadTradeForEdit(id){
     document.getElementById('f-resultado').value=t.resultado;
     document.getElementById('f-pnl').value=t.pnlNeto!=null?t.pnlNeto.toFixed(2):(t.margen?((t.margen*t.resultado)/100).toFixed(2):'');
     applyLive(t.resultado);
+    // Restore snapshot
+    const snapEl = document.getElementById('f-an-snapshot');
+    if(snapEl){ snapEl.value = t.anSnapshot ? JSON.stringify(t.anSnapshot) : ''; }
+    if(t.anSnapshot) renderSnapDisplay(t.anSnapshot); else clearAnSnapshot();
     document.getElementById('result-note').textContent='✏️ Podés editar manual o actualizar precios.';
     document.getElementById('btn-save').innerHTML='💾 Guardar cambios';
     document.getElementById('btn-cancel').style.display='flex';
@@ -4927,6 +5139,7 @@ function resetForm(){
   editingId=null;resultManualMode=false;
   ['f-ticker','f-margen','f-entrada','f-actual','f-resultado','f-pnl'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
   document.getElementById('f-obs').value='';setEstado('');setSemaforo('');
+  clearAnSnapshot();
   document.getElementById('f-lev').value=5;
   document.getElementById('f-open').checked=true;
   document.getElementById('f-10p').checked=false;
@@ -4950,6 +5163,167 @@ function resetForm(){
 }
 function cancelEdit(){resetForm();}
 
+// ══ ANALYZER SNAPSHOT — captura el estado del analizador al momento de la entrada ══
+// ══ SNAPSHOT DEL ANALIZADOR — siempre vinculado al ticker del trade ══
+
+// Función pura: genera snapshot a partir del ticker + caché. No depende del estado del analizador.
+function buildSnapshotForTicker(ticker, tradePosOverride){
+  const tc = tickerChangeCache[ticker] || null;
+  if(!tc) return null; // sin datos en caché
+
+  const auto    = autoDetectDirection(tc);
+  const c1h     = tc.change1h  || 0;
+  const c4h     = tc.change4h  || 0;
+  const c24     = tc.change24h || 0;
+  const btc1h   = _cgCache?.pd?.bitcoin?.usd_1h_change || 0;
+  const accel   = c1h - (c24 / 24);
+  const md      = _cgCache?.md || [];
+  const alts    = md.filter(c=>c.id!=='bitcoin'&&c.id!=='ethereum'&&c.price_change_percentage_24h!=null);
+  const amp     = alts.length ? Math.round(alts.filter(c=>(c.price_change_percentage_24h||0)>0).length/alts.length*100) : 50;
+
+  // TF sugerido por auto-detect
+  const tf = auto.tf;
+
+  // Para la dirección sugerida usamos los scores auto (neutral, sin sesgo del trade actual)
+  const sLong  = Math.min(7, auto.sLong);
+  const sShort = Math.min(7, auto.sShort);
+
+  // Dirección predominante según scores
+  const autoPos    = sLong >= sShort ? 'Long' : 'Short';
+  const autoScore  = autoPos === 'Long' ? sLong : sShort;
+  const tier       = getTier(autoScore);
+  const isLong     = autoPos === 'Long';
+
+  const contraBias = isLong ? (c1h < -0.5 && c4h < -1) : (c1h > 0.5 && c4h > 1);
+  const acCls      = accel > 0.08 ? 'fast' : accel < -0.08 ? 'slow' : 'flat';
+  const stats2     = loadMomentumStats();
+  const s2         = stats2[tier];
+  const prior2     = stats2._priors[tier];
+  const mfeZ2      = mfeZoneState(0, s2, prior2);
+  const exhEntry   = calcExhaustionScore({
+    cmPrice:0, p75:mfeZ2.p75, p90:mfeZ2.p90,
+    condProbNext:null, acCls, livePct:0, contraBias, momentumTier:tier
+  });
+
+  let conf = Math.round(autoScore / 7 * 60);
+  if(!contraBias) conf += 15;
+  if(acCls==='fast') conf += 10;
+  conf = Math.min(100, conf);
+
+  const accelOk  = isLong ? accel > 0.05 : accel < -0.05;
+  const dirClear = Math.abs(sLong - sShort) >= 2;
+  let dirSugerida;
+  if(contraBias)                               dirSugerida = 'NO ENTRAR';
+  else if(autoScore >= 5 && accelOk && dirClear) dirSugerida = isLong ? 'LONG' : 'SHORT';
+  else if(autoScore >= 5)                        dirSugerida = isLong ? 'LONG' : 'SHORT';
+  else if(autoScore >= 3)                        dirSugerida = isLong ? 'LONG CAUTELOSO' : 'SHORT CAUTELOSO';
+  else                                           dirSugerida = 'NO ENTRAR';
+
+  const biasOk  = isLong ? (amp >= 55 && btc1h > 0) : (amp < 45 && btc1h < 0);
+  const sesgomkt = contraBias ? 'En contra' : biasOk ? 'A favor' : 'Neutral';
+
+  return {
+    ticker,
+    dirSugerida,            // 'LONG' | 'SHORT' | 'LONG CAUTELOSO' | 'SHORT CAUTELOSO' | 'NO ENTRAR'
+    scoreLong:  sLong,      // score auto Long (0-7)
+    scoreShort: sShort,     // score auto Short (0-7)
+    confianza:  conf,       // 0-100
+    tfSugerido: tf,
+    estadoMov:  'P0 — temprano',
+    scoreMkt:   autoScore,
+    agotamiento: exhEntry,
+    sesgomkt,
+    mom1h:  c1h,
+    mom4h:  c4h,
+    mom24h: c24,
+    ts: new Date().toISOString()
+  };
+}
+
+// Sincroniza el campo del analizador con el ticker del trade y actualiza el snap display
+function syncAnalizerToTradeTicker(ticker){
+  if(!ticker) return;
+  // Actualizar el campo del analizador visualmente (sin disparar su lógica interna)
+  const anTicker = document.getElementById('an-ticker');
+  if(anTicker && anTicker.value.toUpperCase() !== ticker) anTicker.value = ticker;
+
+  // Si ya hay datos en caché, pre-generar y mostrar el snap
+  const snap = buildSnapshotForTicker(ticker);
+  if(snap){
+    document.getElementById('f-an-snapshot').value = JSON.stringify(snap);
+    renderSnapDisplay(snap);
+  } else {
+    // Sin datos aún — mostrar estado pendiente
+    clearAnSnapshot();
+    const emptyEl = document.getElementById('snap-empty');
+    if(emptyEl) emptyEl.textContent = `Sin datos en caché para ${ticker}. Se capturará automáticamente al guardar.`;
+  }
+}
+
+// Reemplaza el botón "Capturar" manual — ahora solo fuerza re-captura del ticker actual
+function captureAnSnapshot(){
+  const ticker = (document.getElementById('f-ticker').value||'').toUpperCase().trim();
+  if(!ticker){ alert('Ingresá el ticker del trade primero.'); return; }
+  const snap = buildSnapshotForTicker(ticker);
+  if(snap){
+    document.getElementById('f-an-snapshot').value = JSON.stringify(snap);
+    renderSnapDisplay(snap);
+  } else {
+    const btn = document.getElementById('snap-capture-btn');
+    if(btn){ btn.textContent='⟳ Buscando…'; btn.disabled=true; }
+    fetchTickerChanges([ticker, 'BTC', 'ETH']).then(()=>{
+      const snap2 = buildSnapshotForTicker(ticker);
+      if(snap2){
+        document.getElementById('f-an-snapshot').value = JSON.stringify(snap2);
+        renderSnapDisplay(snap2);
+      } else {
+        alert(`No se encontraron datos para ${ticker}. Verificá el símbolo.`);
+      }
+      if(btn){ btn.textContent='📋 Actualizar'; btn.disabled=false; }
+    });
+  }
+}
+
+function clearAnSnapshot(){
+  document.getElementById('f-an-snapshot').value = '';
+  document.getElementById('snap-display').style.display='none';
+  document.getElementById('snap-empty').style.display='block';
+  document.getElementById('snap-capture-btn').textContent='📋 Capturar';
+}
+
+function renderSnapDisplay(snap){
+  if(!snap){ clearAnSnapshot(); return; }
+  const dirCol = snap.dirSugerida==='LONG'?'#00c853':snap.dirSugerida==='SHORT'?'#ff3d57':snap.dirSugerida.includes('CAUTELOSO')?'#ffd100':'#9999b8';
+  const confLbl= snap.confianza>=70?'Alta':snap.confianza>=45?'Media':'Baja';
+  const confCol= snap.confianza>=70?'#00c853':snap.confianza>=45?'#ffd100':'#ff6b00';
+  const exhLbl = snap.agotamiento>=80?'Agotado':snap.agotamiento>=60?'Alto riesgo':snap.agotamiento>=35?'Cuidado':'Puede seguir';
+
+  function cell(lbl, val, col){
+    return `<div style="background:var(--surface2);border-radius:6px;padding:6px 8px">
+      <div style="font-size:9px;color:var(--text2);font-weight:700;text-transform:uppercase;letter-spacing:.3px;margin-bottom:2px">${lbl}</div>
+      <div style="font-size:12px;font-weight:900;color:${col||'var(--text)'}">${val}</div>
+    </div>`;
+  }
+
+  document.getElementById('snap-content').innerHTML =
+    cell('Ticker', snap.ticker||'—', '#ff6b00')+
+    cell('Dirección sistema', snap.dirSugerida, dirCol)+
+    cell('Confianza', `${confLbl} (${snap.confianza})`, confCol)+
+    cell('TF sugerido', snap.tfSugerido, '#ff6b00')+
+    cell('Score Long', `${snap.scoreLong??snap.scoreMkt??'—'}/7`, '#00c853')+
+    cell('Score Short', `${snap.scoreShort??'—'}/7`, '#ff3d57')+
+    cell('Agotamiento', `${snap.agotamiento} · ${exhLbl}`, snap.agotamiento>=60?'#ff3d57':snap.agotamiento>=35?'#ffd100':'#00c853')+
+    cell('Sesgo mkt', snap.sesgomkt, snap.sesgomkt==='A favor'?'#00c853':snap.sesgomkt==='En contra'?'#ff3d57':'#ffd100')+
+    cell('Mom 1H', (snap.mom1h>=0?'+':'')+snap.mom1h.toFixed(1)+'%', snap.mom1h>=0?'#00c853':'#ff3d57')+
+    cell('Mom 4H', (snap.mom4h>=0?'+':'')+snap.mom4h.toFixed(1)+'%', snap.mom4h>=0?'#00c853':'#ff3d57')+
+    cell('Mom 24H', (snap.mom24h>=0?'+':'')+snap.mom24h.toFixed(1)+'%', snap.mom24h>=0?'#00c853':'#ff3d57')+
+    cell('Estado', snap.estadoMov||'P0 — temprano', '#00c853');
+
+  document.getElementById('snap-display').style.display='block';
+  document.getElementById('snap-empty').style.display='none';
+  document.getElementById('snap-capture-btn').textContent='🔄 Actualizar';
+}
+
 // ══ OPEN COUNT BADGE ══
 function updateOpenCount(){
   const n=D.trades.filter(t=>t.open).length;
@@ -4972,23 +5346,16 @@ function getTradeRecommendation(t, livePct, totalMins, tc){
   const c1h=has?tc.change1h:null;
   const c4h=has?tc.change4h:null;
   const c24=has?tc.change24h:null;
+  // Direction: positive = ticker going up
   const trending1h=c1h!==null?(c1h>1?'up':c1h<-1?'down':'flat'):null;
   const trending4h=c4h!==null?(c4h>2?'up':c4h<-2?'down':'flat'):null;
-  const momentum=
+  const trending24=c24!==null?(c24>4?'up':c24<-4?'down':'flat'):null;
+  const momentum=  // combined momentum signal
     trending1h==='up'&&trending4h==='up'?'strong_up':
     trending1h==='down'&&trending4h==='down'?'strong_down':
     trending1h==='up'?'weak_up':
     trending1h==='down'?'weak_down':'neutral';
   const tkMov=has?` · ${t.ticker} 1h:${c1h>=0?'+':''}${c1h.toFixed(1)}% 4h:${c4h>=0?'+':''}${c4h.toFixed(1)}% 24h:${c24>=0?'+':''}${c24.toFixed(1)}%`:'';
-
-  // ── Momentum acceleration (frenando / acelerando) ─────────
-  const accel=has?(c1h||0)-((c24||0)/24):0;
-  const isAccelerating=accel>0.08;
-  const isDecelerating=accel<-0.08;
-  // Direction of momentum vs trade
-  const momFavor=isLong?(momentum==='strong_up'||momentum==='weak_up'):(momentum==='strong_down'||momentum==='weak_down');
-  const momStrong=isLong?momentum==='strong_up':momentum==='strong_down';
-  const momAgainst=isLong?(momentum==='strong_down'):momentum==='strong_up';
 
   // ── Historical stats ─────────────────────────────────────
   const similar=closed.filter(x=>x.estrategia===t.estrategia&&x.pos===t.pos);
@@ -5015,114 +5382,89 @@ function getTradeRecommendation(t, livePct, totalMins, tc){
   const bestSalida=salidaEntries.length?salidaEntries.sort((a,b)=>b.ev-a.ev)[0].k:null;
   const salidaHint=bestSalida?` Mejor salida en ${t.ticker}: ${bestSalida}.`:'';
 
-  // ── Classify trade state using percentile + exhaustion ─────
-  // Uses MFE stats to determine percentile position
-  const lev=t.lev||1;
-  const cmPrice=Math.abs(pct)/lev; // pure price % (no leverage)
-  const ctxScore=has?calcContextScore(tc,t.pos):null;
-  const tier=ctxScore!==null?getTier(ctxScore):(t.entryContextScore!=null?getTier(t.entryContextScore):'debil');
-  const stats=loadMomentumStats();
-  const s=stats[tier];
-  const prior=stats._priors[tier];
-  const p75=s.p75MFE||prior.avgMax*1.3;
-  const p90=s.p90MFE||prior.avgMax*1.6;
-  const pctPosition=Math.min(100,Math.round(cmPrice/p90*100));
-
-  // ── Trade state: Temprano / Medio / Avanzado ───────────────
-  // P0–P30 + bajo exhaustion → Temprano
-  // P30–P70 → Medio
-  // P70+ o exhaustion alto → Avanzado
-  const inProfit=pct>3;
-  const inLoss=pct<-3;
-  // Simple exhaustion proxy for this function (full calc done in renderTPProbBlock)
-  const simpleExh=(pctPosition>=70)||((isDecelerating||momAgainst)&&pctPosition>=40);
-  const tradeState=pctPosition<30&&!simpleExh?'temprano':pctPosition<70&&!simpleExh?'medio':'avanzado';
-
   const atTP=effectiveTP&&pct>=effectiveTP*0.85;
   const atSL=effectiveSL&&pct<=-effectiveSL*0.8;
   const overtime=avgDurMins&&totalMins>avgDurMins*1.5;
+  const inProfit=pct>3;
+  const inLoss=pct<-3;
 
+  // ── Clasificación de duración (modificador de contexto) ──────────────────
   const durCtxRec = classifyTradeDuration(t, totalMins);
-  const durHint = durCtxRec.stage==='extendido'?` ⏱ Trade extendido.`:durCtxRec.stage==='temprano'?` ⚡ Fase inicial.`:'';
+  const durHint = durCtxRec.stage === 'extendido'
+    ? ` ⏱ Trade extendido (${Math.round((durCtxRec.ratio||1)*100)}% del tiempo típico).`
+    : durCtxRec.stage === 'temprano'
+    ? ` ⚡ Trade temprano — aún en fase inicial.`
+    : '';
+
+  // ── Sesión de mercado (modificador de confianza) ──────────────────────────
   const sessCtxRec = getMarketSessionContext();
-  const sessHint = sessCtxRec.confidence<0.85?` ${sessCtxRec.label}: ${sessCtxRec.note}.`:'';
-  const tkCtx=tkTrades.length>=3?` | ${t.ticker}: WR ${(tkPosWR!==null?(tkPosWR*100).toFixed(0):'-')}% EV ${tkEV>=0?'+':''}${tkEV.toFixed(1)}%`:tkTrades.length>0?` | ${t.ticker}: ${tkTrades.length} trade${tkTrades.length>1?'s':''}`:'';
+  const sessHint = sessCtxRec.confidence < 0.85
+    ? ` ${sessCtxRec.label}: ${sessCtxRec.note}.`
+    : '';
 
-  // ══ PRIORIDAD 1: ESTADO DEL TRADE (percentil + agotamiento) ══
-  // Siempre tiene prioridad sobre momentum y contexto
+  // Ticker context
+  const tkCtx=tkTrades.length>=3?` | ${t.ticker}: WR ${(tkPosWR!==null?(tkPosWR*100).toFixed(0):'-')}% EV ${tkEV>=0?'+':''}${tkEV.toFixed(1)}%`
+    :tkTrades.length>0?` | ${t.ticker}: ${tkTrades.length} trade${tkTrades.length>1?'s':''}`:'';
 
-  // Estado Avanzado → Reducir (independientemente del contexto)
-  if(tradeState==='avanzado'&&inProfit&&isDecelerating)
-    return{action:'🟠 Reducir',color:'#ff6b00',bg:'rgba(255,107,0,.1)',border:'rgba(255,107,0,.35)',
-      reason:`Trade en zona avanzada (P${pctPosition}) + frenando — reducir exposición.${salidaHint}`+tkMov+tkCtx};
-  if(tradeState==='avanzado'&&inProfit)
-    return{action:'🟠 Reducir',color:'#ff6b00',bg:'rgba(255,107,0,.1)',border:'rgba(255,107,0,.35)',
-      reason:`Trade en zona avanzada (P${pctPosition}) — comenzar a asegurar ganancias.${salidaHint}`+tkMov+tkCtx};
+  // ── DECISION basada en precio del ticker + estadísticas ──
 
-  // SL histórico alcanzado
+  // 🔴 CERRAR
   if(atSL)
-    return{action:'🔴 Salir',color:'#ff3d57',bg:'rgba(255,61,87,.1)',border:'rgba(255,61,87,.35)',
-      reason:`Cerca del SL histórico (${(-effectiveSL).toFixed(1)}%) para ${t.estrategia}.`+tkCtx+tkMov};
-
-  // ══ PRIORIDAD 2: MOMENTUM (acelerando / frenando) ══
-  // Solo aplica cuando el estado no es avanzado
-
-  // Frenando + en pérdida → Salir
-  if(isDecelerating&&momAgainst&&inLoss)
-    return{action:'🔴 Salir',color:'#ff3d57',bg:'rgba(255,61,87,.1)',border:'rgba(255,61,87,.35)',
-      reason:`Frenando + mercado contra el ${t.pos} + en pérdida — cerrar.`+tkCtx+tkMov};
-
-  // Momentum fuerte contra + en pérdida → Salir
-  if(momAgainst&&has&&inLoss)
-    return{action:'🔴 Salir',color:'#ff3d57',bg:'rgba(255,61,87,.1)',border:'rgba(255,61,87,.35)',
-      reason:`${t.ticker} con momentum contra el ${t.pos}${isDecelerating?' + frenando':''} y en pérdida.`+tkCtx+tkMov};
-
-  // Overtime + en pérdida → Salir
+    return{action:'🔴 Cerrar',color:'#ff3d57',bg:'rgba(255,61,87,.1)',border:'rgba(255,61,87,.35)',
+      reason:`Cerca de tu SL histórico (${(-effectiveSL).toFixed(1)}%) para ${t.estrategia}`+tkCtx+tkMov};
   if(overtime&&inLoss)
-    return{action:'🔴 Salir',color:'#ff3d57',bg:'rgba(255,61,87,.1)',border:'rgba(255,61,87,.35)',
-      reason:`Trade extendido y en pérdida — cerrar.`+durHint+sessHint+tkCtx+tkMov};
+    return{action:'🔴 Cerrar',color:'#ff3d57',bg:'rgba(255,61,87,.1)',border:'rgba(255,61,87,.35)',
+      reason:`Overtime (${avgDurMins<60?Math.round(avgDurMins)+'m':Math.floor(avgDurMins/60)+'h'} promedio) y en pérdida`+durHint+sessHint+tkCtx+tkMov};
+  if(isLong&&momentum==='strong_down'&&inLoss)
+    return{action:'🔴 Cerrar',color:'#ff3d57',bg:'rgba(255,61,87,.1)',border:'rgba(255,61,87,.35)',
+      reason:`${t.ticker} cayendo fuerte (1h${c1h.toFixed(1)}% · 4h${c4h.toFixed(1)}%) y tu Long en pérdida`+tkCtx};
+  if(!isLong&&momentum==='strong_up'&&inLoss)
+    return{action:'🔴 Cerrar',color:'#ff3d57',bg:'rgba(255,61,87,.1)',border:'rgba(255,61,87,.35)',
+      reason:`${t.ticker} subiendo fuerte (1h+${c1h.toFixed(1)}% · 4h+${c4h.toFixed(1)}%) y tu Short en pérdida`+tkCtx};
 
-  // Momentum fuerte contra + en ganancia → Reducir
-  if(momAgainst&&has&&inProfit)
-    return{action:'🟠 Reducir',color:'#ff6b00',bg:'rgba(255,107,0,.1)',border:'rgba(255,107,0,.35)',
-      reason:`${t.ticker} frenando/girando contra el ${t.pos} con ganancia — asegurar.${salidaHint}`+tkCtx+tkMov};
-
-  // Frenando en zona media → Cuidado
-  if(isDecelerating&&tradeState==='medio')
-    return{action:'🟡 Cuidado',color:'#ffd100',bg:'rgba(255,209,0,.08)',border:'rgba(255,209,0,.4)',
-      reason:`Frenando en zona media (P${pctPosition}) — mantener con cautela.${salidaHint}`+tkMov+tkCtx};
-
-  // ══ PRIORIDAD 3: CONTEXTO (a favor / en contra / sesión) ══
-  // Solo complementa cuando estado y momentum no generaron señal clara
-
-  // Sin precios + en pérdida
+  // 🟡 PROTEGER / ESPERAR
+  if(atTP&&isLong&&(trending1h==='down'||trending4h==='down'))
+    return{action:'🟡 Proteger BE',color:'#ffd100',bg:'rgba(255,209,0,.08)',border:'rgba(255,209,0,.4)',
+      reason:`TP histórico alcanzado (${effectiveTP.toFixed(1)}%) pero ${t.ticker} perdiendo momentum.${salidaHint}`+tkCtx+tkMov};
+  if(inProfit&&isLong&&momentum==='strong_down')
+    return{action:'🟡 Proteger BE',color:'#ffd100',bg:'rgba(255,209,0,.08)',border:'rgba(255,209,0,.4)',
+      reason:`${t.ticker} girando a la baja (1h${c1h.toFixed(1)}%) con ganancia. Mové SL a entrada`+tkCtx};
+  if(inProfit&&!isLong&&momentum==='strong_up')
+    return{action:'🟡 Proteger BE',color:'#ffd100',bg:'rgba(255,209,0,.08)',border:'rgba(255,209,0,.4)',
+      reason:`${t.ticker} rebotando (1h+${c1h.toFixed(1)}%) con tu Short en ganancia. Asegurá`+tkCtx};
+  if(inProfit&&overtime)
+    return{action:'🟡 Cierre parcial',color:'#ffd100',bg:'rgba(255,209,0,.08)',border:'rgba(255,209,0,.4)',
+      reason:`Buen resultado + más tiempo del promedio.${salidaHint}`+durHint+sessHint+tkCtx+tkMov};
+  if(inProfit&&atTP)
+    return{action:'🟡 Proteger BE',color:'#ffd100',bg:'rgba(255,209,0,.08)',border:'rgba(255,209,0,.4)',
+      reason:`En tu TP histórico (${effectiveTP.toFixed(1)}%). Mové SL a entrada.${salidaHint}`+tkCtx+tkMov};
   if(!has&&inLoss)
-    return{action:'🟡 Cuidado',color:'#ffd100',bg:'rgba(255,209,0,.08)',border:'rgba(255,209,0,.4)',
-      reason:'Actualizá precios — trade en pérdida sin datos de momentum.'+tkCtx};
+    return{action:'🟡 Esperar',color:'#ffd100',bg:'rgba(255,209,0,.08)',border:'rgba(255,209,0,.4)',
+      reason:'Actualizá precios para ver el momentum del ticker'+tkCtx};
 
-  // Temprano + momentum fuerte a favor → Mantener / Entrar
-  if(tradeState==='temprano'&&momStrong&&has)
+  // 🟢 MANTENER / DEJAR CORRER
+  if(atTP&&isLong&&momentum==='strong_up')
+    return{action:'🟢 Dejar correr',color:'#00c853',bg:'rgba(0,200,83,.08)',border:'rgba(0,200,83,.35)',
+      reason:`TP histórico (${effectiveTP.toFixed(1)}%) + ${t.ticker} sigue subiendo fuerte.${salidaHint}`+tkCtx+tkMov};
+  if(atTP&&!isLong&&momentum==='strong_down')
+    return{action:'🟢 Dejar correr',color:'#00c853',bg:'rgba(0,200,83,.08)',border:'rgba(0,200,83,.35)',
+      reason:`TP histórico (${effectiveTP.toFixed(1)}%) + ${t.ticker} sigue bajando.${salidaHint}`+tkCtx+tkMov};
+  if(isLong&&momentum==='strong_up'&&inProfit)
     return{action:'🟢 Mantener',color:'#00c853',bg:'rgba(0,200,83,.08)',border:'rgba(0,200,83,.35)',
-      reason:`Trade temprano (P${pctPosition}) + momentum fuerte a favor — dejar desarrollar.`+durHint+tkCtx+tkMov};
-
-  // Temprano + momentum a favor
-  if(tradeState==='temprano'&&momFavor&&has)
+      reason:`${t.ticker} subiendo fuerte (1h+${c1h.toFixed(1)}% · 4h+${c4h.toFixed(1)}%). Long funcionando`+durHint+sessHint+tkCtx};
+  if(!isLong&&momentum==='strong_down'&&inProfit)
     return{action:'🟢 Mantener',color:'#00c853',bg:'rgba(0,200,83,.08)',border:'rgba(0,200,83,.35)',
-      reason:`Trade temprano (P${pctPosition}) + momentum a favor — en fase inicial.`+durHint+tkCtx+tkMov};
-
-  // Acelerando en zona temprana/media → Mantener
-  if(isAccelerating&&!momAgainst&&(tradeState==='temprano'||tradeState==='medio'))
+      reason:`${t.ticker} cayendo fuerte (1h${c1h.toFixed(1)}%). Short bien posicionado`+tkCtx};
+  if(isLong&&(momentum==='weak_up'||momentum==='strong_up')&&!inLoss)
     return{action:'🟢 Mantener',color:'#00c853',bg:'rgba(0,200,83,.08)',border:'rgba(0,200,83,.35)',
-      reason:`Acelerando en zona ${tradeState} (P${pctPosition}) — momentum activo.`+tkMov+tkCtx};
+      reason:`${t.ticker} con momentum positivo (1h+${c1h!==null?c1h.toFixed(1):'?'}%).`+(tkPosWR!==null?` WR ${(tkPosWR*100).toFixed(0)}% en ${t.ticker} ${t.pos}.`:'')+tkCtx};
+  if(!isLong&&(momentum==='weak_down'||momentum==='strong_down')&&!inLoss)
+    return{action:'🟢 Mantener',color:'#00c853',bg:'rgba(0,200,83,.08)',border:'rgba(0,200,83,.35)',
+      reason:`${t.ticker} con momentum negativo (1h${c1h!==null?c1h.toFixed(1):'?'}%). Short a favor`+tkCtx};
 
-  // Medio + en ventana → Mantener con cautela
-  if(tradeState==='medio')
-    return{action:'🟡 Mantener',color:'#ffd100',bg:'rgba(255,209,0,.08)',border:'rgba(255,209,0,.4)',
-      reason:`Zona media (P${pctPosition}) — mantener con cautela.${momFavor&&has?' Momentum a favor.':''}${salidaHint}`+tkCtx+tkMov};
-
-  // Sin señal clara
+  // Default
   return{action:'⚪ Sin señal',color:'var(--text2)',bg:'var(--surface2)',border:'var(--border)',
-    reason:(has?`Sin señal clara — P${pctPosition}, estado ${tradeState}.`:'Actualizá precios para análisis.')+durHint+sessHint+tkCtx+tkMov};
+    reason:(has?'Sin señal clara por ahora':'Actualizá precios para análisis del ticker')+durHint+sessHint+tkCtx+tkMov};
 }
 
 // ══ AUTO-LEARNING: PROBABILIDAD DE TP ══════════════════════════════════════
@@ -5466,67 +5808,54 @@ function exhaustionLabel(score){
   return              { label:'🟢 Puede seguir', col:'#00c853', bg:'rgba(0,200,83,.08)', border:'rgba(0,200,83,.3)' };
 }
 
-// ── SINGLE DECISION — prioridad: estado (percentil+agotamiento) > momentum > contexto ──
+// ── SINGLE DECISION — context-first hierarchy ──
+// Priority: context signals > statistical signals
 function buildDecision(exhScore, exhL, mfeZ, acCls, condProbNext, livePct, contraBias, momentumTier, durStage, sessConf){
   const isDecel   = acCls === 'slow';
   const isAccel   = acCls === 'fast';
   const inLoss    = livePct !== null && livePct < 0;
-  const inProfit  = livePct !== null && livePct > 3;
-  const probStr   = condProbNext !== null ? ` (${condProbNext}% de probabilidad de continuar)` : '';
+  const probStr   = condProbNext !== null ? ` (solo ${condProbNext}% lo logra)` : '';
   const weakMom   = momentumTier === 'debil';
   const midMom    = momentumTier === 'medio';
+  // Sufijo de contexto: aparece al final del mensaje de decisión cuando reduce confianza
   const ctxSuffix = (durStage==='extendido'&&sessConf<0.85) ? ' · timing fuera de ventana + sesión débil'
     : durStage==='extendido' ? ' · trade fuera de ventana típica'
     : sessConf<0.85 ? ' · sesión de baja actividad'
     : '';
 
-  // ══ PRIORIDAD 1: ESTADO (percentil + agotamiento) ══
-  // La recomendación de estado siempre prevalece, incluso si el contexto es "a favor"
+  // ── CONTEXT OVERRIDE: momentum+bias against trade + in loss ──
+  if(contraBias && weakMom && inLoss)
+    return `⚠️ Potencial sin confirmación — el mercado va en contra, momentum débil y en pérdida → salida rápida`;
+  if(contraBias && inLoss)
+    return `⚠️ Contexto en contra — bias opuesto y trade en pérdida → evaluar salida`;
+  if(weakMom && inLoss && isDecel)
+    return `🔴 Cerrar — momentum débil + frenando + en pérdida → no sostener`;
+  if(contraBias && weakMom)
+    return `⚠️ Contexto adverso — momentum débil + contra el bias → no dejar correr sin confirmación`;
 
+  // ── STATISTICAL: high exhaustion ──
   if(exhScore >= 80)
-    return `🔴 Salir — trade estadísticamente agotado${condProbNext !== null ? probStr : ''}`;
-
+    return `🔴 Cerrar todo — trade estadísticamente agotado${condProbNext !== null ? probStr : ''}`;
   if(exhScore >= 60){
-    // Estado avanzado + frenando → cerrar más agresivamente
-    if(isDecel) return `🔴 Reducir 70–100% — zona avanzada + frenando${contraBias ? ' + contexto en contra' : ''}`;
-    // Estado avanzado pero acelerando → dejar runner pequeño
-    if(isAccel && !contraBias) return `🟠 Reducir 50–70% — zona avanzada; acelerando, dejar runner`;
-    return `🔴 Reducir 70–100% — zona avanzada${contraBias ? ' + contexto en contra' : ''}`;
+    if(isAccel && !contraBias) return `🟠 Cerrar 50–70% — zona de alto riesgo; acelerando, dejar runner`;
+    return `🔴 Cerrar 70–100% — agotamiento${isDecel ? ' + frenando' : ''}${contraBias ? ' + contra el bias' : ''}`;
   }
 
-  // ══ PRIORIDAD 2: MOMENTUM (acelerando / frenando) ══
-  // Aplica cuando el estado no es crítico (exhScore < 60)
-
-  // Momentum + contexto adversos → señal de cierre/reducción
-  if(contraBias && weakMom && inLoss)
-    return `🔴 Salir — momentum débil + contexto en contra + en pérdida`;
-  if(contraBias && inLoss)
-    return `🔴 Reducir — contexto adverso + en pérdida → evaluar salida`;
-  if(weakMom && inLoss && isDecel)
-    return `🔴 Salir — momentum débil + frenando + en pérdida`;
-
+  // ── MEDIUM EXHAUSTION ──
   if(exhScore >= 35){
-    // Estado medio — momentum decide la intensidad
-    if(isDecel) return `🟠 Reducir exposición — frenando en zona avanzada${contraBias ? ' + contexto en contra' : ''}`;
-    if(contraBias || weakMom) return `🟡 Cuidado — zona avanzada, ${contraBias ? 'contexto en contra' : 'momentum débil'}`;
-    if(mfeZ.toP90 > 0) return `🟡 Mantener con cautela — falta +${mfeZ.toP90.toFixed(1)}% para zona extrema${mfeZ.zone==='alto'?probStr:''}`;
+    if(contraBias) return `🟡 Cuidado — potencial estadístico pero contexto no acompaña`;
+    if(weakMom)    return `🟡 Reducir exposición — momentum débil en zona avanzada`;
+    if(isDecel)    return `🟡 Cerrar parcial — frenando en zona avanzada`;
+    if(mfeZ.toP90 > 0) return `🟡 Asegurar BE — falta +${mfeZ.toP90.toFixed(1)}% para p90${mfeZ.zone==='alto'?probStr:''}`;
     return `🟡 Proteger — seguir solo si el momentum confirma`;
   }
 
-  // ══ PRIORIDAD 3: CONTEXTO (a favor / en contra / sesión) ══
-  // Complementa cuando estado y momentum son neutros/positivos
-
-  if(contraBias && weakMom)
-    return `🟡 Sin escalar — contexto adverso + momentum débil`;
-  if(contraBias)
-    return `🟡 Potencial disponible pero contexto en contra — no escalar`;
-  if(weakMom)
-    return `🟡 Recorrido disponible — momentum débil, esperá confirmación`;
-
-  // Estado temprano / bueno
+  // ── LOW EXHAUSTION: favor continuation ──
+  if(contraBias) return `🟡 Potencial disponible pero contexto en contra — no escalar`;
+  if(weakMom)    return `🟡 Recorrido disponible — momentum débil, esperá confirmación antes de mantener`;
   if(mfeZ.zone === 'bajo'){
     const distStr = mfeZ.toP75 > 0 ? `, falta +${mfeZ.toP75.toFixed(1)}% para p75` : '';
-    return `🟢 Mantener — mucho recorrido disponible${distStr}${ctxSuffix}`;
+    return `🟢 Dejar correr — mucho recorrido disponible${distStr}${ctxSuffix}`;
   }
   if(isAccel) return `🟢 Mantener — acelerando con recorrido disponible${ctxSuffix}`;
   return `🟢 Observar — probabilidad positiva, esperá señal más clara${ctxSuffix}`;
@@ -5568,8 +5897,6 @@ function renderTPProbBlock(trade, livePct){
     const accel = (c1h||0) - ((c24||0)/24);
     return accel > 0.08 ? 'fast' : accel < -0.08 ? 'slow' : 'flat';
   })() : 'flat';
-  const isDecelerating = acCls === 'slow';
-  const isAccelerating = acCls === 'fast';
 
   // contraBias: ticker price moving against trade direction (1H AND 4H)
   const contraBias = tc ? (
@@ -5752,40 +6079,48 @@ function renderTPProbBlock(trade, livePct){
   const blockId = `cont-block-${trade.id}`;
   const innerBlockId = `cont-inner-${trade.id}`;
 
-
-  // ── SEÑAL PRINCIPAL: basada en estado del trade (percentil + agotamiento) ──────
-  // Prioridad: estado (percentil) > momentum > contexto
-  // La señal principal ya está en `decision` y `exhL`; aquí derivamos el subtítulo accionable
-  let stateSignalText, stateSignalColor, stateSignalBg;
-  if(exhScore >= 80){
-    stateSignalText = `P${pctPos} — Zona agotada`; stateSignalColor='#ff3d57'; stateSignalBg='rgba(255,61,87,.12)';
-  } else if(exhScore >= 60){
-    stateSignalText = isDecelerating ? `P${pctPos} — Avanzado + frenando` : `P${pctPos} — Zona avanzada`;
-    stateSignalColor='#ff6b00'; stateSignalBg='rgba(255,107,0,.12)';
-  } else if(exhScore >= 35){
-    stateSignalText = isDecelerating ? `P${pctPos} — Frenando` : `P${pctPos} — Zona media`;
-    stateSignalColor='#ffd100'; stateSignalBg='rgba(255,209,0,.08)';
+  // ── SEÑAL PRINCIPAL: la más relevante para mostrar en el header ──────────
+  // Prioridad: contra-bias > en pérdida > extendido > momentum > neutro
+  let primarySignal, primaryColor, primaryBg;
+  if(contraBias){
+    primarySignal = `🚫 ${isLong?'Mercado bajando':'Mercado subiendo'} — contra el ${trade.pos}`;
+    primaryColor = '#ff3d57'; primaryBg = 'rgba(255,61,87,.12)';
+  } else if(livePct !== null && livePct < -2){
+    primarySignal = `📉 En pérdida (${livePct.toFixed(1)}%)`;
+    primaryColor = '#ff3d57'; primaryBg = 'rgba(255,61,87,.12)';
+  } else if(durCtx.stage === 'extendido'){
+    primarySignal = `⏱ ${durCtx.label}`;
+    primaryColor = durCtx.color; primaryBg = durCtx.bg;
+  } else if(acCls === 'slow'){
+    primarySignal = `⚠️ Frenando — momentum desacelerando`;
+    primaryColor = '#ffd100'; primaryBg = 'rgba(255,209,0,.08)';
+  } else if(acCls === 'fast' && !contraBias){
+    primarySignal = `🔥 Acelerando — momentum activo`;
+    primaryColor = '#00c853'; primaryBg = 'rgba(0,200,83,.1)';
+  } else if(livePct !== null && livePct > 3){
+    primarySignal = `✅ En ganancia (${livePct>=0?'+':''}${livePct.toFixed(1)}%)`;
+    primaryColor = '#00c853'; primaryBg = 'rgba(0,200,83,.1)';
   } else {
-    stateSignalText = isAccelerating ? `P${pctPos} — Temprano + acelerando` : `P${pctPos} — Zona temprana`;
-    stateSignalColor='#00c853'; stateSignalBg='rgba(0,200,83,.1)';
+    primarySignal = hasTickerData ? tierLabel : '⚪ Sin precios';
+    primaryColor = tierColor; primaryBg = tierColor==='#00c853'?'rgba(0,200,83,.1)':tierColor==='#ffd100'?'rgba(255,209,0,.08)':'rgba(255,107,0,.08)';
   }
 
   return `<div style="background:var(--surface2);border:1px solid ${exhScore>=80?'rgba(255,61,87,.5)':exhScore>=60?'rgba(255,107,0,.4)':exhScore>=35?'rgba(255,209,0,.4)':'var(--border)'};border-radius:8px;margin-top:8px" onclick="event.stopPropagation()" id="${blockId}">
 
-    <!-- COLLAPSED HEADER: señal + recomendación + confianza -->
+    <!-- COLLAPSED HEADER: señal principal + confianza matizada -->
     <div onclick="(function(){var el=document.getElementById('${innerBlockId}');var open=el.style.display!=='none';el.style.display=open?'none':'block';document.getElementById('${blockId}').querySelector('.cont-arrow').textContent=open?'▼':'▲'})()" style="padding:9px 12px;cursor:pointer">
-      <!-- Línea 1: SEÑAL principal (estado del trade) + confianza -->
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px">
-        <span style="font-size:13px;font-weight:900;padding:3px 10px;border-radius:6px;background:${exhL.bg};border:1.5px solid ${exhL.border};color:${exhL.col};white-space:nowrap">${exhL.label}</span>
+      <!-- Línea 1: label de continuación (prominente) + confianza -->
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:5px">
+        <div style="display:flex;align-items:center;gap:6px;min-width:0">
+          <span style="font-size:12px;font-weight:900;padding:3px 10px;border-radius:6px;background:${exhL.bg};border:1.5px solid ${exhL.border};color:${exhL.col};white-space:nowrap">${exhL.label} ${confSuffix?'<span style="font-size:9px;opacity:.85">'+confSuffix.trim()+'</span>':''}</span>
+        </div>
         <div style="display:flex;align-items:center;gap:5px;flex-shrink:0">
-          <span style="font-size:9px;font-weight:800;color:${confColor}">Confianza ${confScore}%</span>
+          <span style="font-size:9px;font-weight:800;color:${confColor}">Conf. ${confLabel} ${confScore}%</span>
           <span class="cont-arrow" style="color:var(--text2);font-size:11px">▼</span>
         </div>
       </div>
-      <!-- Línea 2: RECOMENDACIÓN concreta (decisión accionable) -->
-      <div style="font-size:10px;font-weight:800;padding:2px 8px;border-radius:5px;background:${stateSignalBg};color:${stateSignalColor};display:inline-block;margin-bottom:3px">${stateSignalText}</div>
-      <!-- Línea 3: decisión en texto corto -->
-      <div style="font-size:10px;font-weight:700;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${decision.replace(/^[🔴🟠🟡🟢⚪⚠️]\s*/,'')}</div>
+      <!-- Línea 2: señal principal del contexto -->
+      <div style="font-size:10px;font-weight:800;padding:2px 8px;border-radius:5px;background:${primaryBg};color:${primaryColor};display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${primarySignal}</div>
     </div>
 
     <!-- EXPANDED CONTENT (hidden by default) -->
@@ -5805,8 +6140,7 @@ function renderTPProbBlock(trade, livePct){
         ${sessCtx.confidence < 0.85 || durCtx.stage === 'extendido' ? `<div style="font-size:9px;color:#ffd100;background:rgba(255,209,0,.07);border:1px solid rgba(255,209,0,.2);border-radius:6px;padding:5px 9px;margin-bottom:8px">⚠️ ${sessCtx.confidence<0.85?sessCtx.note:''}${sessCtx.confidence<0.85&&durCtx.stage==='extendido'?' · ':''}${durCtx.stage==='extendido'?'Trade fuera de ventana típica — reduce confianza':''}</div>` : ''}
       </div>
 
-      <!-- SEÑALES SECUNDARIAS: contexto (a favor/en contra), sesión, momentum tier -->
-      <div style="font-size:9px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px">Contexto secundario</div>
+      <!-- SEÑALES SECUNDARIAS: compactas, en pills -->
       <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:10px">
         ${tc ? `<span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;background:${acCls==='fast'?'rgba(0,200,83,.12)':acCls==='slow'?'rgba(255,61,87,.1)':'rgba(153,153,184,.08)'};color:${acCls==='fast'?'#00c853':acCls==='slow'?'#ff3d57':'#9999b8'}">${acCls==='fast'?'🔥 Acelerando':acCls==='slow'?'⚠️ Frenando':'→ Estable'}</span>` : ''}
         ${tc ? `<span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;background:${contraBias?'rgba(255,61,87,.1)':'rgba(0,200,83,.1)'};color:${contraBias?'#ff3d57':'#00c853'}">${contraBias?`🚫 Contra ${trade.pos}`:`✅ A favor ${trade.pos}`}</span>` : ''}
@@ -5884,215 +6218,6 @@ function renderTPProbBlock(trade, livePct){
     </div>
   </div>`;
 }
-// ══════════════════════════════════════════════════════════════════════════════
-// ══ BACKTESTING ENGINE ════════════════════════════════════════════════════════
-// ══════════════════════════════════════════════════════════════════════════════
-
-// ── 1. SNAPSHOT: graba el estado actual del trade en su historial ──────────
-function recordRecSnapshot(trade, livePct, tc){
-  if(!trade.open) return;
-  const now = Date.now();
-  const last = trade.recSnaps && trade.recSnaps.length
-    ? trade.recSnaps[trade.recSnaps.length-1].ts : 0;
-  if(now - last < 5 * 60 * 1000) return; // throttle: 1 snap cada 5 min
-
-  const rec = getTradeRecommendation(trade, livePct, 0, tc);
-  const lev = trade.lev || 1;
-  const cmPrice = livePct !== null ? Math.abs(livePct) / lev : 0;
-  const ctxScore = calcContextScore(tc, trade.pos);
-  const tier = ctxScore !== null ? getTier(ctxScore) : 'debil';
-  const stats = loadMomentumStats();
-  const s = stats[tier];
-  const prior = stats._priors[tier];
-  const p90 = s.p90MFE || prior.avgMax * 1.6;
-  const pctPos = Math.min(100, Math.round(cmPrice / p90 * 100));
-  const accel = tc ? (tc.change1h||0) - ((tc.change24h||0)/24) : 0;
-  const acCls = accel > 0.08 ? 'fast' : accel < -0.08 ? 'slow' : 'flat';
-  const isLong = trade.pos === 'Long';
-  const contraBias = tc ? (isLong ? ((tc.change1h||0)<-0.5&&(tc.change4h||0)<-1) : ((tc.change1h||0)>0.5&&(tc.change4h||0)>1)) : false;
-  const mfeZ = mfeZoneState(cmPrice, s, prior);
-  const exhScore = calcExhaustionScore({ cmPrice, p75:mfeZ.p75, p90:mfeZ.p90, condProbNext:null, acCls, livePct, contraBias, momentumTier:tier, durationStage:'ventana' });
-
-  if(!trade.recSnaps) trade.recSnaps = [];
-  trade.recSnaps.push({ ts:now, rec:rec.action, pct:livePct, pctPos, exh:exhScore, mfe:trade.maxMovePct??null, mae:trade.maxAdversePct??null, conf:Math.round((1-exhScore/100)*100) });
-
-  if(!trade.recInicial){
-    trade.recInicial = rec.action;
-    trade.confInicial = Math.round((1-exhScore/100)*100);
-    trade.pctPosInicial = pctPos;
-  }
-  persist(D);
-}
-
-// ── 2. SIMULACIÓN: calcula el resultado hipotético siguiendo las recs ──────
-// Reducir → cierre 50% en ese snap | Salir/Cerrar → cierre total | Mantener → continuar
-function simulateTradeResult(trade){
-  if(!trade.recSnaps || trade.recSnaps.length < 2) return null;
-  if(trade.resultado === undefined || trade.resultado === null) return null;
-  const snaps = trade.recSnaps;
-  const margen = trade.margenOriginal || trade.margen || 1;
-  const realResult = trade.resultado;
-  const realPnl = margen * realResult / 100;
-
-  let remainingPct = 1.0;
-  let lockedPnl = 0;
-  let exitedAt = null;
-
-  for(let i = 0; i < snaps.length; i++){
-    const snap = snaps[i];
-    const action = snap.rec || '';
-    const pct = snap.pct !== null ? snap.pct : 0;
-    const isClose  = /salir|cerrar|🔴/i.test(action);
-    const isReduce = /reducir|🟠/i.test(action);
-
-    if(isClose && remainingPct > 0){
-      lockedPnl += margen * remainingPct * (pct/100);
-      remainingPct = 0;
-      exitedAt = { snap, reason:'Cerrar' };
-      break;
-    }
-    if(isReduce && remainingPct > 0.3){
-      lockedPnl += margen * remainingPct * 0.5 * (pct/100);
-      remainingPct *= 0.5;
-    }
-  }
-  if(remainingPct > 0) lockedPnl += margen * remainingPct * (realResult/100);
-
-  const simPnl = lockedPnl;
-  const simResult = margen > 0 ? simPnl / margen * 100 : 0;
-  const diffPnl = simPnl - realPnl;
-  return {
-    simResult, simPnl, realResult, realPnl, diffPnl,
-    diffPct: simResult - realResult,
-    improved: diffPnl > 0.5,
-    harmed:   diffPnl < -0.5,
-    neutral:  Math.abs(diffPnl) <= 0.5,
-    exitedAt, snapsUsed: snaps.length
-  };
-}
-
-// ── 3. STATS AGREGADAS ──────────────────────────────────────────────────────
-function computeBacktestStats(){
-  const closed = D.trades.filter(t => !t.open && t.resultado!==undefined && t.recSnaps && t.recSnaps.length>=2);
-  if(!closed.length) return null;
-  const results = closed.map(t=>({t, sim:simulateTradeResult(t)})).filter(x=>x.sim);
-  if(!results.length) return null;
-
-  const improved = results.filter(r=>r.sim.improved);
-  const harmed   = results.filter(r=>r.sim.harmed);
-  const avgDiff  = results.reduce((s,r)=>s+r.sim.diffPnl,0)/results.length;
-  const totalDiff= results.reduce((s,r)=>s+r.sim.diffPnl,0);
-
-  const byRec = {};
-  results.forEach(r=>{ const k=r.t.recInicial||'Sin rec'; if(!byRec[k])byRec[k]=[]; byRec[k].push(r.sim.diffPnl); });
-
-  const byZone = { temprano:[], medio:[], avanzado:[] };
-  results.forEach(r=>{ const p=r.t.pctPosInicial??50; const z=p<30?'temprano':p<70?'medio':'avanzado'; byZone[z].push(r.sim.diffPnl); });
-
-  return { n:results.length, improved:improved.length, harmed:harmed.length,
-    neutral:results.length-improved.length-harmed.length,
-    pctImproved:Math.round(improved.length/results.length*100),
-    avgDiff, totalDiff, byRec, byZone, results };
-}
-
-// ── 4. MINI BADGE para historial ─────────────────────────────────────────
-function btBadgeHTML(trade){
-  if(!trade.recSnaps||trade.recSnaps.length<2) return '';
-  const sim=simulateTradeResult(trade);
-  if(!sim) return '';
-  const col  = sim.improved?'#00c853':sim.harmed?'#ff3d57':'#9999b8';
-  const bg   = sim.improved?'rgba(0,200,83,.1)':sim.harmed?'rgba(255,61,87,.08)':'rgba(153,153,184,.07)';
-  const icon = sim.improved?'📈':sim.harmed?'📉':'≈';
-  const sign = sim.diffPnl>=0?'+':'';
-  return `<span style="font-size:9px;font-weight:800;padding:2px 7px;border-radius:4px;background:${bg};color:${col};border:1px solid ${col}40" title="App: ${sim.simResult>=0?'+':''}${sim.simResult.toFixed(1)}% · Δ${sign}$${sim.diffPnl.toFixed(2)}">${icon} App: ${sim.simResult>=0?'+':''}${sim.simResult.toFixed(1)}%</span>`;
-}
-
-// ── 5. RENDER SECCIÓN BACKTESTING en Stats ────────────────────────────────
-function renderBacktestStats(){
-  const el=document.getElementById('backtest-stats-container');
-  if(!el) return;
-  const stats=computeBacktestStats();
-  if(!stats){
-    el.innerHTML=`<div class="chart-box" style="opacity:.65">
-      <div class="chart-label">🧪 Backtesting de recomendaciones</div>
-      <div style="font-size:12px;color:var(--text2);text-align:center;padding:12px 0">
-        El sistema registra snapshots automáticamente mientras tenés trades abiertos.<br>
-        <span style="font-size:10px;opacity:.7">Se necesitan ≥ 2 snapshots por trade cerrado para comparar.</span>
-      </div>
-    </div>`;
-    return;
-  }
-  const pctImprColor=stats.pctImproved>=55?'#00c853':stats.pctImproved>=40?'#ffd100':'#ff3d57';
-  const totalSign=stats.totalDiff>=0?'+':'';
-  const avgSign=stats.avgDiff>=0?'+':'';
-
-  const recRows=Object.entries(stats.byRec).map(([k,v])=>{
-    const avg=v.reduce((s,x)=>s+x,0)/v.length;
-    const col=avg>=0?'#00c853':'#ff3d57';
-    return `<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border)"><span style="font-size:11px;font-weight:700">${k}</span><span style="font-size:11px;font-weight:800;color:${col}">${avg>=0?'+':''}$${avg.toFixed(2)} · ${v.length}</span></div>`;
-  }).join('');
-
-  const zoneEmoji={temprano:'⚡',medio:'🟡',avanzado:'🟠'};
-  const zoneRows=Object.entries(stats.byZone).filter(e=>e[1].length).map(([k,v])=>{
-    const avg=v.reduce((s,x)=>s+x,0)/v.length;
-    const col=avg>=0?'#00c853':'#ff3d57';
-    return `<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border)"><span style="font-size:11px;font-weight:700">${zoneEmoji[k]} ${k}</span><span style="font-size:11px;font-weight:800;color:${col}">${avg>=0?'+':''}$${avg.toFixed(2)} · ${v.length}</span></div>`;
-  }).join('');
-
-  const recentRows=[...stats.results].reverse().slice(0,6).map(r=>{
-    const sim=r.sim;
-    const col=sim.improved?'#00c853':sim.harmed?'#ff3d57':'#9999b8';
-    const sign=sim.diffPnl>=0?'+':'';
-    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border)">
-      <div><div style="font-size:11px;font-weight:800">${r.t.ticker} ${r.t.pos} · ${(r.t.fecha||'').slice(5)}</div><div style="font-size:9px;color:var(--text2)">${r.t.recInicial||'—'} · ${sim.snapsUsed} snaps</div></div>
-      <div style="text-align:right"><div style="font-size:12px;font-weight:900;color:${col}">${sign}$${sim.diffPnl.toFixed(2)}</div><div style="font-size:9px;color:var(--text2)">${sim.realResult>=0?'+':''}${sim.realResult.toFixed(1)}% → ${sim.simResult>=0?'+':''}${sim.simResult.toFixed(1)}%</div></div>
-    </div>`;
-  }).join('');
-
-  el.innerHTML=`<div class="chart-box">
-    <div class="chart-label">🧪 Backtesting — ¿Agregan valor las recomendaciones?</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px">
-      <div style="background:var(--surface2);border-radius:10px;padding:10px;text-align:center">
-        <div style="font-size:8px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">App mejora</div>
-        <div style="font-size:26px;font-weight:900;color:${pctImprColor}">${stats.pctImproved}%</div>
-        <div style="font-size:9px;color:var(--text2)">${stats.improved}/${stats.n} trades</div>
-      </div>
-      <div style="background:var(--surface2);border-radius:10px;padding:10px;text-align:center">
-        <div style="font-size:8px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">Impacto total</div>
-        <div style="font-size:22px;font-weight:900;color:${stats.totalDiff>=0?'#00c853':'#ff3d57'}">${totalSign}$${Math.abs(stats.totalDiff).toFixed(2)}</div>
-        <div style="font-size:9px;color:var(--text2)">${stats.n} trades</div>
-      </div>
-      <div style="background:var(--surface2);border-radius:10px;padding:10px;text-align:center">
-        <div style="font-size:8px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">Avg/trade</div>
-        <div style="font-size:22px;font-weight:900;color:${stats.avgDiff>=0?'#00c853':'#ff3d57'}">${avgSign}$${Math.abs(stats.avgDiff).toFixed(2)}</div>
-        <div style="font-size:9px;color:var(--text2)">${stats.harmed} empeoraron</div>
-      </div>
-    </div>
-    <div style="background:${stats.pctImproved>=55?'rgba(0,200,83,.08)':stats.pctImproved>=40?'rgba(255,209,0,.06)':'rgba(255,61,87,.07)'};border:1px solid ${stats.pctImproved>=55?'rgba(0,200,83,.3)':stats.pctImproved>=40?'rgba(255,209,0,.3)':'rgba(255,61,87,.3)'};border-radius:8px;padding:8px 12px;margin-bottom:12px;font-size:11px;font-weight:800;color:${pctImprColor}">
-      ${stats.pctImproved>=60?'✅ Las recomendaciones agregan valor real.':stats.pctImproved>=45?'🟡 Impacto mixto — necesitás más datos.':'🔴 Sin valor estadístico aún — ajustá el sistema.'} <span style="font-size:9px;opacity:.7">(${stats.n} trades con datos)</span>
-    </div>
-    ${recRows?`<div style="margin-bottom:12px"><div style="font-size:9px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px">Por recomendación inicial</div>${recRows}</div>`:''}
-    ${zoneRows?`<div style="margin-bottom:12px"><div style="font-size:9px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px">Por zona de percentil al entrar</div>${zoneRows}</div>`:''}
-    ${recentRows?`<div><div style="font-size:9px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px">Últimas comparaciones</div>${recentRows}</div>`:''}
-  </div>`;
-}
-
-// ── 6. AUTO-SNAPSHOT al actualizar precios ───────────────────────────────
-function triggerBacktestSnapshots(){
-  const open=D.trades.filter(t=>t.open&&t.entrada);
-  let changed=false;
-  open.forEach(t=>{
-    const lp=livePrices[t.ticker];
-    const price=lp||t.actual||t.entrada||0;
-    let livePct=null;
-    if(t.entrada&&price) livePct=calcPct(t.entrada,price,t.pos,t.lev);
-    const tc=tickerChangeCache[t.ticker]||null;
-    const snapsBefore=t.recSnaps?t.recSnaps.length:0;
-    recordRecSnapshot(t,livePct,tc);
-    if((t.recSnaps?t.recSnaps.length:0)>snapsBefore) changed=true;
-  });
-}
-
 // what-if replaced by renderKpiProjection
 
 // ── PARTIAL CLOSE MODAL ──
