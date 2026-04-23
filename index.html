@@ -549,7 +549,10 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
     <div class="field" style="margin-bottom:10px">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
         <label style="margin-bottom:0">🤖 Snapshot del analizador <span style="color:var(--text2);font-size:9px;font-weight:600">opcional — para estadísticas vs sistema</span></label>
-        <button type="button" onclick="captureAnSnapshot()" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:4px 10px;font-family:'Nunito',sans-serif;font-size:11px;font-weight:700;color:#ff6b00;cursor:pointer;white-space:nowrap" id="snap-capture-btn" title="Forzar re-captura del snapshot para el ticker actual">🔄 Actualizar</button>
+        <div style="display:flex;gap:6px;align-items:center">
+          <button type="button" onclick="captureAnSnapshot()" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:4px 10px;font-family:'Nunito',sans-serif;font-size:11px;font-weight:700;color:#ff6b00;cursor:pointer;white-space:nowrap" id="snap-capture-btn" title="Capturar snapshot del analizador">🔄 Actualizar</button>
+          <button type="button" onclick="deleteAnSnapshot()" style="display:none;background:var(--surface2);border:1px solid rgba(255,61,87,.35);border-radius:6px;padding:4px 10px;font-family:'Nunito',sans-serif;font-size:11px;font-weight:700;color:#ff3d57;cursor:pointer;white-space:nowrap;align-items:center;gap:4px" id="snap-delete-btn" title="Eliminar snapshot de este trade">✕ Eliminar</button>
+        </div>
       </div>
       <div id="snap-display" style="display:none;background:var(--input-bg);border:1.5px solid var(--border);border-radius:8px;padding:10px 12px;font-size:11px">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
@@ -5041,19 +5044,25 @@ async function saveTrade(){
   const ticker=document.getElementById('f-ticker').value.toUpperCase().trim();
   if(!ticker){alert('Ingresá el ticker');return;}
 
-  // ── Auto-snapshot: siempre del ticker del trade ──────────────────────────
-  // Si no hay caché para este ticker, intentar fetchear antes de guardar
-  if(!tickerChangeCache[ticker] && location.protocol.startsWith('https')){
-    const btn=document.getElementById('btn-save');
-    if(btn){btn.disabled=true;btn.innerHTML='⟳ Obteniendo datos…';}
-    try{ await fetchTickerChanges([ticker,'BTC','ETH']); }catch(e){}
-    if(btn){btn.disabled=false;btn.innerHTML=editingId?'💾 Guardar cambios':'➕ Agregar Trade';}
+  // ── Auto-snapshot: SOLO al crear un trade nuevo (nunca sobreescribir en edición) ──
+  const existingSnapOnSave = editingId ? D.trades.find(x=>x.id===editingId)?.anSnapshot : null;
+  if(!editingId || !existingSnapOnSave){
+    // Solo capturar si es trade nuevo, o si el trade existente no tiene snapshot
+    if(!tickerChangeCache[ticker] && location.protocol.startsWith('https')){
+      const btn=document.getElementById('btn-save');
+      if(btn){btn.disabled=true;btn.innerHTML='⟳ Obteniendo datos…';}
+      try{ await fetchTickerChanges([ticker,'BTC','ETH']); }catch(e){}
+      if(btn){btn.disabled=false;btn.innerHTML=editingId?'💾 Guardar cambios':'➕ Agregar Trade';}
+    }
+    const autoSnap = buildSnapshotForTicker(ticker);
+    const snapEl = document.getElementById('f-an-snapshot');
+    if(autoSnap && snapEl) snapEl.value = JSON.stringify(autoSnap);
   }
-  // Generar snap con datos más frescos disponibles (puede ser null si no hay red/símbolo inválido)
-  const autoSnap = buildSnapshotForTicker(ticker);
-  // Guardar en el campo hidden para que el objeto trade lo levante
-  const snapEl = document.getElementById('f-an-snapshot');
-  if(autoSnap && snapEl) snapEl.value = JSON.stringify(autoSnap);
+  // Si estamos editando y ya había snapshot, restaurarlo al campo hidden (no tocarlo)
+  if(editingId && existingSnapOnSave){
+    const snapEl = document.getElementById('f-an-snapshot');
+    if(snapEl) snapEl.value = JSON.stringify(existingSnapOnSave);
+  }
   const resultado=parseFloat(document.getElementById('f-resultado').value)||0;
   const fechahora=getFechaHoraValue();
   const closedHoraVal=document.getElementById('f-closedhora').value||null;
@@ -5160,10 +5169,11 @@ function loadTradeForEdit(id){
     document.getElementById('f-resultado').value=t.resultado;
     document.getElementById('f-pnl').value=t.pnlNeto!=null?t.pnlNeto.toFixed(2):(t.margen?((t.margen*t.resultado)/100).toFixed(2):'');
     applyLive(t.resultado);
-    // Restore snapshot
+    // Restore snapshot — immutable, do not overwrite
     const snapEl = document.getElementById('f-an-snapshot');
     if(snapEl){ snapEl.value = t.anSnapshot ? JSON.stringify(t.anSnapshot) : ''; }
     if(t.anSnapshot) renderSnapDisplay(t.anSnapshot); else clearAnSnapshot();
+    updateSnapEditUI();
     document.getElementById('result-note').textContent='✏️ Podés editar manual o actualizar precios.';
     document.getElementById('btn-save').innerHTML='💾 Guardar cambios';
     document.getElementById('btn-cancel').style.display='flex';
@@ -5171,6 +5181,7 @@ function loadTradeForEdit(id){
 }
 function resetForm(){
   editingId=null;resultManualMode=false;
+  updateSnapEditUI();
   ['f-ticker','f-margen','f-entrada','f-actual','f-resultado','f-pnl'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
   document.getElementById('f-obs').value='';setEstado('');setSemaforo('');
   clearAnSnapshot();
@@ -5275,33 +5286,53 @@ function buildSnapshotForTicker(ticker, tradePosOverride){
 }
 
 // Sincroniza el campo del analizador con el ticker del trade y actualiza el snap display
+// En modo edición (editingId != null), NO sobreescribe el snapshot existente
 function syncAnalizerToTradeTicker(ticker){
   if(!ticker) return;
   // Actualizar el campo del analizador visualmente (sin disparar su lógica interna)
   const anTicker = document.getElementById('an-ticker');
   if(anTicker && anTicker.value.toUpperCase() !== ticker) anTicker.value = ticker;
 
-  // Si ya hay datos en caché, pre-generar y mostrar el snap
+  // Si estamos editando y el trade ya tiene snapshot → no tocar, solo mostrarlo
+  if(editingId){
+    const existing = D.trades.find(x=>x.id===editingId);
+    if(existing?.anSnapshot){
+      // Ya se restauró en loadTradeForEdit — no sobreescribir
+      return;
+    }
+  }
+
+  // Trade nuevo (o existente sin snapshot): generar desde caché si hay datos
   const snap = buildSnapshotForTicker(ticker);
   if(snap){
     document.getElementById('f-an-snapshot').value = JSON.stringify(snap);
     renderSnapDisplay(snap);
   } else {
-    // Sin datos aún — mostrar estado pendiente
     clearAnSnapshot();
     const emptyEl = document.getElementById('snap-empty');
     if(emptyEl) emptyEl.textContent = `Sin datos en caché para ${ticker}. Se capturará automáticamente al guardar.`;
   }
 }
 
-// Reemplaza el botón "Capturar" manual — ahora solo fuerza re-captura del ticker actual
+// Captura o recalcula el snapshot manualmente
+// En modo edición pide confirmación explícita antes de sobreescribir
 function captureAnSnapshot(){
   const ticker = (document.getElementById('f-ticker').value||'').toUpperCase().trim();
   if(!ticker){ alert('Ingresá el ticker del trade primero.'); return; }
+
+  // Si estamos editando y ya hay snapshot → pedir confirmación
+  if(editingId){
+    const existing = D.trades.find(x=>x.id===editingId);
+    if(existing?.anSnapshot){
+      if(!confirm('⚠️ Este trade ya tiene un snapshot guardado al momento de entrada.\n\nSobreescribirlo puede afectar las estadísticas históricas.\n\n¿Recalcular de todos modos?')) return;
+    }
+  }
+
   const snap = buildSnapshotForTicker(ticker);
   if(snap){
     document.getElementById('f-an-snapshot').value = JSON.stringify(snap);
     renderSnapDisplay(snap);
+    updateSnapEditUI();
   } else {
     const btn = document.getElementById('snap-capture-btn');
     if(btn){ btn.textContent='⟳ Buscando…'; btn.disabled=true; }
@@ -5310,11 +5341,33 @@ function captureAnSnapshot(){
       if(snap2){
         document.getElementById('f-an-snapshot').value = JSON.stringify(snap2);
         renderSnapDisplay(snap2);
+        updateSnapEditUI();
       } else {
         alert(`No se encontraron datos para ${ticker}. Verificá el símbolo.`);
       }
-      if(btn){ btn.textContent='📋 Actualizar'; btn.disabled=false; }
+      if(btn){ updateSnapEditUI(); btn.disabled=false; }
     });
+  }
+}
+
+// Elimina el snapshot del trade actual (solo disponible en modo edición)
+function deleteAnSnapshot(){
+  if(!confirm('¿Eliminar el snapshot de este trade? Esta acción no se puede deshacer.')) return;
+  clearAnSnapshot();
+  updateSnapEditUI();
+}
+
+// Actualiza los botones del snapshot según el contexto (nuevo vs edición, con/sin snapshot)
+function updateSnapEditUI(){
+  const btn = document.getElementById('snap-capture-btn');
+  const delBtn = document.getElementById('snap-delete-btn');
+  const hasSnap = !!(document.getElementById('f-an-snapshot')?.value);
+  if(editingId){
+    if(btn) btn.innerHTML = hasSnap ? '🔄 Recalcular' : '📋 Capturar';
+    if(delBtn) delBtn.style.display = hasSnap ? 'inline-flex' : 'none';
+  } else {
+    if(btn) btn.innerHTML = '🔄 Actualizar';
+    if(delBtn) delBtn.style.display = 'none';
   }
 }
 
