@@ -748,12 +748,19 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
           <th data-col="fecha"><button id="flt-fecha-btn" onclick="openDateRange()" style="background:var(--input-bg);border:1px solid var(--border);border-radius:5px;color:var(--text2);cursor:pointer;font-size:11px;font-weight:700;padding:4px 6px;width:100%;text-align:left">📅 Rango</button></th>
           <th data-col="ticker"><select id="flt-ticker" onchange="renderHistorial()"><option value="">Todos</option></select></th>
           <th data-col="pos"><select id="flt-pos" onchange="renderHistorial()"><option value="">Todos</option><option value="Long">Long</option><option value="Short">Short</option></select></th>
-          <th data-col="resultado"></th><th data-col="maxMovePct"></th><th data-col="efic"></th><th data-col="pnlNeto"></th>
+          <th data-col="resultado"></th>
+          <th data-col="maxMovePct"></th>
+          <th data-col="efic"></th>
+          <th data-col="pnlNeto"></th>
+          <th data-col="margen"></th>
+          <th data-col="lev"></th>
           <th data-col="temp"><select id="flt-temp" onchange="renderHistorial()"><option value="">Todas</option><option value="1m">1m</option><option value="5m">5m</option><option value="15m">15m</option><option value="1h">1h</option><option value="4h">4h</option><option value="1d">1d</option></select></th>
           <th data-col="estrategia"><select id="flt-estrat" onchange="renderHistorial()"><option value="">Todas</option></select></th>
           <th data-col="salida"><select id="flt-salida" onchange="renderHistorial()"><option value="">Todas</option></select></th>
           <th data-col="timing"><select id="flt-timing" onchange="renderHistorial()"><option value="">Todos</option><option value="A tiempo">A tiempo</option><option value="Retest">Retest</option><option value="Antes">Antes</option><option value="Tarde">Tarde</option></select></th>
-          <th data-col="fl"></th><th data-col="obs"></th><th data-col="durMins"></th>
+          <th data-col="fl"></th>
+          <th data-col="obs"></th>
+          <th data-col="durMins"></th>
           <th data-col="_del"><button onclick="clearFilters()" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:11px;font-weight:700">✕</button></th>
         </tr>
       </thead>
