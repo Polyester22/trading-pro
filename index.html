@@ -699,6 +699,7 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
           <th>Fl.</th>
           <th title="Observaciones">Obs</th>
           <th onclick="sortBy('durMins')">Duración<span class="sort-icon" id="sort-durMins">↕</span></th>
+          <th title="Resultado siguiendo sistema">App</th>
           <th></th>
         </tr>
         <tr class="filter-row">
@@ -1207,6 +1208,7 @@ renderGraficos=function(){
   renderEstadoStats(T);
   renderSemaforoStats(T);
   renderBestTradeRec(T);
+  renderBacktestStats();
 };
 
 // ══ BEST TRADE RECOMMENDATION ══
@@ -2770,6 +2772,10 @@ async function refreshPrices(){
     if(pct!==null&&pct>=10){t.p10=true;changed=true;}
   });
   if(changed){persist(D);updateKPIs();}
+
+  // ── BACKTESTING SNAPSHOTS — graba estado antes de renderizar ──
+  triggerBacktestSnapshots();
+
   renderOpenTrades();
   if(btn){
     btn.innerHTML='✅ Actualizado';
@@ -2972,6 +2978,7 @@ function renderHistorial(){
       <td>${p10flag}</td>
       <td onclick="event.stopPropagation();showObs('${t.id}')" style="text-align:center;cursor:pointer">${t.obs?`<span style="font-size:14px;color:#ff6b00">💬</span>`:`<span style="color:var(--border);font-size:14px">✏️</span>`}</td>
       <td style="font-size:11px;color:var(--text2);white-space:nowrap">${_tdurStr}</td>
+      <td style="white-space:nowrap">${!t.open?btBadgeHTML(t):''}</td>
       <td onclick="event.stopPropagation()"><button class="btn-icon del" onclick="delTrade('${t.id}')">✕</button></td>
     </tr>
 `;
@@ -3711,6 +3718,7 @@ function renderGraficos(){
   <div class="desktop-col-full"><div id="estado-stats-container"></div></div>
   <div class="desktop-col-full"><div id="semaforo-stats-container"></div></div>
   <div class="desktop-col-full"><div id="best-trade-rec-container"></div></div>
+  <div class="desktop-col-full"><div id="backtest-stats-container"></div></div>
 
   <!-- 💸 FEES STATS -->
   ${(()=>{
@@ -5876,6 +5884,215 @@ function renderTPProbBlock(trade, livePct){
     </div>
   </div>`;
 }
+// ══════════════════════════════════════════════════════════════════════════════
+// ══ BACKTESTING ENGINE ════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ── 1. SNAPSHOT: graba el estado actual del trade en su historial ──────────
+function recordRecSnapshot(trade, livePct, tc){
+  if(!trade.open) return;
+  const now = Date.now();
+  const last = trade.recSnaps && trade.recSnaps.length
+    ? trade.recSnaps[trade.recSnaps.length-1].ts : 0;
+  if(now - last < 5 * 60 * 1000) return; // throttle: 1 snap cada 5 min
+
+  const rec = getTradeRecommendation(trade, livePct, 0, tc);
+  const lev = trade.lev || 1;
+  const cmPrice = livePct !== null ? Math.abs(livePct) / lev : 0;
+  const ctxScore = calcContextScore(tc, trade.pos);
+  const tier = ctxScore !== null ? getTier(ctxScore) : 'debil';
+  const stats = loadMomentumStats();
+  const s = stats[tier];
+  const prior = stats._priors[tier];
+  const p90 = s.p90MFE || prior.avgMax * 1.6;
+  const pctPos = Math.min(100, Math.round(cmPrice / p90 * 100));
+  const accel = tc ? (tc.change1h||0) - ((tc.change24h||0)/24) : 0;
+  const acCls = accel > 0.08 ? 'fast' : accel < -0.08 ? 'slow' : 'flat';
+  const isLong = trade.pos === 'Long';
+  const contraBias = tc ? (isLong ? ((tc.change1h||0)<-0.5&&(tc.change4h||0)<-1) : ((tc.change1h||0)>0.5&&(tc.change4h||0)>1)) : false;
+  const mfeZ = mfeZoneState(cmPrice, s, prior);
+  const exhScore = calcExhaustionScore({ cmPrice, p75:mfeZ.p75, p90:mfeZ.p90, condProbNext:null, acCls, livePct, contraBias, momentumTier:tier, durationStage:'ventana' });
+
+  if(!trade.recSnaps) trade.recSnaps = [];
+  trade.recSnaps.push({ ts:now, rec:rec.action, pct:livePct, pctPos, exh:exhScore, mfe:trade.maxMovePct??null, mae:trade.maxAdversePct??null, conf:Math.round((1-exhScore/100)*100) });
+
+  if(!trade.recInicial){
+    trade.recInicial = rec.action;
+    trade.confInicial = Math.round((1-exhScore/100)*100);
+    trade.pctPosInicial = pctPos;
+  }
+  persist(D);
+}
+
+// ── 2. SIMULACIÓN: calcula el resultado hipotético siguiendo las recs ──────
+// Reducir → cierre 50% en ese snap | Salir/Cerrar → cierre total | Mantener → continuar
+function simulateTradeResult(trade){
+  if(!trade.recSnaps || trade.recSnaps.length < 2) return null;
+  if(trade.resultado === undefined || trade.resultado === null) return null;
+  const snaps = trade.recSnaps;
+  const margen = trade.margenOriginal || trade.margen || 1;
+  const realResult = trade.resultado;
+  const realPnl = margen * realResult / 100;
+
+  let remainingPct = 1.0;
+  let lockedPnl = 0;
+  let exitedAt = null;
+
+  for(let i = 0; i < snaps.length; i++){
+    const snap = snaps[i];
+    const action = snap.rec || '';
+    const pct = snap.pct !== null ? snap.pct : 0;
+    const isClose  = /salir|cerrar|🔴/i.test(action);
+    const isReduce = /reducir|🟠/i.test(action);
+
+    if(isClose && remainingPct > 0){
+      lockedPnl += margen * remainingPct * (pct/100);
+      remainingPct = 0;
+      exitedAt = { snap, reason:'Cerrar' };
+      break;
+    }
+    if(isReduce && remainingPct > 0.3){
+      lockedPnl += margen * remainingPct * 0.5 * (pct/100);
+      remainingPct *= 0.5;
+    }
+  }
+  if(remainingPct > 0) lockedPnl += margen * remainingPct * (realResult/100);
+
+  const simPnl = lockedPnl;
+  const simResult = margen > 0 ? simPnl / margen * 100 : 0;
+  const diffPnl = simPnl - realPnl;
+  return {
+    simResult, simPnl, realResult, realPnl, diffPnl,
+    diffPct: simResult - realResult,
+    improved: diffPnl > 0.5,
+    harmed:   diffPnl < -0.5,
+    neutral:  Math.abs(diffPnl) <= 0.5,
+    exitedAt, snapsUsed: snaps.length
+  };
+}
+
+// ── 3. STATS AGREGADAS ──────────────────────────────────────────────────────
+function computeBacktestStats(){
+  const closed = D.trades.filter(t => !t.open && t.resultado!==undefined && t.recSnaps && t.recSnaps.length>=2);
+  if(!closed.length) return null;
+  const results = closed.map(t=>({t, sim:simulateTradeResult(t)})).filter(x=>x.sim);
+  if(!results.length) return null;
+
+  const improved = results.filter(r=>r.sim.improved);
+  const harmed   = results.filter(r=>r.sim.harmed);
+  const avgDiff  = results.reduce((s,r)=>s+r.sim.diffPnl,0)/results.length;
+  const totalDiff= results.reduce((s,r)=>s+r.sim.diffPnl,0);
+
+  const byRec = {};
+  results.forEach(r=>{ const k=r.t.recInicial||'Sin rec'; if(!byRec[k])byRec[k]=[]; byRec[k].push(r.sim.diffPnl); });
+
+  const byZone = { temprano:[], medio:[], avanzado:[] };
+  results.forEach(r=>{ const p=r.t.pctPosInicial??50; const z=p<30?'temprano':p<70?'medio':'avanzado'; byZone[z].push(r.sim.diffPnl); });
+
+  return { n:results.length, improved:improved.length, harmed:harmed.length,
+    neutral:results.length-improved.length-harmed.length,
+    pctImproved:Math.round(improved.length/results.length*100),
+    avgDiff, totalDiff, byRec, byZone, results };
+}
+
+// ── 4. MINI BADGE para historial ─────────────────────────────────────────
+function btBadgeHTML(trade){
+  if(!trade.recSnaps||trade.recSnaps.length<2) return '';
+  const sim=simulateTradeResult(trade);
+  if(!sim) return '';
+  const col  = sim.improved?'#00c853':sim.harmed?'#ff3d57':'#9999b8';
+  const bg   = sim.improved?'rgba(0,200,83,.1)':sim.harmed?'rgba(255,61,87,.08)':'rgba(153,153,184,.07)';
+  const icon = sim.improved?'📈':sim.harmed?'📉':'≈';
+  const sign = sim.diffPnl>=0?'+':'';
+  return `<span style="font-size:9px;font-weight:800;padding:2px 7px;border-radius:4px;background:${bg};color:${col};border:1px solid ${col}40" title="App: ${sim.simResult>=0?'+':''}${sim.simResult.toFixed(1)}% · Δ${sign}$${sim.diffPnl.toFixed(2)}">${icon} App: ${sim.simResult>=0?'+':''}${sim.simResult.toFixed(1)}%</span>`;
+}
+
+// ── 5. RENDER SECCIÓN BACKTESTING en Stats ────────────────────────────────
+function renderBacktestStats(){
+  const el=document.getElementById('backtest-stats-container');
+  if(!el) return;
+  const stats=computeBacktestStats();
+  if(!stats){
+    el.innerHTML=`<div class="chart-box" style="opacity:.65">
+      <div class="chart-label">🧪 Backtesting de recomendaciones</div>
+      <div style="font-size:12px;color:var(--text2);text-align:center;padding:12px 0">
+        El sistema registra snapshots automáticamente mientras tenés trades abiertos.<br>
+        <span style="font-size:10px;opacity:.7">Se necesitan ≥ 2 snapshots por trade cerrado para comparar.</span>
+      </div>
+    </div>`;
+    return;
+  }
+  const pctImprColor=stats.pctImproved>=55?'#00c853':stats.pctImproved>=40?'#ffd100':'#ff3d57';
+  const totalSign=stats.totalDiff>=0?'+':'';
+  const avgSign=stats.avgDiff>=0?'+':'';
+
+  const recRows=Object.entries(stats.byRec).map(([k,v])=>{
+    const avg=v.reduce((s,x)=>s+x,0)/v.length;
+    const col=avg>=0?'#00c853':'#ff3d57';
+    return `<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border)"><span style="font-size:11px;font-weight:700">${k}</span><span style="font-size:11px;font-weight:800;color:${col}">${avg>=0?'+':''}$${avg.toFixed(2)} · ${v.length}</span></div>`;
+  }).join('');
+
+  const zoneEmoji={temprano:'⚡',medio:'🟡',avanzado:'🟠'};
+  const zoneRows=Object.entries(stats.byZone).filter(e=>e[1].length).map(([k,v])=>{
+    const avg=v.reduce((s,x)=>s+x,0)/v.length;
+    const col=avg>=0?'#00c853':'#ff3d57';
+    return `<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--border)"><span style="font-size:11px;font-weight:700">${zoneEmoji[k]} ${k}</span><span style="font-size:11px;font-weight:800;color:${col}">${avg>=0?'+':''}$${avg.toFixed(2)} · ${v.length}</span></div>`;
+  }).join('');
+
+  const recentRows=[...stats.results].reverse().slice(0,6).map(r=>{
+    const sim=r.sim;
+    const col=sim.improved?'#00c853':sim.harmed?'#ff3d57':'#9999b8';
+    const sign=sim.diffPnl>=0?'+':'';
+    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border)">
+      <div><div style="font-size:11px;font-weight:800">${r.t.ticker} ${r.t.pos} · ${(r.t.fecha||'').slice(5)}</div><div style="font-size:9px;color:var(--text2)">${r.t.recInicial||'—'} · ${sim.snapsUsed} snaps</div></div>
+      <div style="text-align:right"><div style="font-size:12px;font-weight:900;color:${col}">${sign}$${sim.diffPnl.toFixed(2)}</div><div style="font-size:9px;color:var(--text2)">${sim.realResult>=0?'+':''}${sim.realResult.toFixed(1)}% → ${sim.simResult>=0?'+':''}${sim.simResult.toFixed(1)}%</div></div>
+    </div>`;
+  }).join('');
+
+  el.innerHTML=`<div class="chart-box">
+    <div class="chart-label">🧪 Backtesting — ¿Agregan valor las recomendaciones?</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px">
+      <div style="background:var(--surface2);border-radius:10px;padding:10px;text-align:center">
+        <div style="font-size:8px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">App mejora</div>
+        <div style="font-size:26px;font-weight:900;color:${pctImprColor}">${stats.pctImproved}%</div>
+        <div style="font-size:9px;color:var(--text2)">${stats.improved}/${stats.n} trades</div>
+      </div>
+      <div style="background:var(--surface2);border-radius:10px;padding:10px;text-align:center">
+        <div style="font-size:8px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">Impacto total</div>
+        <div style="font-size:22px;font-weight:900;color:${stats.totalDiff>=0?'#00c853':'#ff3d57'}">${totalSign}$${Math.abs(stats.totalDiff).toFixed(2)}</div>
+        <div style="font-size:9px;color:var(--text2)">${stats.n} trades</div>
+      </div>
+      <div style="background:var(--surface2);border-radius:10px;padding:10px;text-align:center">
+        <div style="font-size:8px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">Avg/trade</div>
+        <div style="font-size:22px;font-weight:900;color:${stats.avgDiff>=0?'#00c853':'#ff3d57'}">${avgSign}$${Math.abs(stats.avgDiff).toFixed(2)}</div>
+        <div style="font-size:9px;color:var(--text2)">${stats.harmed} empeoraron</div>
+      </div>
+    </div>
+    <div style="background:${stats.pctImproved>=55?'rgba(0,200,83,.08)':stats.pctImproved>=40?'rgba(255,209,0,.06)':'rgba(255,61,87,.07)'};border:1px solid ${stats.pctImproved>=55?'rgba(0,200,83,.3)':stats.pctImproved>=40?'rgba(255,209,0,.3)':'rgba(255,61,87,.3)'};border-radius:8px;padding:8px 12px;margin-bottom:12px;font-size:11px;font-weight:800;color:${pctImprColor}">
+      ${stats.pctImproved>=60?'✅ Las recomendaciones agregan valor real.':stats.pctImproved>=45?'🟡 Impacto mixto — necesitás más datos.':'🔴 Sin valor estadístico aún — ajustá el sistema.'} <span style="font-size:9px;opacity:.7">(${stats.n} trades con datos)</span>
+    </div>
+    ${recRows?`<div style="margin-bottom:12px"><div style="font-size:9px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px">Por recomendación inicial</div>${recRows}</div>`:''}
+    ${zoneRows?`<div style="margin-bottom:12px"><div style="font-size:9px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px">Por zona de percentil al entrar</div>${zoneRows}</div>`:''}
+    ${recentRows?`<div><div style="font-size:9px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px">Últimas comparaciones</div>${recentRows}</div>`:''}
+  </div>`;
+}
+
+// ── 6. AUTO-SNAPSHOT al actualizar precios ───────────────────────────────
+function triggerBacktestSnapshots(){
+  const open=D.trades.filter(t=>t.open&&t.entrada);
+  let changed=false;
+  open.forEach(t=>{
+    const lp=livePrices[t.ticker];
+    const price=lp||t.actual||t.entrada||0;
+    let livePct=null;
+    if(t.entrada&&price) livePct=calcPct(t.entrada,price,t.pos,t.lev);
+    const tc=tickerChangeCache[t.ticker]||null;
+    const snapsBefore=t.recSnaps?t.recSnaps.length:0;
+    recordRecSnapshot(t,livePct,tc);
+    if((t.recSnaps?t.recSnaps.length:0)>snapsBefore) changed=true;
+  });
+}
+
 // what-if replaced by renderKpiProjection
 
 // ── PARTIAL CLOSE MODAL ──
