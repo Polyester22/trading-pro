@@ -4964,16 +4964,23 @@ function getTradeRecommendation(t, livePct, totalMins, tc){
   const c1h=has?tc.change1h:null;
   const c4h=has?tc.change4h:null;
   const c24=has?tc.change24h:null;
-  // Direction: positive = ticker going up
   const trending1h=c1h!==null?(c1h>1?'up':c1h<-1?'down':'flat'):null;
   const trending4h=c4h!==null?(c4h>2?'up':c4h<-2?'down':'flat'):null;
-  const trending24=c24!==null?(c24>4?'up':c24<-4?'down':'flat'):null;
-  const momentum=  // combined momentum signal
+  const momentum=
     trending1h==='up'&&trending4h==='up'?'strong_up':
     trending1h==='down'&&trending4h==='down'?'strong_down':
     trending1h==='up'?'weak_up':
     trending1h==='down'?'weak_down':'neutral';
   const tkMov=has?` · ${t.ticker} 1h:${c1h>=0?'+':''}${c1h.toFixed(1)}% 4h:${c4h>=0?'+':''}${c4h.toFixed(1)}% 24h:${c24>=0?'+':''}${c24.toFixed(1)}%`:'';
+
+  // ── Momentum acceleration (frenando / acelerando) ─────────
+  const accel=has?(c1h||0)-((c24||0)/24):0;
+  const isAccelerating=accel>0.08;
+  const isDecelerating=accel<-0.08;
+  // Direction of momentum vs trade
+  const momFavor=isLong?(momentum==='strong_up'||momentum==='weak_up'):(momentum==='strong_down'||momentum==='weak_down');
+  const momStrong=isLong?momentum==='strong_up':momentum==='strong_down';
+  const momAgainst=isLong?(momentum==='strong_down'):momentum==='strong_up';
 
   // ── Historical stats ─────────────────────────────────────
   const similar=closed.filter(x=>x.estrategia===t.estrategia&&x.pos===t.pos);
@@ -5000,89 +5007,114 @@ function getTradeRecommendation(t, livePct, totalMins, tc){
   const bestSalida=salidaEntries.length?salidaEntries.sort((a,b)=>b.ev-a.ev)[0].k:null;
   const salidaHint=bestSalida?` Mejor salida en ${t.ticker}: ${bestSalida}.`:'';
 
+  // ── Classify trade state using percentile + exhaustion ─────
+  // Uses MFE stats to determine percentile position
+  const lev=t.lev||1;
+  const cmPrice=Math.abs(pct)/lev; // pure price % (no leverage)
+  const ctxScore=has?calcContextScore(tc,t.pos):null;
+  const tier=ctxScore!==null?getTier(ctxScore):(t.entryContextScore!=null?getTier(t.entryContextScore):'debil');
+  const stats=loadMomentumStats();
+  const s=stats[tier];
+  const prior=stats._priors[tier];
+  const p75=s.p75MFE||prior.avgMax*1.3;
+  const p90=s.p90MFE||prior.avgMax*1.6;
+  const pctPosition=Math.min(100,Math.round(cmPrice/p90*100));
+
+  // ── Trade state: Temprano / Medio / Avanzado ───────────────
+  // P0–P30 + bajo exhaustion → Temprano
+  // P30–P70 → Medio
+  // P70+ o exhaustion alto → Avanzado
+  const inProfit=pct>3;
+  const inLoss=pct<-3;
+  // Simple exhaustion proxy for this function (full calc done in renderTPProbBlock)
+  const simpleExh=(pctPosition>=70)||((isDecelerating||momAgainst)&&pctPosition>=40);
+  const tradeState=pctPosition<30&&!simpleExh?'temprano':pctPosition<70&&!simpleExh?'medio':'avanzado';
+
   const atTP=effectiveTP&&pct>=effectiveTP*0.85;
   const atSL=effectiveSL&&pct<=-effectiveSL*0.8;
   const overtime=avgDurMins&&totalMins>avgDurMins*1.5;
-  const inProfit=pct>3;
-  const inLoss=pct<-3;
 
-  // ── Clasificación de duración (modificador de contexto) ──────────────────
   const durCtxRec = classifyTradeDuration(t, totalMins);
-  const durHint = durCtxRec.stage === 'extendido'
-    ? ` ⏱ Trade extendido (${Math.round((durCtxRec.ratio||1)*100)}% del tiempo típico).`
-    : durCtxRec.stage === 'temprano'
-    ? ` ⚡ Trade temprano — aún en fase inicial.`
-    : '';
-
-  // ── Sesión de mercado (modificador de confianza) ──────────────────────────
+  const durHint = durCtxRec.stage==='extendido'?` ⏱ Trade extendido.`:durCtxRec.stage==='temprano'?` ⚡ Fase inicial.`:'';
   const sessCtxRec = getMarketSessionContext();
-  const sessHint = sessCtxRec.confidence < 0.85
-    ? ` ${sessCtxRec.label}: ${sessCtxRec.note}.`
-    : '';
+  const sessHint = sessCtxRec.confidence<0.85?` ${sessCtxRec.label}: ${sessCtxRec.note}.`:'';
+  const tkCtx=tkTrades.length>=3?` | ${t.ticker}: WR ${(tkPosWR!==null?(tkPosWR*100).toFixed(0):'-')}% EV ${tkEV>=0?'+':''}${tkEV.toFixed(1)}%`:tkTrades.length>0?` | ${t.ticker}: ${tkTrades.length} trade${tkTrades.length>1?'s':''}`:'';
 
-  // Ticker context
-  const tkCtx=tkTrades.length>=3?` | ${t.ticker}: WR ${(tkPosWR!==null?(tkPosWR*100).toFixed(0):'-')}% EV ${tkEV>=0?'+':''}${tkEV.toFixed(1)}%`
-    :tkTrades.length>0?` | ${t.ticker}: ${tkTrades.length} trade${tkTrades.length>1?'s':''}`:'';
+  // ══ PRIORIDAD 1: ESTADO DEL TRADE (percentil + agotamiento) ══
+  // Siempre tiene prioridad sobre momentum y contexto
 
-  // ── DECISION basada en precio del ticker + estadísticas ──
+  // Estado Avanzado → Reducir (independientemente del contexto)
+  if(tradeState==='avanzado'&&inProfit&&isDecelerating)
+    return{action:'🟠 Reducir',color:'#ff6b00',bg:'rgba(255,107,0,.1)',border:'rgba(255,107,0,.35)',
+      reason:`Trade en zona avanzada (P${pctPosition}) + frenando — reducir exposición.${salidaHint}`+tkMov+tkCtx};
+  if(tradeState==='avanzado'&&inProfit)
+    return{action:'🟠 Reducir',color:'#ff6b00',bg:'rgba(255,107,0,.1)',border:'rgba(255,107,0,.35)',
+      reason:`Trade en zona avanzada (P${pctPosition}) — comenzar a asegurar ganancias.${salidaHint}`+tkMov+tkCtx};
 
-  // 🔴 CERRAR
+  // SL histórico alcanzado
   if(atSL)
-    return{action:'🔴 Cerrar',color:'#ff3d57',bg:'rgba(255,61,87,.1)',border:'rgba(255,61,87,.35)',
-      reason:`Cerca de tu SL histórico (${(-effectiveSL).toFixed(1)}%) para ${t.estrategia}`+tkCtx+tkMov};
+    return{action:'🔴 Salir',color:'#ff3d57',bg:'rgba(255,61,87,.1)',border:'rgba(255,61,87,.35)',
+      reason:`Cerca del SL histórico (${(-effectiveSL).toFixed(1)}%) para ${t.estrategia}.`+tkCtx+tkMov};
+
+  // ══ PRIORIDAD 2: MOMENTUM (acelerando / frenando) ══
+  // Solo aplica cuando el estado no es avanzado
+
+  // Frenando + en pérdida → Salir
+  if(isDecelerating&&momAgainst&&inLoss)
+    return{action:'🔴 Salir',color:'#ff3d57',bg:'rgba(255,61,87,.1)',border:'rgba(255,61,87,.35)',
+      reason:`Frenando + mercado contra el ${t.pos} + en pérdida — cerrar.`+tkCtx+tkMov};
+
+  // Momentum fuerte contra + en pérdida → Salir
+  if(momAgainst&&has&&inLoss)
+    return{action:'🔴 Salir',color:'#ff3d57',bg:'rgba(255,61,87,.1)',border:'rgba(255,61,87,.35)',
+      reason:`${t.ticker} con momentum contra el ${t.pos}${isDecelerating?' + frenando':''} y en pérdida.`+tkCtx+tkMov};
+
+  // Overtime + en pérdida → Salir
   if(overtime&&inLoss)
-    return{action:'🔴 Cerrar',color:'#ff3d57',bg:'rgba(255,61,87,.1)',border:'rgba(255,61,87,.35)',
-      reason:`Overtime (${avgDurMins<60?Math.round(avgDurMins)+'m':Math.floor(avgDurMins/60)+'h'} promedio) y en pérdida`+durHint+sessHint+tkCtx+tkMov};
-  if(isLong&&momentum==='strong_down'&&inLoss)
-    return{action:'🔴 Cerrar',color:'#ff3d57',bg:'rgba(255,61,87,.1)',border:'rgba(255,61,87,.35)',
-      reason:`${t.ticker} cayendo fuerte (1h${c1h.toFixed(1)}% · 4h${c4h.toFixed(1)}%) y tu Long en pérdida`+tkCtx};
-  if(!isLong&&momentum==='strong_up'&&inLoss)
-    return{action:'🔴 Cerrar',color:'#ff3d57',bg:'rgba(255,61,87,.1)',border:'rgba(255,61,87,.35)',
-      reason:`${t.ticker} subiendo fuerte (1h+${c1h.toFixed(1)}% · 4h+${c4h.toFixed(1)}%) y tu Short en pérdida`+tkCtx};
+    return{action:'🔴 Salir',color:'#ff3d57',bg:'rgba(255,61,87,.1)',border:'rgba(255,61,87,.35)',
+      reason:`Trade extendido y en pérdida — cerrar.`+durHint+sessHint+tkCtx+tkMov};
 
-  // 🟡 PROTEGER / ESPERAR
-  if(atTP&&isLong&&(trending1h==='down'||trending4h==='down'))
-    return{action:'🟡 Proteger BE',color:'#ffd100',bg:'rgba(255,209,0,.08)',border:'rgba(255,209,0,.4)',
-      reason:`TP histórico alcanzado (${effectiveTP.toFixed(1)}%) pero ${t.ticker} perdiendo momentum.${salidaHint}`+tkCtx+tkMov};
-  if(inProfit&&isLong&&momentum==='strong_down')
-    return{action:'🟡 Proteger BE',color:'#ffd100',bg:'rgba(255,209,0,.08)',border:'rgba(255,209,0,.4)',
-      reason:`${t.ticker} girando a la baja (1h${c1h.toFixed(1)}%) con ganancia. Mové SL a entrada`+tkCtx};
-  if(inProfit&&!isLong&&momentum==='strong_up')
-    return{action:'🟡 Proteger BE',color:'#ffd100',bg:'rgba(255,209,0,.08)',border:'rgba(255,209,0,.4)',
-      reason:`${t.ticker} rebotando (1h+${c1h.toFixed(1)}%) con tu Short en ganancia. Asegurá`+tkCtx};
-  if(inProfit&&overtime)
-    return{action:'🟡 Cierre parcial',color:'#ffd100',bg:'rgba(255,209,0,.08)',border:'rgba(255,209,0,.4)',
-      reason:`Buen resultado + más tiempo del promedio.${salidaHint}`+durHint+sessHint+tkCtx+tkMov};
-  if(inProfit&&atTP)
-    return{action:'🟡 Proteger BE',color:'#ffd100',bg:'rgba(255,209,0,.08)',border:'rgba(255,209,0,.4)',
-      reason:`En tu TP histórico (${effectiveTP.toFixed(1)}%). Mové SL a entrada.${salidaHint}`+tkCtx+tkMov};
+  // Momentum fuerte contra + en ganancia → Reducir
+  if(momAgainst&&has&&inProfit)
+    return{action:'🟠 Reducir',color:'#ff6b00',bg:'rgba(255,107,0,.1)',border:'rgba(255,107,0,.35)',
+      reason:`${t.ticker} frenando/girando contra el ${t.pos} con ganancia — asegurar.${salidaHint}`+tkCtx+tkMov};
+
+  // Frenando en zona media → Cuidado
+  if(isDecelerating&&tradeState==='medio')
+    return{action:'🟡 Cuidado',color:'#ffd100',bg:'rgba(255,209,0,.08)',border:'rgba(255,209,0,.4)',
+      reason:`Frenando en zona media (P${pctPosition}) — mantener con cautela.${salidaHint}`+tkMov+tkCtx};
+
+  // ══ PRIORIDAD 3: CONTEXTO (a favor / en contra / sesión) ══
+  // Solo complementa cuando estado y momentum no generaron señal clara
+
+  // Sin precios + en pérdida
   if(!has&&inLoss)
-    return{action:'🟡 Esperar',color:'#ffd100',bg:'rgba(255,209,0,.08)',border:'rgba(255,209,0,.4)',
-      reason:'Actualizá precios para ver el momentum del ticker'+tkCtx};
+    return{action:'🟡 Cuidado',color:'#ffd100',bg:'rgba(255,209,0,.08)',border:'rgba(255,209,0,.4)',
+      reason:'Actualizá precios — trade en pérdida sin datos de momentum.'+tkCtx};
 
-  // 🟢 MANTENER / DEJAR CORRER
-  if(atTP&&isLong&&momentum==='strong_up')
-    return{action:'🟢 Dejar correr',color:'#00c853',bg:'rgba(0,200,83,.08)',border:'rgba(0,200,83,.35)',
-      reason:`TP histórico (${effectiveTP.toFixed(1)}%) + ${t.ticker} sigue subiendo fuerte.${salidaHint}`+tkCtx+tkMov};
-  if(atTP&&!isLong&&momentum==='strong_down')
-    return{action:'🟢 Dejar correr',color:'#00c853',bg:'rgba(0,200,83,.08)',border:'rgba(0,200,83,.35)',
-      reason:`TP histórico (${effectiveTP.toFixed(1)}%) + ${t.ticker} sigue bajando.${salidaHint}`+tkCtx+tkMov};
-  if(isLong&&momentum==='strong_up'&&inProfit)
+  // Temprano + momentum fuerte a favor → Mantener / Entrar
+  if(tradeState==='temprano'&&momStrong&&has)
     return{action:'🟢 Mantener',color:'#00c853',bg:'rgba(0,200,83,.08)',border:'rgba(0,200,83,.35)',
-      reason:`${t.ticker} subiendo fuerte (1h+${c1h.toFixed(1)}% · 4h+${c4h.toFixed(1)}%). Long funcionando`+durHint+sessHint+tkCtx};
-  if(!isLong&&momentum==='strong_down'&&inProfit)
-    return{action:'🟢 Mantener',color:'#00c853',bg:'rgba(0,200,83,.08)',border:'rgba(0,200,83,.35)',
-      reason:`${t.ticker} cayendo fuerte (1h${c1h.toFixed(1)}%). Short bien posicionado`+tkCtx};
-  if(isLong&&(momentum==='weak_up'||momentum==='strong_up')&&!inLoss)
-    return{action:'🟢 Mantener',color:'#00c853',bg:'rgba(0,200,83,.08)',border:'rgba(0,200,83,.35)',
-      reason:`${t.ticker} con momentum positivo (1h+${c1h!==null?c1h.toFixed(1):'?'}%).`+(tkPosWR!==null?` WR ${(tkPosWR*100).toFixed(0)}% en ${t.ticker} ${t.pos}.`:'')+tkCtx};
-  if(!isLong&&(momentum==='weak_down'||momentum==='strong_down')&&!inLoss)
-    return{action:'🟢 Mantener',color:'#00c853',bg:'rgba(0,200,83,.08)',border:'rgba(0,200,83,.35)',
-      reason:`${t.ticker} con momentum negativo (1h${c1h!==null?c1h.toFixed(1):'?'}%). Short a favor`+tkCtx};
+      reason:`Trade temprano (P${pctPosition}) + momentum fuerte a favor — dejar desarrollar.`+durHint+tkCtx+tkMov};
 
-  // Default
+  // Temprano + momentum a favor
+  if(tradeState==='temprano'&&momFavor&&has)
+    return{action:'🟢 Mantener',color:'#00c853',bg:'rgba(0,200,83,.08)',border:'rgba(0,200,83,.35)',
+      reason:`Trade temprano (P${pctPosition}) + momentum a favor — en fase inicial.`+durHint+tkCtx+tkMov};
+
+  // Acelerando en zona temprana/media → Mantener
+  if(isAccelerating&&!momAgainst&&(tradeState==='temprano'||tradeState==='medio'))
+    return{action:'🟢 Mantener',color:'#00c853',bg:'rgba(0,200,83,.08)',border:'rgba(0,200,83,.35)',
+      reason:`Acelerando en zona ${tradeState} (P${pctPosition}) — momentum activo.`+tkMov+tkCtx};
+
+  // Medio + en ventana → Mantener con cautela
+  if(tradeState==='medio')
+    return{action:'🟡 Mantener',color:'#ffd100',bg:'rgba(255,209,0,.08)',border:'rgba(255,209,0,.4)',
+      reason:`Zona media (P${pctPosition}) — mantener con cautela.${momFavor&&has?' Momentum a favor.':''}${salidaHint}`+tkCtx+tkMov};
+
+  // Sin señal clara
   return{action:'⚪ Sin señal',color:'var(--text2)',bg:'var(--surface2)',border:'var(--border)',
-    reason:(has?'Sin señal clara por ahora':'Actualizá precios para análisis del ticker')+durHint+sessHint+tkCtx+tkMov};
+    reason:(has?`Sin señal clara — P${pctPosition}, estado ${tradeState}.`:'Actualizá precios para análisis.')+durHint+sessHint+tkCtx+tkMov};
 }
 
 // ══ AUTO-LEARNING: PROBABILIDAD DE TP ══════════════════════════════════════
@@ -5426,54 +5458,67 @@ function exhaustionLabel(score){
   return              { label:'🟢 Puede seguir', col:'#00c853', bg:'rgba(0,200,83,.08)', border:'rgba(0,200,83,.3)' };
 }
 
-// ── SINGLE DECISION — context-first hierarchy ──
-// Priority: context signals > statistical signals
+// ── SINGLE DECISION — prioridad: estado (percentil+agotamiento) > momentum > contexto ──
 function buildDecision(exhScore, exhL, mfeZ, acCls, condProbNext, livePct, contraBias, momentumTier, durStage, sessConf){
   const isDecel   = acCls === 'slow';
   const isAccel   = acCls === 'fast';
   const inLoss    = livePct !== null && livePct < 0;
-  const probStr   = condProbNext !== null ? ` (solo ${condProbNext}% lo logra)` : '';
+  const inProfit  = livePct !== null && livePct > 3;
+  const probStr   = condProbNext !== null ? ` (${condProbNext}% de probabilidad de continuar)` : '';
   const weakMom   = momentumTier === 'debil';
   const midMom    = momentumTier === 'medio';
-  // Sufijo de contexto: aparece al final del mensaje de decisión cuando reduce confianza
   const ctxSuffix = (durStage==='extendido'&&sessConf<0.85) ? ' · timing fuera de ventana + sesión débil'
     : durStage==='extendido' ? ' · trade fuera de ventana típica'
     : sessConf<0.85 ? ' · sesión de baja actividad'
     : '';
 
-  // ── CONTEXT OVERRIDE: momentum+bias against trade + in loss ──
-  if(contraBias && weakMom && inLoss)
-    return `⚠️ Potencial sin confirmación — el mercado va en contra, momentum débil y en pérdida → salida rápida`;
-  if(contraBias && inLoss)
-    return `⚠️ Contexto en contra — bias opuesto y trade en pérdida → evaluar salida`;
-  if(weakMom && inLoss && isDecel)
-    return `🔴 Cerrar — momentum débil + frenando + en pérdida → no sostener`;
-  if(contraBias && weakMom)
-    return `⚠️ Contexto adverso — momentum débil + contra el bias → no dejar correr sin confirmación`;
+  // ══ PRIORIDAD 1: ESTADO (percentil + agotamiento) ══
+  // La recomendación de estado siempre prevalece, incluso si el contexto es "a favor"
 
-  // ── STATISTICAL: high exhaustion ──
   if(exhScore >= 80)
-    return `🔴 Cerrar todo — trade estadísticamente agotado${condProbNext !== null ? probStr : ''}`;
+    return `🔴 Salir — trade estadísticamente agotado${condProbNext !== null ? probStr : ''}`;
+
   if(exhScore >= 60){
-    if(isAccel && !contraBias) return `🟠 Cerrar 50–70% — zona de alto riesgo; acelerando, dejar runner`;
-    return `🔴 Cerrar 70–100% — agotamiento${isDecel ? ' + frenando' : ''}${contraBias ? ' + contra el bias' : ''}`;
+    // Estado avanzado + frenando → cerrar más agresivamente
+    if(isDecel) return `🔴 Reducir 70–100% — zona avanzada + frenando${contraBias ? ' + contexto en contra' : ''}`;
+    // Estado avanzado pero acelerando → dejar runner pequeño
+    if(isAccel && !contraBias) return `🟠 Reducir 50–70% — zona avanzada; acelerando, dejar runner`;
+    return `🔴 Reducir 70–100% — zona avanzada${contraBias ? ' + contexto en contra' : ''}`;
   }
 
-  // ── MEDIUM EXHAUSTION ──
+  // ══ PRIORIDAD 2: MOMENTUM (acelerando / frenando) ══
+  // Aplica cuando el estado no es crítico (exhScore < 60)
+
+  // Momentum + contexto adversos → señal de cierre/reducción
+  if(contraBias && weakMom && inLoss)
+    return `🔴 Salir — momentum débil + contexto en contra + en pérdida`;
+  if(contraBias && inLoss)
+    return `🔴 Reducir — contexto adverso + en pérdida → evaluar salida`;
+  if(weakMom && inLoss && isDecel)
+    return `🔴 Salir — momentum débil + frenando + en pérdida`;
+
   if(exhScore >= 35){
-    if(contraBias) return `🟡 Cuidado — potencial estadístico pero contexto no acompaña`;
-    if(weakMom)    return `🟡 Reducir exposición — momentum débil en zona avanzada`;
-    if(isDecel)    return `🟡 Cerrar parcial — frenando en zona avanzada`;
-    if(mfeZ.toP90 > 0) return `🟡 Asegurar BE — falta +${mfeZ.toP90.toFixed(1)}% para p90${mfeZ.zone==='alto'?probStr:''}`;
+    // Estado medio — momentum decide la intensidad
+    if(isDecel) return `🟠 Reducir exposición — frenando en zona avanzada${contraBias ? ' + contexto en contra' : ''}`;
+    if(contraBias || weakMom) return `🟡 Cuidado — zona avanzada, ${contraBias ? 'contexto en contra' : 'momentum débil'}`;
+    if(mfeZ.toP90 > 0) return `🟡 Mantener con cautela — falta +${mfeZ.toP90.toFixed(1)}% para zona extrema${mfeZ.zone==='alto'?probStr:''}`;
     return `🟡 Proteger — seguir solo si el momentum confirma`;
   }
 
-  // ── LOW EXHAUSTION: favor continuation ──
-  if(contraBias) return `🟡 Potencial disponible pero contexto en contra — no escalar`;
-  if(weakMom)    return `🟡 Recorrido disponible — momentum débil, esperá confirmación antes de mantener`;
+  // ══ PRIORIDAD 3: CONTEXTO (a favor / en contra / sesión) ══
+  // Complementa cuando estado y momentum son neutros/positivos
+
+  if(contraBias && weakMom)
+    return `🟡 Sin escalar — contexto adverso + momentum débil`;
+  if(contraBias)
+    return `🟡 Potencial disponible pero contexto en contra — no escalar`;
+  if(weakMom)
+    return `🟡 Recorrido disponible — momentum débil, esperá confirmación`;
+
+  // Estado temprano / bueno
   if(mfeZ.zone === 'bajo'){
     const distStr = mfeZ.toP75 > 0 ? `, falta +${mfeZ.toP75.toFixed(1)}% para p75` : '';
-    return `🟢 Dejar correr — mucho recorrido disponible${distStr}${ctxSuffix}`;
+    return `🟢 Mantener — mucho recorrido disponible${distStr}${ctxSuffix}`;
   }
   if(isAccel) return `🟢 Mantener — acelerando con recorrido disponible${ctxSuffix}`;
   return `🟢 Observar — probabilidad positiva, esperá señal más clara${ctxSuffix}`;
@@ -5515,6 +5560,8 @@ function renderTPProbBlock(trade, livePct){
     const accel = (c1h||0) - ((c24||0)/24);
     return accel > 0.08 ? 'fast' : accel < -0.08 ? 'slow' : 'flat';
   })() : 'flat';
+  const isDecelerating = acCls === 'slow';
+  const isAccelerating = acCls === 'fast';
 
   // contraBias: ticker price moving against trade direction (1H AND 4H)
   const contraBias = tc ? (
@@ -5697,48 +5744,40 @@ function renderTPProbBlock(trade, livePct){
   const blockId = `cont-block-${trade.id}`;
   const innerBlockId = `cont-inner-${trade.id}`;
 
-  // ── SEÑAL PRINCIPAL: la más relevante para mostrar en el header ──────────
-  // Prioridad: contra-bias > en pérdida > extendido > momentum > neutro
-  let primarySignal, primaryColor, primaryBg;
-  if(contraBias){
-    primarySignal = `🚫 ${isLong?'Mercado bajando':'Mercado subiendo'} — contra el ${trade.pos}`;
-    primaryColor = '#ff3d57'; primaryBg = 'rgba(255,61,87,.12)';
-  } else if(livePct !== null && livePct < -2){
-    primarySignal = `📉 En pérdida (${livePct.toFixed(1)}%)`;
-    primaryColor = '#ff3d57'; primaryBg = 'rgba(255,61,87,.12)';
-  } else if(durCtx.stage === 'extendido'){
-    primarySignal = `⏱ ${durCtx.label}`;
-    primaryColor = durCtx.color; primaryBg = durCtx.bg;
-  } else if(acCls === 'slow'){
-    primarySignal = `⚠️ Frenando — momentum desacelerando`;
-    primaryColor = '#ffd100'; primaryBg = 'rgba(255,209,0,.08)';
-  } else if(acCls === 'fast' && !contraBias){
-    primarySignal = `🔥 Acelerando — momentum activo`;
-    primaryColor = '#00c853'; primaryBg = 'rgba(0,200,83,.1)';
-  } else if(livePct !== null && livePct > 3){
-    primarySignal = `✅ En ganancia (${livePct>=0?'+':''}${livePct.toFixed(1)}%)`;
-    primaryColor = '#00c853'; primaryBg = 'rgba(0,200,83,.1)';
+
+  // ── SEÑAL PRINCIPAL: basada en estado del trade (percentil + agotamiento) ──────
+  // Prioridad: estado (percentil) > momentum > contexto
+  // La señal principal ya está en `decision` y `exhL`; aquí derivamos el subtítulo accionable
+  let stateSignalText, stateSignalColor, stateSignalBg;
+  if(exhScore >= 80){
+    stateSignalText = `P${pctPos} — Zona agotada`; stateSignalColor='#ff3d57'; stateSignalBg='rgba(255,61,87,.12)';
+  } else if(exhScore >= 60){
+    stateSignalText = isDecelerating ? `P${pctPos} — Avanzado + frenando` : `P${pctPos} — Zona avanzada`;
+    stateSignalColor='#ff6b00'; stateSignalBg='rgba(255,107,0,.12)';
+  } else if(exhScore >= 35){
+    stateSignalText = isDecelerating ? `P${pctPos} — Frenando` : `P${pctPos} — Zona media`;
+    stateSignalColor='#ffd100'; stateSignalBg='rgba(255,209,0,.08)';
   } else {
-    primarySignal = hasTickerData ? tierLabel : '⚪ Sin precios';
-    primaryColor = tierColor; primaryBg = tierColor==='#00c853'?'rgba(0,200,83,.1)':tierColor==='#ffd100'?'rgba(255,209,0,.08)':'rgba(255,107,0,.08)';
+    stateSignalText = isAccelerating ? `P${pctPos} — Temprano + acelerando` : `P${pctPos} — Zona temprana`;
+    stateSignalColor='#00c853'; stateSignalBg='rgba(0,200,83,.1)';
   }
 
   return `<div style="background:var(--surface2);border:1px solid ${exhScore>=80?'rgba(255,61,87,.5)':exhScore>=60?'rgba(255,107,0,.4)':exhScore>=35?'rgba(255,209,0,.4)':'var(--border)'};border-radius:8px;margin-top:8px" onclick="event.stopPropagation()" id="${blockId}">
 
-    <!-- COLLAPSED HEADER: señal principal + confianza matizada -->
+    <!-- COLLAPSED HEADER: señal + recomendación + confianza -->
     <div onclick="(function(){var el=document.getElementById('${innerBlockId}');var open=el.style.display!=='none';el.style.display=open?'none':'block';document.getElementById('${blockId}').querySelector('.cont-arrow').textContent=open?'▼':'▲'})()" style="padding:9px 12px;cursor:pointer">
-      <!-- Línea 1: label de continuación (prominente) + confianza -->
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:5px">
-        <div style="display:flex;align-items:center;gap:6px;min-width:0">
-          <span style="font-size:12px;font-weight:900;padding:3px 10px;border-radius:6px;background:${exhL.bg};border:1.5px solid ${exhL.border};color:${exhL.col};white-space:nowrap">${exhL.label} ${confSuffix?'<span style="font-size:9px;opacity:.85">'+confSuffix.trim()+'</span>':''}</span>
-        </div>
+      <!-- Línea 1: SEÑAL principal (estado del trade) + confianza -->
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px">
+        <span style="font-size:13px;font-weight:900;padding:3px 10px;border-radius:6px;background:${exhL.bg};border:1.5px solid ${exhL.border};color:${exhL.col};white-space:nowrap">${exhL.label}</span>
         <div style="display:flex;align-items:center;gap:5px;flex-shrink:0">
-          <span style="font-size:9px;font-weight:800;color:${confColor}">Conf. ${confLabel} ${confScore}%</span>
+          <span style="font-size:9px;font-weight:800;color:${confColor}">Confianza ${confScore}%</span>
           <span class="cont-arrow" style="color:var(--text2);font-size:11px">▼</span>
         </div>
       </div>
-      <!-- Línea 2: señal principal del contexto -->
-      <div style="font-size:10px;font-weight:800;padding:2px 8px;border-radius:5px;background:${primaryBg};color:${primaryColor};display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${primarySignal}</div>
+      <!-- Línea 2: RECOMENDACIÓN concreta (decisión accionable) -->
+      <div style="font-size:10px;font-weight:800;padding:2px 8px;border-radius:5px;background:${stateSignalBg};color:${stateSignalColor};display:inline-block;margin-bottom:3px">${stateSignalText}</div>
+      <!-- Línea 3: decisión en texto corto -->
+      <div style="font-size:10px;font-weight:700;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${decision.replace(/^[🔴🟠🟡🟢⚪⚠️]\s*/,'')}</div>
     </div>
 
     <!-- EXPANDED CONTENT (hidden by default) -->
@@ -5758,7 +5797,8 @@ function renderTPProbBlock(trade, livePct){
         ${sessCtx.confidence < 0.85 || durCtx.stage === 'extendido' ? `<div style="font-size:9px;color:#ffd100;background:rgba(255,209,0,.07);border:1px solid rgba(255,209,0,.2);border-radius:6px;padding:5px 9px;margin-bottom:8px">⚠️ ${sessCtx.confidence<0.85?sessCtx.note:''}${sessCtx.confidence<0.85&&durCtx.stage==='extendido'?' · ':''}${durCtx.stage==='extendido'?'Trade fuera de ventana típica — reduce confianza':''}</div>` : ''}
       </div>
 
-      <!-- SEÑALES SECUNDARIAS: compactas, en pills -->
+      <!-- SEÑALES SECUNDARIAS: contexto (a favor/en contra), sesión, momentum tier -->
+      <div style="font-size:9px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px">Contexto secundario</div>
       <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:10px">
         ${tc ? `<span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;background:${acCls==='fast'?'rgba(0,200,83,.12)':acCls==='slow'?'rgba(255,61,87,.1)':'rgba(153,153,184,.08)'};color:${acCls==='fast'?'#00c853':acCls==='slow'?'#ff3d57':'#9999b8'}">${acCls==='fast'?'🔥 Acelerando':acCls==='slow'?'⚠️ Frenando':'→ Estable'}</span>` : ''}
         ${tc ? `<span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;background:${contraBias?'rgba(255,61,87,.1)':'rgba(0,200,83,.1)'};color:${contraBias?'#ff3d57':'#00c853'}">${contraBias?`🚫 Contra ${trade.pos}`:`✅ A favor ${trade.pos}`}</span>` : ''}
