@@ -563,6 +563,7 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
       </div>
       <div id="snap-empty" style="font-size:11px;color:var(--text2);padding:4px 0">Se captura automáticamente al escribir el ticker. Requiere HTTPS y datos en caché.</div>
       <input type="hidden" id="f-an-snapshot" value="">
+      <input type="hidden" id="f-snap-deleted" value="">
     </div>
     <div class="field"><label>Observaciones</label><textarea id="f-obs" placeholder="Notas del trade..." rows="2" style="resize:vertical;font-family:'Nunito',sans-serif;font-size:14px;padding:10px 12px;background:var(--input-bg);border:1.5px solid var(--border);border-radius:8px;color:var(--text);width:100%;outline:none;transition:border-color .2s" onfocus="this.style.borderColor='#ff6b00'" onblur="this.style.borderColor='var(--border)'"></textarea></div>
   </div>
@@ -5044,25 +5045,21 @@ async function saveTrade(){
   const ticker=document.getElementById('f-ticker').value.toUpperCase().trim();
   if(!ticker){alert('Ingresá el ticker');return;}
 
-  // ── Auto-snapshot: SOLO al crear un trade nuevo (nunca sobreescribir en edición) ──
-  const existingSnapOnSave = editingId ? D.trades.find(x=>x.id===editingId)?.anSnapshot : null;
-  if(!editingId || !existingSnapOnSave){
-    // Solo capturar si es trade nuevo, o si el trade existente no tiene snapshot
+  // ── Snapshot: separación estricta CREATE vs UPDATE ──────────────────────────
+  if(!editingId){
+    // CREATE: capturar snapshot automáticamente
     if(!tickerChangeCache[ticker] && location.protocol.startsWith('https')){
       const btn=document.getElementById('btn-save');
       if(btn){btn.disabled=true;btn.innerHTML='⟳ Obteniendo datos…';}
       try{ await fetchTickerChanges([ticker,'BTC','ETH']); }catch(e){}
-      if(btn){btn.disabled=false;btn.innerHTML=editingId?'💾 Guardar cambios':'➕ Agregar Trade';}
+      if(btn){btn.disabled=false;btn.innerHTML='➕ Agregar Trade';}
     }
     const autoSnap = buildSnapshotForTicker(ticker);
     const snapEl = document.getElementById('f-an-snapshot');
     if(autoSnap && snapEl) snapEl.value = JSON.stringify(autoSnap);
   }
-  // Si estamos editando y ya había snapshot, restaurarlo al campo hidden (no tocarlo)
-  if(editingId && existingSnapOnSave){
-    const snapEl = document.getElementById('f-an-snapshot');
-    if(snapEl) snapEl.value = JSON.stringify(existingSnapOnSave);
-  }
+  // UPDATE: NO capturar nada — el campo f-an-snapshot ya tiene el valor correcto
+  // (snapshot original, o vacío si el usuario lo eliminó con deleteAnSnapshot)
   const resultado=parseFloat(document.getElementById('f-resultado').value)||0;
   const fechahora=getFechaHoraValue();
   const closedHoraVal=document.getElementById('f-closedhora').value||null;
@@ -5103,8 +5100,9 @@ async function saveTrade(){
     if(existingTrade.partialCloses?.length)    t.partialCloses       = existingTrade.partialCloses;
     if(existingTrade.margenOriginal!=null)     t.margenOriginal      = existingTrade.margenOriginal;
     if(existingTrade.fechaCierre)              t.fechaCierre         = existingTrade.fechaCierre;
-    // Preserve existing snapshot if no new one was set in form
-    if(!t.anSnapshot && existingTrade.anSnapshot) t.anSnapshot = existingTrade.anSnapshot;
+    // Snapshot: respect whatever is in the form field (may be empty = deleted by user)
+    // Do NOT fall back to existingTrade.anSnapshot — that would undo a manual deletion
+    // (the form field was already set correctly by loadTradeForEdit / deleteAnSnapshot)
   }
   if(editingId){const i=D.trades.findIndex(x=>x.id===editingId);D.trades[i]=t;}else{D.trades.push(t);}
   persist(D);
@@ -5180,6 +5178,7 @@ function loadTradeForEdit(id){
   },120);
 }
 function resetForm(){
+  const _sdf=document.getElementById('f-snap-deleted');if(_sdf)_sdf.value='';
   editingId=null;resultManualMode=false;
   updateSnapEditUI();
   ['f-ticker','f-margen','f-entrada','f-actual','f-resultado','f-pnl'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
@@ -5353,6 +5352,11 @@ function captureAnSnapshot(){
 // Elimina el snapshot del trade actual (solo disponible en modo edición)
 function deleteAnSnapshot(){
   if(!confirm('¿Eliminar el snapshot de este trade? Esta acción no se puede deshacer.')) return;
+  // Vaciar el campo hidden Y marcar flag para que saveTrade no regenere
+  const snapEl = document.getElementById('f-an-snapshot');
+  if(snapEl) snapEl.value = '';
+  const flagEl = document.getElementById('f-snap-deleted');
+  if(flagEl) flagEl.value = '1';
   clearAnSnapshot();
   updateSnapEditUI();
 }
