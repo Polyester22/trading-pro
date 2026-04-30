@@ -4030,13 +4030,34 @@ function renderGraficos(){
     const totalBruto = T.filter(t=>t.pnlBruto!=null).reduce((s,t)=>s+t.pnlBruto,0);
     const feesPctNeto = totalNeto!==0 ? Math.abs(totalFees/Math.abs(totalBruto||totalNeto)*100) : 0;
     const avgFeePerTrade = totalFees/withFees.length;
-    const impacto = totalBruto!==0 ? (totalNeto - totalBruto) : null; // siempre negativo (fees)
     const tradesConFees = withFees.length;
     const feeColor = '#00aaff';
+    // % que las fees reducen el PnL neto final (sobre neto, no sobre bruto)
+    const feesImpactOnNeto = totalNeto!==0 ? Math.abs(totalFees/Math.abs(totalNeto)*100) : 0;
+    // Retorno bruto medio por trade vs retorno neto medio por trade
+    const avgBrutoPerTrade = totalBruto/T.filter(t=>t.pnlBruto!=null).length;
+    const avgNetoPerTrade  = totalNeto/T.filter(t=>t.pnlNeto!=null).length;
+    const impactColor = feesPctNeto > 10 ? '#ff3d57' : feesPctNeto > 5 ? '#ffd100' : '#00c853';
     return `<div class="desktop-col-full">
     <div class="chart-box" style="cursor:default;border-color:rgba(0,170,255,.2)">
       <div class="chart-label" style="color:${feeColor}">💸 Análisis de fees — impacto en rendimiento</div>
-      <!-- Fila 1: PnL Bruto → Fees → PnL Neto (el flujo completo) -->
+
+      <!-- Barra de impacto visual -->
+      <div style="background:rgba(255,61,87,.08);border:1px solid rgba(255,61,87,.25);border-radius:10px;padding:10px 14px;margin-bottom:10px">
+        <div style="font-size:10px;color:var(--text2);font-weight:700;margin-bottom:6px;text-transform:uppercase">Impacto de las fees sobre tu resultado</div>
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:5px">
+          <div style="flex:1;background:var(--surface2);border-radius:4px;height:8px;overflow:hidden">
+            <div style="width:${Math.min(feesPctNeto*4,100)}%;height:100%;background:${impactColor};border-radius:4px;transition:width .3s"></div>
+          </div>
+          <div style="font-size:18px;font-weight:900;color:${impactColor};white-space:nowrap">-${feesPctNeto.toFixed(1)}%</div>
+        </div>
+        <div style="font-size:11px;color:var(--text2);line-height:1.5">
+          Las fees se llevaron <strong style="color:#ff3d57">${feesPctNeto.toFixed(1)}%</strong> del bruto generado
+          ${feesImpactOnNeto>0?`· redujeron el PnL neto en <strong style="color:${impactColor}">${feesImpactOnNeto.toFixed(1)}%</strong>`:''}
+        </div>
+      </div>
+
+      <!-- Fila 1: PnL Bruto → Fees → PnL Neto -->
       ${totalBruto!==0?`<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px">
         <div style="background:rgba(0,170,255,.07);border:1px solid rgba(0,170,255,.2);border-radius:9px;padding:10px;text-align:center">
           <div style="font-size:9px;color:#00aaff;font-weight:700;text-transform:uppercase;margin-bottom:3px">PnL Bruto</div>
@@ -4052,15 +4073,18 @@ function renderGraficos(){
           <div style="font-size:16px;font-weight:900;color:${totalNeto>=0?'#00c853':'#ff3d57'};word-break:break-all">${totalNeto>=0?'+':''}$${totalNeto.toFixed(2)}</div>
         </div>
       </div>` : ''}
-      <!-- Fila 2: métricas de fees -->
+
+      <!-- Fila 2: promedios por trade -->
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
         <div style="background:var(--surface2);border-radius:9px;padding:10px;text-align:center">
           <div style="font-size:9px;color:var(--text2);font-weight:700;text-transform:uppercase;margin-bottom:3px">Fee promedio / trade</div>
           <div style="font-size:18px;font-weight:900;color:#ffd100">$${avgFeePerTrade.toFixed(2)}</div>
+          ${!isNaN(avgBrutoPerTrade)&&avgBrutoPerTrade>0?`<div style="font-size:9px;color:var(--text2);margin-top:2px">= ${(avgFeePerTrade/avgBrutoPerTrade*100).toFixed(1)}% del bruto medio/trade</div>`:''}
         </div>
         <div style="background:var(--surface2);border-radius:9px;padding:10px;text-align:center">
           <div style="font-size:9px;color:var(--text2);font-weight:700;text-transform:uppercase;margin-bottom:3px">Trades con fees</div>
           <div style="font-size:18px;font-weight:900;color:${feeColor}">${tradesConFees}</div>
+          ${T.length>tradesConFees?`<div style="font-size:9px;color:var(--text2);margin-top:2px">${T.length-tradesConFees} sin fees registradas</div>`:''}
         </div>
       </div>
     </div></div>`;
