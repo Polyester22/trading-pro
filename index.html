@@ -746,6 +746,7 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
           <th data-col="fl"><span class="col-drag-area">Fl.</span><span class="col-resize-handle"></span></th>
           <th data-col="obs" title="Observaciones"><span class="col-drag-area">Obs</span><span class="col-resize-handle"></span></th>
           <th data-col="durMins" onclick="sortBy('durMins')"><span class="col-drag-area">Duración<span class="sort-icon" id="sort-durMins">↕</span></span><span class="col-resize-handle"></span></th>
+          <th data-col="vsavg"><span class="col-drag-area" title="vs promedio del ticker/pos">vs⌀</span><span class="col-resize-handle"></span></th>
           <th data-col="_del"><span class="col-drag-area"></span></th>
         </tr>
         <tr class="filter-row" id="hist-filter-row">
@@ -765,6 +766,7 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
           <th data-col="fl"></th>
           <th data-col="obs"></th>
           <th data-col="durMins"></th>
+          <th data-col="vsavg"></th>
           <th data-col="_del"><button onclick="clearFilters()" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:11px;font-weight:700">✕</button></th>
         </tr>
       </thead>
@@ -1252,36 +1254,16 @@ function renderSistemaStats(T){
   var el = document.getElementById('sistema-stats-container');
   if(!el) return;
 
-  // Only trades with a snapshot
+  // Only closed trades with a snapshot
   var withSnap = T.filter(function(t){ return t.anSnapshot; });
   if(withSnap.length < 3){
     el.innerHTML = withSnap.length === 0
-      ? '' // hide silently until first snapshot
-      : '<div class="chart-box" style="cursor:default"><div class="chart-label">🤖 Sistema vs mis decisiones</div><div style="font-size:12px;color:var(--text2);padding:8px">Necesitás al menos 3 trades cerrados con snapshot del analizador. Seguí capturando al entrar.</div></div>';
+      ? ''
+      : '<div class="chart-box" style="cursor:default"><div class="chart-label">🤖 Sistema vs mis decisiones</div><div style="font-size:12px;color:var(--text2);padding:8px">Necesitás al menos 3 trades cerrados con snapshot. Seguí capturando al entrar.</div></div>';
     return;
   }
 
-  // ── Classify each trade ──────────────────────────────────────────────────
-  function classify(t){
-    var snap = t.anSnapshot;
-    var dir  = snap.dirSugerida || ''; // 'LONG','SHORT','LONG CAUTELOSO','SHORT CAUTELOSO','NO ENTRAR'
-    var pos  = t.pos; // 'Long' or 'Short'
-    if(dir === 'NO ENTRAR') return 'neutral'; // system said skip
-    var sysLong  = dir.includes('LONG');
-    var sysShort = dir.includes('SHORT');
-    if(sysLong  && pos === 'Long')  return 'alineado';
-    if(sysShort && pos === 'Short') return 'alineado';
-    if(sysLong  && pos === 'Short') return 'contra';
-    if(sysShort && pos === 'Long')  return 'contra';
-    return 'neutral';
-  }
-
-  withSnap.forEach(function(t){ t._sysClass = classify(t); });
-
-  var alineados = withSnap.filter(function(t){ return t._sysClass === 'alineado'; });
-  var contras   = withSnap.filter(function(t){ return t._sysClass === 'contra'; });
-  var neutrales = withSnap.filter(function(t){ return t._sysClass === 'neutral'; });
-
+  // ── Helpers ────────────────────────────────────────────────────────────
   function grp(arr){
     if(!arr.length) return null;
     var wins = arr.filter(function(t){ return t.resultado > 0; });
@@ -1289,84 +1271,16 @@ function renderSistemaStats(T){
     var pnl  = arr.reduce(function(s,t){ return s + (t.margen * t.resultado / 100); }, 0);
     return { n: arr.length, wins: wins.length, wr: wins.length / arr.length * 100, ev: ev, pnl: pnl };
   }
-
-  var sAlin = grp(alineados);
-  var sCont = grp(contras);
-  var sNeut = grp(neutrales);
-
-  // ── 2. Por nivel de confianza ─────────────────────────────────────────────
-  var altaConf = withSnap.filter(function(t){ return t.anSnapshot.confianza >= 70; });
-  var mediaConf= withSnap.filter(function(t){ return t.anSnapshot.confianza >= 45 && t.anSnapshot.confianza < 70; });
-  var bajaConf = withSnap.filter(function(t){ return t.anSnapshot.confianza < 45; });
-  var sConf = [
-    { label:'🟢 Alta (70+)', s: grp(altaConf), col:'#00c853' },
-    { label:'🟡 Media (45–70)', s: grp(mediaConf), col:'#ffd100' },
-    { label:'🔴 Baja (<45)', s: grp(bajaConf), col:'#ff6b00' }
-  ].filter(function(x){ return x.s && x.s.n >= 1; });
-
-  // ── 3. Por score de mercado ───────────────────────────────────────────────
-  var highScore = withSnap.filter(function(t){ return t.anSnapshot.scoreMkt >= 5; });
-  var midScore  = withSnap.filter(function(t){ return t.anSnapshot.scoreMkt >= 3 && t.anSnapshot.scoreMkt < 5; });
-  var lowScore  = withSnap.filter(function(t){ return t.anSnapshot.scoreMkt < 3; });
-  var sScore = [
-    { label:'🔥 Score ≥5 (fuerte)', s: grp(highScore), col:'#00c853' },
-    { label:'🟡 Score 3–4 (medio)', s: grp(midScore), col:'#ffd100' },
-    { label:'⚠️ Score <3 (débil)', s: grp(lowScore), col:'#ff6b00' }
-  ].filter(function(x){ return x.s && x.s.n >= 1; });
-
-  // ── 4. Por sesgo de mercado ───────────────────────────────────────────────
-  var sA = withSnap.filter(function(t){ return t.anSnapshot.sesgomkt === 'A favor'; });
-  var sE = withSnap.filter(function(t){ return t.anSnapshot.sesgomkt === 'En contra'; });
-  var sN = withSnap.filter(function(t){ return t.anSnapshot.sesgomkt === 'Neutral'; });
-  var sSesgo = [
-    { label:'✅ Sesgo a favor', s: grp(sA), col:'#00c853' },
-    { label:'❌ Sesgo en contra', s: grp(sE), col:'#ff3d57' },
-    { label:'↔ Sesgo neutral', s: grp(sN), col:'#9999b8' }
-  ].filter(function(x){ return x.s && x.s.n >= 1; });
-
-  // ── 5. Por momentum 1H ───────────────────────────────────────────────────
-  var momAligned   = withSnap.filter(function(t){
-    var m = t.anSnapshot.mom1h || 0;
-    return (t.pos === 'Long' && m > 0) || (t.pos === 'Short' && m < 0);
-  });
-  var momOpposed   = withSnap.filter(function(t){
-    var m = t.anSnapshot.mom1h || 0;
-    return (t.pos === 'Long' && m < 0) || (t.pos === 'Short' && m > 0);
-  });
-  var sMom = [
-    { label:'🟢 1H a favor', s: grp(momAligned), col:'#00c853' },
-    { label:'🔴 1H en contra', s: grp(momOpposed), col:'#ff3d57' }
-  ].filter(function(x){ return x.s && x.s.n >= 1; });
-
-  // ── Insight principal ─────────────────────────────────────────────────────
-  var insightHTML = '';
-  if(sAlin && sCont && sAlin.n >= 3 && sCont.n >= 3){
-    var diff = sAlin.ev - sCont.ev;
-    var col  = diff > 0 ? '#00c853' : '#ffd100';
-    var sign = diff >= 0 ? '+' : '';
-    insightHTML = '<div style="background:rgba(255,107,0,.07);border:1px solid rgba(255,107,0,.2);border-radius:10px;padding:10px 12px;margin-bottom:12px;font-size:12px;font-weight:700;color:var(--text);line-height:1.6">' +
-      (diff > 5
-        ? '✅ Seguir el sistema te da <strong style="color:#00c853">'+sign+diff.toFixed(1)+'%</strong> de EV extra por trade vs ir en contra. Edge real detectado.'
-        : diff < -3
-          ? '⚠️ Curiosamente, operás <strong style="color:#ffd100">'+Math.abs(diff).toFixed(1)+'% mejor</strong> cuando vas en contra del sistema. Revisá si el analizador está bien calibrado.'
-          : '→ Sin diferencia significativa todavía entre seguir o ignorar el sistema. Necesitás más muestra (≥10 trades por grupo).'
-      ) + '</div>';
-  } else if(sAlin && sAlin.n >= 3){
-    insightHTML = '<div style="background:rgba(0,200,83,.06);border:1px solid rgba(0,200,83,.2);border-radius:10px;padding:10px 12px;margin-bottom:12px;font-size:12px;font-weight:700;color:var(--text2)">'+sAlin.n+' trades alineados con el sistema: EV '+(sAlin.ev>=0?'+':'')+sAlin.ev.toFixed(1)+'%. Necesitás más trades en contra para comparar.</div>';
-  }
-
-  // ── Helpers de render ─────────────────────────────────────────────────────
+  function evBadge(ev){ return '<span style="font-size:22px;font-weight:900;color:'+(ev>=0?'#00c853':'#ff3d57')+'">'+(ev>=0?'+':'')+ev.toFixed(1)+'%</span>'; }
   function statCard(label, s, col){
     if(!s) return '';
-    var evCol = s.ev >= 0 ? '#00c853' : '#ff3d57';
-    return '<div style="background:var(--surface2);border-radius:10px;padding:12px;border-left:3px solid '+(col||'#ff6b00')+'">' +
-      '<div style="font-size:11px;font-weight:800;color:'+(col||'#ff6b00')+';margin-bottom:8px">'+label+'</div>' +
-      '<div style="font-size:24px;font-weight:900;color:'+evCol+'">'+(s.ev>=0?'+':'')+s.ev.toFixed(1)+'%</div>' +
-      '<div style="font-size:10px;color:var(--text2);margin-top:4px">WR '+s.wr.toFixed(0)+'% · '+s.n+' trade'+(s.n>1?'s':'')+'</div>' +
+    return '<div style="flex:1;min-width:130px;background:var(--surface2);border-radius:10px;padding:12px;border-left:3px solid '+(col||'#ff6b00')+'">' +
+      '<div style="font-size:10px;font-weight:800;color:'+(col||'#ff6b00')+';margin-bottom:6px">'+label+'</div>' +
+      evBadge(s.ev) +
+      '<div style="font-size:10px;color:var(--text2);margin-top:4px">WR '+s.wr.toFixed(0)+'% · '+s.n+'t</div>' +
       '<div style="font-size:11px;font-weight:800;color:'+(s.pnl>=0?'#00c853':'#ff3d57')+';margin-top:2px">P&L '+(s.pnl>=0?'+':'')+'$'+s.pnl.toFixed(0)+'</div>' +
     '</div>';
   }
-
   function barChart(rows){
     var maxEV = Math.max.apply(null, rows.map(function(r){ return r.s ? Math.abs(r.s.ev) : 0; }).concat([1]));
     return rows.filter(function(r){ return r.s && r.s.n >= 1; }).map(function(r){
@@ -1380,39 +1294,201 @@ function renderSistemaStats(T){
       '</div>';
     }).join('');
   }
+  function sectionTitle(txt){
+    return '<div style="font-size:10px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin:14px 0 8px">'+txt+'</div>';
+  }
 
+  // ── A. followedSystem grouping ──────────────────────────────────────────
+  annotateFollowedSystem();
+  var followed    = withSnap.filter(function(t){ return t.followedSystem === true; });
+  var notFollowed = withSnap.filter(function(t){ return t.followedSystem === false; });
+  var neutral     = withSnap.filter(function(t){ return t.followedSystem === null; });
+  var sFollow  = grp(followed);
+  var sContra  = grp(notFollowed);
+  var sNeut    = grp(neutral);
+
+  // ── B. systemEV vs userEV ───────────────────────────────────────────────
+  var evData = computeSystemVsUserEV(T);
+  var deltaHTML = '';
+  if(evData && evData.systemEV != null && evData.nFollowed >= 3){
+    var delta = evData.deltaEV || 0;
+    var dCol  = delta >= 0 ? '#00c853' : '#ff3d57';
+    var dSign = delta >= 0 ? '+' : '';
+    deltaHTML =
+      '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px">' +
+        '<div style="background:rgba(0,200,83,.08);border:1px solid rgba(0,200,83,.2);border-radius:10px;padding:10px;text-align:center">' +
+          '<div style="font-size:9px;font-weight:800;color:#00c853;text-transform:uppercase;margin-bottom:4px">EV Sistema</div>' +
+          '<div style="font-size:20px;font-weight:900;color:#00c853">'+(evData.systemEV>=0?'+':'')+evData.systemEV.toFixed(1)+'%</div>' +
+          '<div style="font-size:10px;color:var(--text2)">WR '+evData.systemWR.toFixed(0)+'%</div>' +
+        '</div>' +
+        '<div style="background:rgba(153,153,184,.06);border:1px solid rgba(153,153,184,.15);border-radius:10px;padding:10px;text-align:center">' +
+          '<div style="font-size:9px;font-weight:800;color:var(--text2);text-transform:uppercase;margin-bottom:4px">EV Total usuario</div>' +
+          '<div style="font-size:20px;font-weight:900;color:'+(evData.userEV>=0?'#00c853':'#ff3d57')+'">'+(evData.userEV>=0?'+':'')+evData.userEV.toFixed(1)+'%</div>' +
+          '<div style="font-size:10px;color:var(--text2)">WR '+evData.userWR.toFixed(0)+'%</div>' +
+        '</div>' +
+        '<div style="background:rgba(255,107,0,.07);border:1px solid rgba(255,107,0,.2);border-radius:10px;padding:10px;text-align:center">' +
+          '<div style="font-size:9px;font-weight:800;color:#ff6b00;text-transform:uppercase;margin-bottom:4px">ΔEV usuario</div>' +
+          '<div style="font-size:20px;font-weight:900;color:'+dCol+'">'+dSign+delta.toFixed(1)+'%</div>' +
+          '<div style="font-size:10px;color:var(--text2)">'+(delta >= 0 ? 'agrega edge ✅' : 'destruye edge ⚠️')+'</div>' +
+        '</div>' +
+      '</div>';
+  }
+
+  // ── C. Main insight ─────────────────────────────────────────────────────
+  var insightHTML = '';
+  if(sFollow && sContra && sFollow.n >= 3 && sContra.n >= 3){
+    var diff = sFollow.ev - sContra.ev;
+    insightHTML = '<div style="background:rgba(255,107,0,.07);border:1px solid rgba(255,107,0,.2);border-radius:10px;padding:10px 12px;margin-bottom:12px;font-size:12px;font-weight:700;color:var(--text);line-height:1.6">' +
+      (diff > 5
+        ? '✅ Seguir el sistema te da <strong style="color:#00c853">+'+(diff).toFixed(1)+'%</strong> de EV extra por trade. Edge real detectado.'
+        : diff < -3
+          ? '⚠️ Operás <strong style="color:#ffd100">'+Math.abs(diff).toFixed(1)+'% mejor</strong> cuando vas en contra del sistema. Revisá calibración del analizador.'
+          : '→ Sin diferencia significativa todavía. Necesitás ≥10 trades por grupo.'
+      ) + '</div>';
+  }
+
+  // ── D. Simulación del sistema ───────────────────────────────────────────
+  var simData   = simulateSystem(T);
+  var simHTML   = '';
+  if(simData){
+    var simPFstr = simData.pf >= 999 ? '∞' : simData.pf.toFixed(2);
+    simHTML = sectionTitle('📊 Simulación — si solo siguieras el sistema') +
+      '<div style="background:rgba(0,170,255,.07);border:1px solid rgba(0,170,255,.2);border-radius:10px;padding:12px;margin-bottom:14px;display:grid;grid-template-columns:repeat(4,1fr);gap:8px;text-align:center">' +
+        '<div><div style="font-size:8px;color:var(--text2);font-weight:700;text-transform:uppercase;margin-bottom:3px">EV/trade</div><div style="font-size:16px;font-weight:900;color:'+(simData.ev>=0?'#00c853':'#ff3d57')+'">'+(simData.ev>=0?'+':'')+simData.ev.toFixed(1)+'%</div></div>' +
+        '<div><div style="font-size:8px;color:var(--text2);font-weight:700;text-transform:uppercase;margin-bottom:3px">Win Rate</div><div style="font-size:16px;font-weight:900;color:#ffd100">'+simData.wr.toFixed(0)+'%</div></div>' +
+        '<div><div style="font-size:8px;color:var(--text2);font-weight:700;text-transform:uppercase;margin-bottom:3px">P. Factor</div><div style="font-size:16px;font-weight:900;color:#00aaff">'+simPFstr+'</div></div>' +
+        '<div><div style="font-size:8px;color:var(--text2);font-weight:700;text-transform:uppercase;margin-bottom:3px">P&L total</div><div style="font-size:16px;font-weight:900;color:'+(simData.pnl>=0?'#00c853':'#ff3d57')+'">'+(simData.pnl>=0?'+':'')+'$'+simData.pnl.toFixed(0)+'</div></div>' +
+      '</div>';
+  }
+
+  // ── E. Por tipo de trade ────────────────────────────────────────────────
+  annotateTradeTypes();
+  var byType  = {};
+  withSnap.forEach(function(t){
+    var tp = t.tradeType || detectTradeType(t);
+    if(!byType[tp]) byType[tp] = [];
+    byType[tp].push(t);
+  });
+  var typeColors = { continuacion:'#00c853', ruptura:'#00aaff', rango:'#ffd100', agotado:'#ff3d57' };
+  var typeEmoji  = { continuacion:'→', ruptura:'⚡', rango:'↔', agotado:'🔥' };
+  var typeRows = Object.entries(byType).map(function(e){
+    return { label: (typeEmoji[e[0]]||'')+ ' '+e[0], s: grp(e[1]), col: typeColors[e[0]]||'#9999b8' };
+  }).sort(function(a,b){ return (b.s?b.s.ev:0)-(a.s?a.s.ev:0); });
+
+  // ── F. MFE hit rates ────────────────────────────────────────────────────
+  var mfeHTML = '';
+  var tradesWithMFE = withSnap.filter(function(t){ return t.maxMovePct != null; });
+  if(tradesWithMFE.length >= 3){
+    // Use dynamic TPs from most common ticker+pos (or global defaults)
+    var defaultTP = { tp1: 5, tp2: 7.5, runner: 12 };
+    var hits = computeMFEHitRates(tradesWithMFE, defaultTP.tp1, defaultTP.tp2, defaultTP.runner);
+    if(hits){
+      function pctBar(pct, col, label){
+        var w = Math.max(pct, 3);
+        return '<div style="margin-bottom:6px">' +
+          '<div style="display:flex;justify-content:space-between;font-size:10px;font-weight:700;color:var(--text2);margin-bottom:3px"><span>'+label+'</span><span style="color:'+col+'">'+pct.toFixed(0)+'%</span></div>' +
+          '<div style="background:var(--surface2);border-radius:4px;height:7px;overflow:hidden"><div style="width:'+w+'%;height:100%;background:'+col+';border-radius:4px"></div></div>' +
+        '</div>';
+      }
+      mfeHTML = sectionTitle('📈 MFE — alcance de targets ('+hits.n+' trades con MFE)') +
+        '<div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:14px">' +
+          pctBar(hits.pctTP1, '#ffd100', '≥TP1 ('+defaultTP.tp1+'%) · '+hits.hitTP1+'/'+hits.n+' trades') +
+          pctBar(hits.pctTP2, '#ff6b00', '≥TP2 ('+defaultTP.tp2+'%) · '+hits.hitTP2+'/'+hits.n+' trades') +
+          pctBar(hits.pctRun, '#00aaff', '≥Runner ('+defaultTP.runner+'%) · '+hits.hitRun+'/'+hits.n+' trades') +
+          '<div style="display:flex;gap:10px;margin-top:10px;padding-top:8px;border-top:1px solid var(--border)">' +
+            '<div style="flex:1;text-align:center"><div style="font-size:8px;color:var(--text2);font-weight:700;text-transform:uppercase">Salida óptima p50</div><div style="font-size:16px;font-weight:900;color:#00c853">+'+hits.optP50.toFixed(1)+'%</div></div>' +
+            '<div style="flex:1;text-align:center"><div style="font-size:8px;color:var(--text2);font-weight:700;text-transform:uppercase">Salida óptima p75</div><div style="font-size:16px;font-weight:900;color:#00aaff">+'+hits.optP75.toFixed(1)+'%</div></div>' +
+          '</div>' +
+        '</div>';
+    }
+  }
+
+  // ── G. Tiempo óptimo ────────────────────────────────────────────────────
+  var timeHTML = '';
+  var optTime = computeOptimalTime(withSnap);
+  if(optTime){
+    var avgDurH = (optTime.avgDurMins/60).toFixed(1);
+    timeHTML = sectionTitle('⏱ Tiempo promedio de trades ('+optTime.n+' trades)') +
+      '<div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:14px;display:flex;gap:10px">' +
+        '<div style="flex:1;text-align:center"><div style="font-size:8px;color:var(--text2);font-weight:700;text-transform:uppercase;margin-bottom:3px">Duración media</div><div style="font-size:18px;font-weight:900;color:#ffd100">'+avgDurH+'h</div></div>' +
+        '<div style="flex:1;text-align:center"><div style="font-size:8px;color:var(--text2);font-weight:700;text-transform:uppercase;margin-bottom:3px">Efic. captura media</div><div style="font-size:18px;font-weight:900;color:#00c853">'+(optTime.avgEff*100).toFixed(0)+'%</div></div>' +
+      '</div>';
+  }
+
+  // ── Secondary breakdown sections ────────────────────────────────────────
+  var altaConf  = withSnap.filter(function(t){ return t.anSnapshot.confianza >= 70; });
+  var mediaConf = withSnap.filter(function(t){ return t.anSnapshot.confianza >= 45 && t.anSnapshot.confianza < 70; });
+  var bajaConf  = withSnap.filter(function(t){ return t.anSnapshot.confianza < 45; });
+  var sConf = [
+    { label:'🟢 Alta (70+)', s: grp(altaConf), col:'#00c853' },
+    { label:'🟡 Media (45–70)', s: grp(mediaConf), col:'#ffd100' },
+    { label:'🔴 Baja (<45)', s: grp(bajaConf), col:'#ff6b00' }
+  ].filter(function(x){ return x.s && x.s.n >= 1; });
+
+  var highScore = withSnap.filter(function(t){ return t.anSnapshot.scoreMkt >= 5; });
+  var midScore  = withSnap.filter(function(t){ return t.anSnapshot.scoreMkt >= 3 && t.anSnapshot.scoreMkt < 5; });
+  var lowScore  = withSnap.filter(function(t){ return t.anSnapshot.scoreMkt < 3; });
+  var sScore = [
+    { label:'🔥 Score ≥5 (fuerte)', s: grp(highScore), col:'#00c853' },
+    { label:'🟡 Score 3–4 (medio)', s: grp(midScore), col:'#ffd100' },
+    { label:'⚠️ Score <3 (débil)', s: grp(lowScore), col:'#ff6b00' }
+  ].filter(function(x){ return x.s && x.s.n >= 1; });
+
+  var sA = withSnap.filter(function(t){ return t.anSnapshot.sesgomkt === 'A favor'; });
+  var sE = withSnap.filter(function(t){ return t.anSnapshot.sesgomkt === 'En contra'; });
+  var sN = withSnap.filter(function(t){ return t.anSnapshot.sesgomkt === 'Neutral'; });
+  var sSesgo = [
+    { label:'✅ Sesgo a favor', s: grp(sA), col:'#00c853' },
+    { label:'❌ Sesgo en contra', s: grp(sE), col:'#ff3d57' },
+    { label:'↔ Sesgo neutral', s: grp(sN), col:'#9999b8' }
+  ].filter(function(x){ return x.s && x.s.n >= 1; });
+
+  var momAligned = withSnap.filter(function(t){ var m=t.anSnapshot.mom1h||0; return (t.pos==='Long'&&m>0)||(t.pos==='Short'&&m<0); });
+  var momOpposed = withSnap.filter(function(t){ var m=t.anSnapshot.mom1h||0; return (t.pos==='Long'&&m<0)||(t.pos==='Short'&&m>0); });
+  var sMom = [
+    { label:'🟢 1H a favor', s: grp(momAligned), col:'#00c853' },
+    { label:'🔴 1H en contra', s: grp(momOpposed), col:'#ff3d57' }
+  ].filter(function(x){ return x.s && x.s.n >= 1; });
+
+  // ── Assemble HTML ────────────────────────────────────────────────────────
   el.innerHTML = '<div class="chart-box" style="cursor:default;border-color:rgba(0,170,255,.25)">' +
     '<div class="chart-label" style="color:#00aaff">🤖 Sistema vs mis decisiones ('+withSnap.length+' trades con snapshot)</div>' +
     insightHTML +
 
-    // ── Bloque 1: Alineado vs Contra ──────────────────────────────────────
-    '<div style="font-size:10px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Alineación con el sistema</div>' +
+    sectionTitle('⚡ EV Sistema vs EV Usuario') +
+    deltaHTML +
+
+    sectionTitle('✅ Alineado vs ❌ En contra') +
     '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">' +
-      statCard('✅ Alineado con el sistema', sAlin, '#00c853') +
-      statCard('❌ En contra del sistema', sCont, '#ff3d57') +
-      (sNeut ? statCard('🟡 Neutral / No trade', sNeut, '#9999b8') : '') +
+      statCard('✅ Siguió el sistema', sFollow, '#00c853') +
+      statCard('❌ No siguió el sistema', sContra, '#ff3d57') +
+      (sNeut ? statCard('🟡 Sin snapshot/dirección', sNeut, '#9999b8') : '') +
     '</div>' +
 
-    // ── Bloque 2: Por confianza ───────────────────────────────────────────
-    '<div style="font-size:10px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Por nivel de confianza</div>' +
-    '<div style="margin-bottom:14px">'+barChart(sConf)+'</div>' +
+    simHTML +
 
-    // ── Bloque 3: Por score de mercado ────────────────────────────────────
-    '<div style="font-size:10px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Por score de mercado (0–7)</div>' +
-    '<div style="margin-bottom:14px">'+barChart(sScore)+'</div>' +
+    sectionTitle('🏷 Por tipo de trade') +
+    '<div style="margin-bottom:14px">' + barChart(typeRows) + '</div>' +
 
-    // ── Bloque 4: Por sesgo de mercado ────────────────────────────────────
-    '<div style="font-size:10px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Por sesgo de mercado</div>' +
-    '<div style="margin-bottom:14px">'+barChart(sSesgo)+'</div>' +
+    mfeHTML +
+    timeHTML +
 
-    // ── Bloque 5: Por momentum 1H ─────────────────────────────────────────
-    '<div style="font-size:10px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Por momentum 1H (alineado con tu posición)</div>' +
-    '<div style="margin-bottom:10px">'+barChart(sMom)+'</div>' +
+    sectionTitle('📊 Por confianza del analizador') +
+    '<div style="margin-bottom:14px">' + barChart(sConf) + '</div>' +
+
+    sectionTitle('📊 Por score de mercado (0–7)') +
+    '<div style="margin-bottom:14px">' + barChart(sScore) + '</div>' +
+
+    sectionTitle('📊 Por sesgo de mercado') +
+    '<div style="margin-bottom:14px">' + barChart(sSesgo) + '</div>' +
+
+    sectionTitle('📊 Por momentum 1H') +
+    '<div style="margin-bottom:10px">' + barChart(sMom) + '</div>' +
 
     '<div style="font-size:10px;color:var(--text2);padding:8px 0;border-top:1px solid var(--border);margin-top:4px">' +
       '⚠️ Mínimo recomendado: 10 trades por grupo para conclusiones confiables. · ' +
       '<strong style="color:#00aaff">'+withSnap.length+'</strong> de <strong>'+T.length+'</strong> trades tienen snapshot.' +
-      (withSnap.length < T.length ? ' Capturá el analizador al abrir nuevos trades para aumentar la muestra.' : '') +
+      (withSnap.length < T.length ? ' Capturá el analizador al abrir nuevos trades.' : '') +
     '</div>' +
   '</div>';
 }
@@ -2917,41 +2993,26 @@ function updateMFEMAE(livePrice){
     if(!price || price <= 0) return;
 
     const entry = t.entrada;
-    if(entry <= 0) return;
     const isLong = t.pos === 'Long';
 
-    // ── Pure price % — NO leverage, NO margin ──────────────────────────────
-    // MFE formula: (price - entry) / entry * 100  [positive = favorable for Long]
-    // MAE formula: (entry - price) / entry * 100  [positive = adverse for Long]
-    // For Short: directions are inverted
+    // Raw price move % (no leverage, no margin — just price)
     const rawPricePct = (price - entry) / entry * 100;
 
-    const favorablePct = isLong ?  rawPricePct : -rawPricePct;
-    const adversePct   = isLong ? -rawPricePct :  rawPricePct;
+    // MFE: favorable move (positive for Long when price rises, positive for Short when price falls)
+    const favorablePct = isLong ? rawPricePct : -rawPricePct;
+    // MAE: adverse move (positive when price went against us)
+    const adversePct   = isLong ? -rawPricePct : rawPricePct;
 
-    // Sanity cap: pure price moves on crypto rarely exceed 60% in a single trade
-    const MAX_SANE_PCT = 60;
-
-    // Update MFE: running maximum of favorable move
-    if(favorablePct > 0 && favorablePct <= MAX_SANE_PCT){
+    // Update MFE: keep running maximum of favorable move
+    if(favorablePct > 0){
       const prev = t.maxMovePct || 0;
       if(favorablePct > prev){ t.maxMovePct = parseFloat(favorablePct.toFixed(3)); changed = true; }
     }
 
-    // Update MAE: running maximum of adverse move (pure price, no leverage)
-    if(adversePct > 0 && adversePct <= MAX_SANE_PCT){
+    // Update MAE: keep running maximum of adverse move (most negative excursion)
+    if(adversePct > 0){
       const prev = t.maxAdversePct || 0;
       if(adversePct > prev){ t.maxAdversePct = parseFloat(adversePct.toFixed(3)); changed = true; }
-    }
-
-    // ── Sanitize stale corrupt values (e.g. leverage-inflated from old bug) ──
-    if(t.maxAdversePct != null && t.maxAdversePct > MAX_SANE_PCT){
-      t.maxAdversePct = null;
-      changed = true;
-    }
-    if(t.maxMovePct != null && t.maxMovePct > MAX_SANE_PCT){
-      t.maxMovePct = null;
-      changed = true;
     }
   });
   if(changed){ persist(D); }
@@ -3212,6 +3273,13 @@ function renderHistorial(){
       <td data-col="fl">${p10flag}</td>
       <td data-col="obs" onclick="event.stopPropagation();showObs('${t.id}')" style="text-align:center;cursor:pointer">${t.obs?`<span style="font-size:14px;color:#ff6b00">💬</span>`:`<span style="color:var(--border);font-size:14px">✏️</span>`}</td>
       <td data-col="durMins" style="font-size:11px;color:var(--text2);white-space:nowrap">${_tdurStr}</td>
+      <td data-col="vsavg" style="font-size:10px;font-weight:800;text-align:center;vertical-align:middle">${(()=>{
+        const va=computeVsAvg(t,D.trades.filter(x=>!x.open));
+        if(!va||t.open)return'';
+        const sign=va.vsAvg>=0?'+':'';
+        const col=va.vsAvg>=2?'#00c853':va.vsAvg<=-2?'#ff3d57':'#9999b8';
+        return`<span style="color:${col}">${sign}${va.vsAvg.toFixed(1)}</span>`;
+      })()}</td>
       <td data-col="_del" onclick="event.stopPropagation()"><button class="btn-icon del" onclick="delTrade('${t.id}')">✕</button></td>
     </tr>
 `;
@@ -4793,6 +4861,7 @@ function init(){
   setNowDatetime();
   document.getElementById('f-lev').value=5;
   loadCapital();migratePatronFromObs();setTimeout(updateCapitalDisplay,100);populateSelects();updateTickerDropdown();updatePreviews();updateKPIs();updateOpenCount();updateSyncLastTime();setTimeout(startCycleMonitor,2000);
+  annotateFollowedSystem(); annotateTradeTypes(); // Sistema Analytics v2
   // Auto-switch to En Curso if there are open trades, else enforce Cargar state
   if(D.trades.some(t=>t.open)) switchTab('abiertos');
   else switchTab('cargar');
@@ -5093,8 +5162,7 @@ async function saveTrade(){
   const closedHoraFinal=closedHoraVal||(existingTrade?existingTrade.closedHora:null)||null;
   // Preserve auto-calculated MFE/MAE from the existing trade — never overwrite from form
   const mfePreserved = existingTrade?.maxMovePct   != null ? {maxMovePct:   existingTrade.maxMovePct}   : {};
-  // Preserve MAE only if it's a valid pure-price value (sanitize corrupt leverage-inflated data)
-  const maePreserved = (existingTrade?.maxAdversePct != null && existingTrade.maxAdversePct <= 60) ? {maxAdversePct: existingTrade.maxAdversePct} : {};
+  const maePreserved = existingTrade?.maxAdversePct != null ? {maxAdversePct: existingTrade.maxAdversePct} : {};
   const t={id:editingId||uid(),fecha:getFechaValue(),fechahora,ticker,pos:document.getElementById('f-pos').value,
     margen:parseFloat(document.getElementById('f-margen').value)||0,entrada:parseFloat(document.getElementById('f-entrada').value)||0,
     actual:parseFloat(document.getElementById('f-actual').value)||0,lev:parseFloat(document.getElementById('f-lev').value)||5,
@@ -5133,6 +5201,7 @@ async function saveTrade(){
   }
   if(editingId){const i=D.trades.findIndex(x=>x.id===editingId);D.trades[i]=t;}else{D.trades.push(t);}
   persist(D);
+  annotateFollowedSystem(); annotateTradeTypes();
   if(!t.open && t.resultado !== undefined) updateMomentumStats(t);
   const wasEditing=!!editingId;const wasOpen=t.open;resetForm();updateKPIs();updateTickerDropdown();updateOpenCount();
   if(wasEditing) switchTab(wasOpen?'abiertos':'historial');
@@ -5313,6 +5382,180 @@ function buildSnapshotForTicker(ticker, tradePosOverride){
 
 // Sincroniza el campo del analizador con el ticker del trade y actualiza el snap display
 // En modo edición (editingId != null), NO sobreescribe el snapshot existente
+
+/* ══════════════════════════════════════════════════════════════════════════
+   SISTEMA ANALYTICS v2 — followedSystem, detectType, MFE metrics
+   ══════════════════════════════════════════════════════════════════════════ */
+
+// ── 1. followedSystem ────────────────────────────────────────────────────
+// Returns true if the trade followed the system's direction + TF at entry
+function computeFollowedSystem(trade){
+  var snap = trade.anSnapshot;
+  if(!snap) return null; // can't determine without snapshot
+  var dir  = snap.dirSugerida || '';
+  if(dir === 'NO ENTRAR') return false; // system said skip → not followed
+  var sysLong  = dir.includes('LONG');
+  var sysShort = dir.includes('SHORT');
+  var dirOk  = (sysLong && trade.pos === 'Long') || (sysShort && trade.pos === 'Short');
+  // TF check — optional, only strict if tfSugerido set
+  var tfOk   = !snap.tfSugerido || !trade.temp || trade.temp === snap.tfSugerido;
+  return dirOk && tfOk;
+}
+
+// Annotate all trades with followedSystem (run once on load + after each save)
+function annotateFollowedSystem(){
+  D.trades.forEach(function(t){
+    t.followedSystem = computeFollowedSystem(t);
+  });
+}
+
+// ── 2. detectTradeType ───────────────────────────────────────────────────
+// Classifies each trade into one of 4 types based on snapshot + trade data
+function detectTradeType(trade){
+  var snap = trade.anSnapshot;
+  var momentum  = snap ? (snap.scoreMkt || 0) : 0;
+  var agot      = snap ? (snap.agotamiento || 0) : 0;
+  var confianza = snap ? (snap.confianza || 0) : 0;
+  var temp      = trade.temp || '';
+  var salida    = (trade.salida || '').toLowerCase();
+
+  // Agotado: high exhaustion at entry
+  if(agot >= 60) return 'agotado';
+  // Ruptura: strong momentum + short TF
+  if(momentum >= 5 && (temp === '1m' || temp === '5m' || temp === '15m')) return 'ruptura';
+  // Continuacion: strong momentum on medium+ TF, not exhausted
+  if(momentum >= 4 && (temp === '1h' || temp === '4h' || temp === '1d')) return 'continuacion';
+  // Rango: low momentum, any TF
+  if(momentum < 3) return 'rango';
+  // Default
+  return 'continuacion';
+}
+
+function annotateTradeTypes(){
+  D.trades.forEach(function(t){
+    if(!t.tradeType) t.tradeType = detectTradeType(t);
+  });
+}
+
+// ── 3. MFE hit rates ─────────────────────────────────────────────────────
+// Given a set of closed trades (with maxMovePct), compute TP hit rates
+function computeMFEHitRates(trades, tp1, tp2, runner){
+  var withMFE = trades.filter(function(t){ return t.maxMovePct != null; });
+  if(!withMFE.length) return null;
+  var n = withMFE.length;
+  var hitTP1   = withMFE.filter(function(t){ return t.maxMovePct >= tp1; }).length;
+  var hitTP2   = withMFE.filter(function(t){ return t.maxMovePct >= tp2; }).length;
+  var hitRun   = withMFE.filter(function(t){ return t.maxMovePct >= runner; }).length;
+  // Optimal exit = p50 and p75 of MFE distribution
+  var sorted   = withMFE.map(function(t){ return t.maxMovePct; }).sort(function(a,b){ return a-b; });
+  var p50idx   = Math.floor(sorted.length * 0.50);
+  var p75idx   = Math.floor(sorted.length * 0.75);
+  var optP50   = sorted[p50idx] || 0;
+  var optP75   = sorted[p75idx] || 0;
+  return {
+    n: n,
+    hitTP1: hitTP1, pctTP1: hitTP1/n*100,
+    hitTP2: hitTP2, pctTP2: hitTP2/n*100,
+    hitRun: hitRun, pctRun: hitRun/n*100,
+    optP50: optP50, optP75: optP75
+  };
+}
+
+// ── 4. optimalTime ───────────────────────────────────────────────────────
+// Average time to MFE for closed trades with duration data
+function computeOptimalTime(trades){
+  // We approximate time-to-MFE as total duration * efficiency
+  // (exact would require tick-level data we don't have)
+  var valid = trades.filter(function(t){
+    return t.durMins != null && t.durMins > 0 && t.maxMovePct != null && t.maxMovePct > 0;
+  });
+  if(valid.length < 3) return null;
+  // efficiency = resultado_price / maxMovePct (how much of MFE was captured)
+  var avgDur = valid.reduce(function(s,t){ return s + t.durMins; }, 0) / valid.length;
+  var effs   = valid.map(function(t){
+    var lev  = t.lev || 1;
+    var pureR = Math.abs(t.resultado) / lev;
+    return Math.min(1, pureR / t.maxMovePct);
+  });
+  var avgEff = effs.reduce(function(s,e){ return s+e; }, 0) / effs.length;
+  return { avgDurMins: avgDur, avgEff: avgEff, n: valid.length };
+}
+
+// ── 5. vsAvg (per trade) ─────────────────────────────────────────────────
+// Returns how this trade's R% compares to the average R% of similar trades
+function computeVsAvg(trade, allTrades){
+  // "similar" = same pos + same ticker (if ≥3 trades) else all closed
+  var similar = allTrades.filter(function(t){
+    return !t.open && t.ticker === trade.ticker && t.pos === trade.pos;
+  });
+  if(similar.length < 3){
+    similar = allTrades.filter(function(t){ return !t.open; });
+  }
+  if(!similar.length) return null;
+  var avg = similar.reduce(function(s,t){ return s + t.resultado; }, 0) / similar.length;
+  var lev = trade.lev || 1;
+  var pureTrade = trade.resultado / lev;
+  var pureAvg   = avg / lev;
+  return { vsAvg: pureTrade - pureAvg, avg: pureAvg, r: pureTrade };
+}
+
+// ── 6. systemEV vs userEV ────────────────────────────────────────────────
+// systemEV  = EV of trades where followedSystem === true
+// userEV    = EV of all trades
+// deltaEV   = userEV - systemEV (positive = user adds edge, negative = destroys)
+function computeSystemVsUserEV(trades){
+  var closed = trades.filter(function(t){ return !t.open && t.resultado !== undefined; });
+  if(!closed.length) return null;
+  var withSnap    = closed.filter(function(t){ return t.anSnapshot != null; });
+  var followed    = withSnap.filter(function(t){ return t.followedSystem === true; });
+  var notFollowed = withSnap.filter(function(t){ return t.followedSystem === false; });
+  function ev(arr){
+    if(!arr.length) return null;
+    return arr.reduce(function(s,t){ return s + t.resultado; }, 0) / arr.length;
+  }
+  function wr(arr){
+    if(!arr.length) return null;
+    return arr.filter(function(t){ return t.resultado > 0; }).length / arr.length * 100;
+  }
+  var userEV   = ev(closed);
+  var systemEV = ev(followed);
+  var contraEV = ev(notFollowed);
+  return {
+    userEV:    userEV,
+    systemEV:  systemEV,
+    contraEV:  contraEV,
+    deltaEV:   (systemEV != null && userEV != null) ? userEV - systemEV : null,
+    userWR:    wr(closed),
+    systemWR:  wr(followed),
+    contraWR:  wr(notFollowed),
+    nTotal:    closed.length,
+    nFollowed: followed.length,
+    nContra:   notFollowed.length
+  };
+}
+
+// ── 7. simulateSystem ────────────────────────────────────────────────────
+// Returns what the stats would look like if ONLY system-aligned trades were kept
+function simulateSystem(trades){
+  var followed = trades.filter(function(t){
+    return !t.open && t.followedSystem === true && t.resultado !== undefined;
+  });
+  if(followed.length < 3) return null;
+  var wins = followed.filter(function(t){ return t.resultado > 0; });
+  var losses = followed.filter(function(t){ return t.resultado < 0; });
+  var grossW = wins.reduce(function(s,t){ return s + t.resultado; }, 0);
+  var grossL = Math.abs(losses.reduce(function(s,t){ return s + t.resultado; }, 0)) || 1;
+  var ev  = followed.reduce(function(s,t){ return s + t.resultado; }, 0) / followed.length;
+  var pnl = followed.reduce(function(s,t){ return s + (t.margen * t.resultado / 100); }, 0);
+  return {
+    n:      followed.length,
+    wr:     wins.length / followed.length * 100,
+    ev:     ev,
+    pf:     grossW / grossL,
+    pnl:    pnl
+  };
+}
+
 function syncAnalizerToTradeTicker(ticker){
   if(!ticker) return;
   // Actualizar el campo del analizador visualmente (sin disparar su lógica interna)
@@ -5666,8 +5909,7 @@ function updateMomentumStats(trade){
   const s     = stats[tier];
 
   const maxMove = trade.maxMovePct !== undefined ? Math.abs(trade.maxMovePct) : Math.abs(trade.resultado);
-  // Use MAE only if it's a sane pure-price value (not leverage-inflated)
-  const maeVal  = (trade.maxAdversePct !== undefined && trade.maxAdversePct != null && Math.abs(trade.maxAdversePct) <= 60) ? Math.abs(trade.maxAdversePct) : null;
+  const maeVal  = trade.maxAdversePct !== undefined ? Math.abs(trade.maxAdversePct) : null;
 
   s.count  = (s.count  || 0) + 1;
   s.hit3   = (s.hit3   || 0) + (maxMove >= 3  ? 1 : 0);
@@ -6071,9 +6313,7 @@ function renderTPProbBlock(trade, livePct){
   const tierColor = !hasTickerData ? 'var(--text2)' : tier==='fuerte'?'#00c853':tier==='medio'?'#ffd100':'#ff6b00';
 
   const mfeLive = trade.maxMovePct    != null ? `+${trade.maxMovePct.toFixed(2)}%`    : '—';
-  // Guard: MAE must be pure price %, never leverage-inflated (max sane ~60% for crypto)
-  const maeRaw = trade.maxAdversePct != null && trade.maxAdversePct <= 60 ? trade.maxAdversePct : null;
-  const maeLive = maeRaw != null ? `-${maeRaw.toFixed(2)}%` : '—';
+  const maeLive = trade.maxAdversePct != null ? `-${trade.maxAdversePct.toFixed(2)}%` : '—';
 
   // ── DYNAMIC TPs — same source as getMomentumTP block above ───────────────
   const dtp = getTickerDynamicTP(trade.ticker, trade.pos, tier);
@@ -7636,6 +7876,7 @@ const COL_DEFS = [
   {id:'fl',       label:'Fl.',      sortKey:null,        defaultW:28},
   {id:'obs',      label:'Obs',      sortKey:null,        defaultW:32},
   {id:'durMins',  label:'Duración', sortKey:'durMins',   defaultW:62},
+  {id:'vsavg',    label:'vs⌀',      sortKey:null,        defaultW:36},
   {id:'_del',     label:'',         sortKey:null,        defaultW:28},
 ];
 
