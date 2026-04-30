@@ -2917,26 +2917,41 @@ function updateMFEMAE(livePrice){
     if(!price || price <= 0) return;
 
     const entry = t.entrada;
+    if(entry <= 0) return;
     const isLong = t.pos === 'Long';
 
-    // Raw price move % (no leverage, no margin — just price)
+    // ── Pure price % — NO leverage, NO margin ──────────────────────────────
+    // MFE formula: (price - entry) / entry * 100  [positive = favorable for Long]
+    // MAE formula: (entry - price) / entry * 100  [positive = adverse for Long]
+    // For Short: directions are inverted
     const rawPricePct = (price - entry) / entry * 100;
 
-    // MFE: favorable move (positive for Long when price rises, positive for Short when price falls)
-    const favorablePct = isLong ? rawPricePct : -rawPricePct;
-    // MAE: adverse move (positive when price went against us)
-    const adversePct   = isLong ? -rawPricePct : rawPricePct;
+    const favorablePct = isLong ?  rawPricePct : -rawPricePct;
+    const adversePct   = isLong ? -rawPricePct :  rawPricePct;
 
-    // Update MFE: keep running maximum of favorable move
-    if(favorablePct > 0){
+    // Sanity cap: pure price moves on crypto rarely exceed 60% in a single trade
+    const MAX_SANE_PCT = 60;
+
+    // Update MFE: running maximum of favorable move
+    if(favorablePct > 0 && favorablePct <= MAX_SANE_PCT){
       const prev = t.maxMovePct || 0;
       if(favorablePct > prev){ t.maxMovePct = parseFloat(favorablePct.toFixed(3)); changed = true; }
     }
 
-    // Update MAE: keep running maximum of adverse move (most negative excursion)
-    if(adversePct > 0){
+    // Update MAE: running maximum of adverse move (pure price, no leverage)
+    if(adversePct > 0 && adversePct <= MAX_SANE_PCT){
       const prev = t.maxAdversePct || 0;
       if(adversePct > prev){ t.maxAdversePct = parseFloat(adversePct.toFixed(3)); changed = true; }
+    }
+
+    // ── Sanitize stale corrupt values (e.g. leverage-inflated from old bug) ──
+    if(t.maxAdversePct != null && t.maxAdversePct > MAX_SANE_PCT){
+      t.maxAdversePct = null;
+      changed = true;
+    }
+    if(t.maxMovePct != null && t.maxMovePct > MAX_SANE_PCT){
+      t.maxMovePct = null;
+      changed = true;
     }
   });
   if(changed){ persist(D); }
@@ -5078,7 +5093,8 @@ async function saveTrade(){
   const closedHoraFinal=closedHoraVal||(existingTrade?existingTrade.closedHora:null)||null;
   // Preserve auto-calculated MFE/MAE from the existing trade — never overwrite from form
   const mfePreserved = existingTrade?.maxMovePct   != null ? {maxMovePct:   existingTrade.maxMovePct}   : {};
-  const maePreserved = existingTrade?.maxAdversePct != null ? {maxAdversePct: existingTrade.maxAdversePct} : {};
+  // Preserve MAE only if it's a valid pure-price value (sanitize corrupt leverage-inflated data)
+  const maePreserved = (existingTrade?.maxAdversePct != null && existingTrade.maxAdversePct <= 60) ? {maxAdversePct: existingTrade.maxAdversePct} : {};
   const t={id:editingId||uid(),fecha:getFechaValue(),fechahora,ticker,pos:document.getElementById('f-pos').value,
     margen:parseFloat(document.getElementById('f-margen').value)||0,entrada:parseFloat(document.getElementById('f-entrada').value)||0,
     actual:parseFloat(document.getElementById('f-actual').value)||0,lev:parseFloat(document.getElementById('f-lev').value)||5,
@@ -5650,7 +5666,8 @@ function updateMomentumStats(trade){
   const s     = stats[tier];
 
   const maxMove = trade.maxMovePct !== undefined ? Math.abs(trade.maxMovePct) : Math.abs(trade.resultado);
-  const maeVal  = trade.maxAdversePct !== undefined ? Math.abs(trade.maxAdversePct) : null;
+  // Use MAE only if it's a sane pure-price value (not leverage-inflated)
+  const maeVal  = (trade.maxAdversePct !== undefined && trade.maxAdversePct != null && Math.abs(trade.maxAdversePct) <= 60) ? Math.abs(trade.maxAdversePct) : null;
 
   s.count  = (s.count  || 0) + 1;
   s.hit3   = (s.hit3   || 0) + (maxMove >= 3  ? 1 : 0);
@@ -6054,7 +6071,9 @@ function renderTPProbBlock(trade, livePct){
   const tierColor = !hasTickerData ? 'var(--text2)' : tier==='fuerte'?'#00c853':tier==='medio'?'#ffd100':'#ff6b00';
 
   const mfeLive = trade.maxMovePct    != null ? `+${trade.maxMovePct.toFixed(2)}%`    : '—';
-  const maeLive = trade.maxAdversePct != null ? `-${trade.maxAdversePct.toFixed(2)}%` : '—';
+  // Guard: MAE must be pure price %, never leverage-inflated (max sane ~60% for crypto)
+  const maeRaw = trade.maxAdversePct != null && trade.maxAdversePct <= 60 ? trade.maxAdversePct : null;
+  const maeLive = maeRaw != null ? `-${maeRaw.toFixed(2)}%` : '—';
 
   // ── DYNAMIC TPs — same source as getMomentumTP block above ───────────────
   const dtp = getTickerDynamicTP(trade.ticker, trade.pos, tier);
