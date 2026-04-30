@@ -1295,7 +1295,7 @@ function renderSistemaStats(T){
     }).join('');
   }
   function sectionTitle(txt){
-    return '<div style="font-size:10px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin:14px 0 8px">'+txt+'</div>';
+    return '<div style="font-size:10px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin:14px 0 8px;white-space:normal;word-break:break-word">'+txt+'</div>';
   }
 
   // ── A. followedSystem grouping ──────────────────────────────────────────
@@ -1318,17 +1318,17 @@ function renderSistemaStats(T){
       '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px">' +
         '<div style="background:rgba(0,200,83,.08);border:1px solid rgba(0,200,83,.2);border-radius:10px;padding:10px;text-align:center">' +
           '<div style="font-size:9px;font-weight:800;color:#00c853;text-transform:uppercase;margin-bottom:4px">EV Sistema</div>' +
-          '<div style="font-size:20px;font-weight:900;color:#00c853">'+(evData.systemEV>=0?'+':'')+evData.systemEV.toFixed(1)+'%</div>' +
+          '<div style="font-size:16px;font-weight:900;color:#00c853;word-break:break-all">'+(evData.systemEV>=0?'+':'')+evData.systemEV.toFixed(1)+'%</div>' +
           '<div style="font-size:10px;color:var(--text2)">WR '+evData.systemWR.toFixed(0)+'%</div>' +
         '</div>' +
         '<div style="background:rgba(153,153,184,.06);border:1px solid rgba(153,153,184,.15);border-radius:10px;padding:10px;text-align:center">' +
           '<div style="font-size:9px;font-weight:800;color:var(--text2);text-transform:uppercase;margin-bottom:4px">EV Total usuario</div>' +
-          '<div style="font-size:20px;font-weight:900;color:'+(evData.userEV>=0?'#00c853':'#ff3d57')+'">'+(evData.userEV>=0?'+':'')+evData.userEV.toFixed(1)+'%</div>' +
+          '<div style="font-size:16px;font-weight:900;color:'+(evData.userEV>=0?'#00c853':'#ff3d57')+';word-break:break-all">'+(evData.userEV>=0?'+':'')+evData.userEV.toFixed(1)+'%</div>' +
           '<div style="font-size:10px;color:var(--text2)">WR '+evData.userWR.toFixed(0)+'%</div>' +
         '</div>' +
         '<div style="background:rgba(255,107,0,.07);border:1px solid rgba(255,107,0,.2);border-radius:10px;padding:10px;text-align:center">' +
           '<div style="font-size:9px;font-weight:800;color:#ff6b00;text-transform:uppercase;margin-bottom:4px">ΔEV usuario</div>' +
-          '<div style="font-size:20px;font-weight:900;color:'+dCol+'">'+dSign+delta.toFixed(1)+'%</div>' +
+          '<div style="font-size:16px;font-weight:900;color:'+dCol+';word-break:break-all">'+dSign+delta.toFixed(1)+'%</div>' +
           '<div style="font-size:10px;color:var(--text2)">'+(delta >= 0 ? 'agrega edge ✅' : 'destruye edge ⚠️')+'</div>' +
         '</div>' +
       '</div>';
@@ -4036,40 +4036,33 @@ function renderGraficos(){
     return `<div class="desktop-col-full">
     <div class="chart-box" style="cursor:default;border-color:rgba(0,170,255,.2)">
       <div class="chart-label" style="color:${feeColor}">💸 Análisis de fees — impacto en rendimiento</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px">
+      <!-- Fila 1: PnL Bruto → Fees → PnL Neto (el flujo completo) -->
+      ${totalBruto!==0?`<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px">
+        <div style="background:rgba(0,170,255,.07);border:1px solid rgba(0,170,255,.2);border-radius:9px;padding:10px;text-align:center">
+          <div style="font-size:9px;color:#00aaff;font-weight:700;text-transform:uppercase;margin-bottom:3px">PnL Bruto</div>
+          <div style="font-size:16px;font-weight:900;color:${totalBruto>=0?'#00c853':'#ff3d57'};word-break:break-all">${totalBruto>=0?'+':''}$${totalBruto.toFixed(2)}</div>
+        </div>
+        <div style="background:rgba(255,61,87,.07);border:1px solid rgba(255,61,87,.2);border-radius:9px;padding:10px;text-align:center">
+          <div style="font-size:9px;color:#ff3d57;font-weight:700;text-transform:uppercase;margin-bottom:3px">Fees totales</div>
+          <div style="font-size:16px;font-weight:900;color:#ff3d57;word-break:break-all">-$${totalFees.toFixed(2)}</div>
+          <div style="font-size:9px;color:var(--text2);margin-top:2px">${tradesConFees}t · ${feesPctNeto.toFixed(1)}% del bruto</div>
+        </div>
+        <div style="background:rgba(0,200,83,.07);border:1px solid rgba(0,200,83,.2);border-radius:9px;padding:10px;text-align:center">
+          <div style="font-size:9px;color:#00c853;font-weight:700;text-transform:uppercase;margin-bottom:3px">PnL Neto</div>
+          <div style="font-size:16px;font-weight:900;color:${totalNeto>=0?'#00c853':'#ff3d57'};word-break:break-all">${totalNeto>=0?'+':''}$${totalNeto.toFixed(2)}</div>
+        </div>
+      </div>` : ''}
+      <!-- Fila 2: métricas de fees -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
         <div style="background:var(--surface2);border-radius:9px;padding:10px;text-align:center">
-          <div style="font-size:9px;color:var(--text2);margin-bottom:3px;text-transform:uppercase">Total fees pagadas</div>
-          <div style="font-size:22px;font-weight:900;color:#ff3d57">-$${totalFees.toFixed(2)}</div>
-          <div style="font-size:10px;color:var(--text2);margin-top:2px">${tradesConFees} trade${tradesConFees>1?'s':''} con fees</div>
+          <div style="font-size:9px;color:var(--text2);font-weight:700;text-transform:uppercase;margin-bottom:3px">Fee promedio / trade</div>
+          <div style="font-size:18px;font-weight:900;color:#ffd100">$${avgFeePerTrade.toFixed(2)}</div>
         </div>
         <div style="background:var(--surface2);border-radius:9px;padding:10px;text-align:center">
-          <div style="font-size:9px;color:var(--text2);margin-bottom:3px;text-transform:uppercase">% sobre PnL bruto</div>
-          <div style="font-size:22px;font-weight:900;color:${feeColor}">${feesPctNeto.toFixed(1)}%</div>
-          <div style="font-size:10px;color:var(--text2);margin-top:2px">del bruto lo absorben fees</div>
-        </div>
-        <div style="background:var(--surface2);border-radius:9px;padding:10px;text-align:center">
-          <div style="font-size:9px;color:var(--text2);margin-bottom:3px;text-transform:uppercase">Fees promedio / trade</div>
-          <div style="font-size:22px;font-weight:900;color:#ffd100">$${avgFeePerTrade.toFixed(2)}</div>
-          <div style="font-size:10px;color:var(--text2);margin-top:2px">por operación cerrada</div>
+          <div style="font-size:9px;color:var(--text2);font-weight:700;text-transform:uppercase;margin-bottom:3px">Trades con fees</div>
+          <div style="font-size:18px;font-weight:900;color:${feeColor}">${tradesConFees}</div>
         </div>
       </div>
-      ${totalBruto!==0?`<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
-        <div style="background:rgba(0,170,255,.07);border:1px solid rgba(0,170,255,.2);border-radius:8px;padding:8px;text-align:center">
-          <div style="font-size:9px;color:#00aaff;margin-bottom:3px">PnL BRUTO</div>
-          <div style="font-size:16px;font-weight:900;color:${totalBruto>=0?'#00c853':'#ff3d57'}">${totalBruto>=0?'+':''}$${totalBruto.toFixed(2)}</div>
-        </div>
-        <div style="background:rgba(255,61,87,.07);border:1px solid rgba(255,61,87,.2);border-radius:8px;padding:8px;text-align:center">
-          <div style="font-size:9px;color:#ff3d57;margin-bottom:3px">FEES TOTALES</div>
-          <div style="font-size:16px;font-weight:900;color:#ff3d57">-$${totalFees.toFixed(2)}</div>
-        </div>
-        <div style="background:rgba(0,200,83,.07);border:1px solid rgba(0,200,83,.2);border-radius:8px;padding:8px;text-align:center">
-          <div style="font-size:9px;color:#00c853;margin-bottom:3px">PnL NETO</div>
-          <div style="font-size:16px;font-weight:900;color:${totalNeto>=0?'#00c853':'#ff3d57'}">${totalNeto>=0?'+':''}$${totalNeto.toFixed(2)}</div>
-        </div>
-      </div>
-      <div style="font-size:10px;color:var(--text2);margin-top:8px;text-align:center">
-        Las fees reducen el resultado en <strong style="color:#ff3d57">$${totalFees.toFixed(2)}</strong> — equivale a <strong style="color:#ffd100">${feesPctNeto.toFixed(1)}%</strong> del bruto generado
-      </div>` : `<div style="font-size:11px;color:var(--text2);text-align:center">Cargá más trades con PnL bruto para ver la comparativa completa</div>`}
     </div></div>`;
   })()}
 
