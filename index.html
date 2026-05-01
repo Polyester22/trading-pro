@@ -2650,6 +2650,22 @@ function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
   // ── Exhaustion at entry ───────────────────────────────────────────────────
   const acCls      = accel > 0.08 ? 'fast' : accel < -0.08 ? 'slow' : 'flat';
   const contraBias = isLong ? (c1h < -0.5 && c4h < -1) : (c1h > 0.5 && c4h > 1);
+
+  // ── STRUCTURAL TREND BIAS (from interpretTechnical) ───────────────────────
+  // trendBias derived from candle data stored in last interpretation
+  // We derive it from upCount logic mirrored in interpretTechnical:
+  // trend = upCount>=7 'alcista' | upCount<=3 'bajista' | else 'lateral'
+  // Since we don't have candles here, we infer from 4H/24H momentum direction:
+  //   alcista: c4h > 0.5 AND c24 > 1
+  //   bajista: c4h < -0.5 AND c24 < -1
+  //   lateral: everything else
+  let trendBias;
+  if      (c4h > 0.5  && c24 > 1)  trendBias = 'alcista';
+  else if (c4h < -0.5 && c24 < -1) trendBias = 'bajista';
+  else                               trendBias = 'lateral';
+
+  // contra_tendencia: direction opposes structural trend
+  const contraTendencia = (isLong && trendBias === 'bajista') || (!isLong && trendBias === 'alcista');
   const exhEntry   = calcExhaustionScore({
     cmPrice:0, p75:mfeZ.p75, p90:mfeZ.p90,
     condProbNext:null, acCls, livePct:0, contraBias, momentumTier:tier
@@ -2699,12 +2715,16 @@ function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
   }
 
   const tradeTypeMeta = {
-    ruptura:     { label:'RUPTURA',     emoji:'⚡', color:'#00aaff', sub:'Entrada temprana — dejar correr' },
-    continuacion:{ label:'CONTINUACIÓN',emoji:'→',  color:'#00c853', sub:'Tendencia activa — gestión conservadora' },
-    rango:       { label:'RANGO',       emoji:'↔',  color:'#ffd100', sub:'Sin señal clara — evitar operar' },
-    agotado:     { label:'AGOTADO',     emoji:'🔴', color:'#ff3d57', sub:'Movimiento extendido — no entrar' }
+    ruptura:               { label:'RUPTURA',            emoji:'⚡', color:'#00aaff', sub:'Entrada temprana — dejar correr' },
+    continuacion:          { label:'CONTINUACIÓN',       emoji:'→',  color:'#00c853', sub:'Tendencia activa — gestión conservadora' },
+    rango:                 { label:'RANGO',              emoji:'↔',  color:'#ffd100', sub:'Sin señal clara — evitar operar' },
+    agotado:               { label:'AGOTADO',            emoji:'🔴', color:'#ff3d57', sub:'Movimiento extendido — no entrar' }
   };
-  const ttMeta = tradeTypeMeta[tradeType];
+  const ttMeta = tradeTypeMeta[tradeType] || tradeTypeMeta['continuacion'];
+
+  // ── trendBias display helpers ─────────────────────────────────────────────
+  const trendBiasLabel = trendBias === 'alcista' ? '📈 Alcista' : trendBias === 'bajista' ? '📉 Bajista' : '↔ Lateral';
+  const trendBiasColor = trendBias === 'alcista' ? '#00c853' : trendBias === 'bajista' ? '#ff3d57' : '#ffd100';
 
   // ── SCORE ADJUSTMENT por tipo ──────────────────────────────────────────────
   const scoreAdj = { ruptura:+2, continuacion:-1, agotado:-3, rango:0 };
@@ -2719,6 +2739,8 @@ function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
   if(tradeType === 'agotado')  conf = Math.min(conf, 28);
   if(tradeType === 'rango')    conf = Math.min(conf, 38);
   if(tradeType === 'ruptura')  conf = Math.min(100, conf + 10);
+  // Contra-tendencia: penalizar -20 puntos y nunca superar 50
+  if(contraTendencia)          { conf -= 20; conf = Math.min(conf, 50); }
   conf = Math.max(0, Math.min(100, conf));
 
   const confLabel = conf >= 70 ? 'Alta' : conf >= 45 ? 'Media' : 'Baja';
@@ -2734,6 +2756,10 @@ function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
     recColor='#ff3d57'; recBg='rgba(255,61,87,.1)'; recBorder='rgba(255,61,87,.5)';
   } else if(tradeType === 'rango'){
     recAction='SIN SEÑAL — RANGO'; recEmoji='↔';
+    recColor='#ffd100'; recBg='rgba(255,209,0,.08)'; recBorder='rgba(255,209,0,.4)';
+  } else if(contraTendencia){
+    // Structural trend opposes direction → label as counter-trend bounce
+    recAction=isLong?'LONG — REBOTE CONTRA TENDENCIA':'SHORT — REBOTE CONTRA TENDENCIA'; recEmoji='⚠️';
     recColor='#ffd100'; recBg='rgba(255,209,0,.08)'; recBorder='rgba(255,209,0,.4)';
   } else if(contraBias){
     recAction='NO ENTRAR'; recEmoji='⏸';
@@ -2778,6 +2804,10 @@ function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
 
   // ── BULLETS ───────────────────────────────────────────────────────────────
   const bullets = [];
+  // Structural trend + contra-tendencia alert (FIRST bullet if detected)
+  if(contraTendencia){
+    bullets.push(`⚠️ CONTRA TENDENCIA — estructura ${trendBias} · ${isLong?'LONG':'SHORT'} es rebote, no ruptura real`);
+  }
   bullets.push(`Momentum 1H ${c1h>=0?'+':''}${c1h.toFixed(1)}% · 4H ${c4h>=0?'+':''}${c4h.toFixed(1)}% · 24H ${c24>=0?'+':''}${c24.toFixed(1)}%`);
   if(acCls==='fast')
     bullets.push(`Aceleración activa — precio acelerando ${Math.abs(accel).toFixed(2)}% sobre promedio horario`);
@@ -2788,11 +2818,18 @@ function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
   if(!isManual)      bullets.push(`TF sugerido: ${tf} — ${tfReason}`);
   if(tkN >= 2)       bullets.push(`Historial ${ticker} ${pos}: ${tkN} trades · WR ${tkWR.toFixed(0)}% · EV ${tkEV>=0?'+':''}${tkEV.toFixed(1)}%`);
   if(!dtp.hasData)   bullets.push(`Sin historial MFE propio — usando priors calibrados para TP/SL`);
-  // Trade type specific advice
-  if(tradeType==='ruptura')      bullets.unshift('⚡ Ruptura detectada — dejar correr el runner si supera TP1');
-  if(tradeType==='continuacion') bullets.unshift('→ Continuación — gestión conservadora: cerrar 50% en TP1');
-  if(tradeType==='agotado')      bullets.unshift('🔴 Movimiento agotado — evitar entrada, esperar reset');
-  if(tradeType==='rango')        bullets.unshift('↔ Mercado en rango — esperar ruptura definida antes de operar');
+  // Trade type specific advice — differentiated for contra-tendencia
+  if(contraTendencia){
+    bullets.unshift(`→ Rebote en tendencia ${trendBias} — cerrar 70%+ en TP1, NO dejar runner`);
+  } else if(tradeType==='ruptura'){
+    bullets.unshift('⚡ Ruptura alineada con tendencia — dejar correr el runner si supera TP1');
+  } else if(tradeType==='continuacion'){
+    bullets.unshift('→ Continuación — gestión conservadora: cerrar 50% en TP1');
+  } else if(tradeType==='agotado'){
+    bullets.unshift('🔴 Movimiento agotado — evitar entrada, esperar reset');
+  } else if(tradeType==='rango'){
+    bullets.unshift('↔ Mercado en rango — esperar ruptura definida antes de operar');
+  }
   const bulletsHTML = bullets.slice(0,4).map(b=>`<div class="an-bullet">${b}</div>`).join('');
 
   // ── DIRECTION comparison (only in auto mode) ──────────────────────────────
@@ -2827,6 +2864,14 @@ function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
   const now = new Date();
   const ts  = `${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}`;
 
+  // ── TP ADJUSTMENT for contra-tendencia ────────────────────────────────────
+  const dtpDisplay = contraTendencia ? {
+    tp1:    Math.min(dtp.tp1,    2.5),
+    tp2:    Math.min(dtp.tp2,    3.5),
+    hasData: dtp.hasData,
+    source:  dtp.source
+  } : dtp;
+
   return `
   <div class="an-rec" style="background:${recBg};border:2px solid ${recBorder};margin-bottom:10px">
     <div class="an-action" style="color:${recColor}">${recEmoji} ${recAction}</div>
@@ -2836,6 +2881,7 @@ function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
       <div style="background:${ttMeta.color}22;border:1px solid ${ttMeta.color}88;border-radius:6px;padding:4px 9px;font-size:11px;font-weight:800;color:${ttMeta.color}">
         ${ttMeta.emoji} ${ttMeta.label} — ${ttMeta.sub}
       </div>
+      ${contraTendencia ? `<div style="background:rgba(255,209,0,.15);border:1px solid rgba(255,209,0,.5);border-radius:6px;padding:4px 9px;font-size:11px;font-weight:800;color:#ffd100">⚠️ Contra tendencia</div>` : ''}
       ${timing !== 'optimal' ? `<div id="an-timing-badge" style="background:${timingInfo.color}22;border:1px solid ${timingInfo.color}88;border-radius:6px;padding:4px 9px;font-size:11px;font-weight:800;color:${timingInfo.color}">
         ${timingInfo.emoji} ${timingInfo.label}
       </div>` : `<div id="an-timing-badge"></div>`}
@@ -2861,21 +2907,25 @@ function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
       <div class="an-cell-lbl">Agotamiento</div>
       <div class="an-cell-val" style="color:${exhL.col}">${exhEntry}/100 · ${exhL.label.replace(/[🟢🟡🟠🔴] /,'')}</div>
     </div>
+    <div class="an-cell" style="grid-column:1/-1;${contraTendencia?'background:rgba(255,209,0,.06);border:1px solid rgba(255,209,0,.25);border-radius:8px;':''}">
+      <div class="an-cell-lbl">Tendencia estructural</div>
+      <div class="an-cell-val" style="color:${trendBiasColor}">${trendBiasLabel}${contraTendencia?` <span style="font-size:9px;color:#ffd100;font-weight:700">· operás contra la estructura</span>`:''}</div>
+    </div>
   </div>
 
-  <div style="font-size:9px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px">Niveles sugeridos (% precio sin apalancamiento)</div>
+  <div style="font-size:9px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px">Niveles sugeridos (% precio sin apalancamiento)${contraTendencia?' <span style="color:#ffd100">— reducidos (contra tendencia)</span>':''}</div>
   <div class="an-tp-row">
     <div class="an-tp-box" style="border:1px solid rgba(0,200,83,.3)">
       <div class="an-tp-lbl">TP1</div>
-      <div class="an-tp-val" style="color:#00c853">${sign}${dtp.tp1.toFixed(1)}%</div>
+      <div class="an-tp-val" style="color:#00c853">${sign}${dtpDisplay.tp1.toFixed(1)}%</div>
     </div>
     <div class="an-tp-box" style="border:1px solid rgba(255,107,0,.3)">
       <div class="an-tp-lbl">TP2 / avg</div>
-      <div class="an-tp-val" style="color:#ff6b00">${sign}${dtp.tp2.toFixed(1)}%</div>
+      <div class="an-tp-val" style="color:#ff6b00">${sign}${dtpDisplay.tp2.toFixed(1)}%</div>
     </div>
-    <div class="an-tp-box" style="border:1px solid rgba(255,61,87,.25)">
-      <div class="an-tp-lbl">Runner p90</div>
-      <div class="an-tp-val" style="color:#ff3d57">${sign}${dtp.runner.toFixed(1)}%</div>
+    <div class="an-tp-box" style="border:1px solid rgba(255,61,87,.25)${contraTendencia?';opacity:.45':''}">
+      <div class="an-tp-lbl">${contraTendencia?'Runner ⛔':'Runner p90'}</div>
+      <div class="an-tp-val" style="color:${contraTendencia?'#9999b8':'#ff3d57'}">${contraTendencia?'—':sign+dtp.runner.toFixed(1)+'%'}</div>
     </div>
     <div class="an-tp-box" style="border:1px solid rgba(153,153,184,.25)">
       <div class="an-tp-lbl">SL</div>
@@ -2887,7 +2937,7 @@ function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
   ${histHTML}
   ${!dtp.hasData?`<div style="font-size:9px;color:var(--text2);background:rgba(255,209,0,.06);border:1px solid rgba(255,209,0,.2);border-radius:6px;padding:6px 10px;margin-bottom:10px">⚠️ ${dtp.source}</div>`:''}
 
-  <button class="an-save-btn" onclick="saveAnalysis('${ticker}','${pos}','${tf}','${recAction}',${conf},'${confLabel}','${tradeType}')">
+  <button class="an-save-btn" onclick="saveAnalysis('${ticker}','${pos}','${tf}','${recAction}',${conf},'${confLabel}','${tradeType}',${contraTendencia})">
     📋 Guardar análisis
   </button>
   ${renderCalibrationBadge(tradeType)}
@@ -2896,10 +2946,11 @@ function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
   </div>`;
 }
 
-function saveAnalysis(ticker, pos, tf, rec, conf, confLabel, tradeType){
+function saveAnalysis(ticker, pos, tf, rec, conf, confLabel, tradeType, contraTendencia){
   const now = new Date();
   analyzerLog.unshift({
     ticker, pos, tf, rec, conf, confLabel, tradeType: tradeType||'continuacion',
+    contraTendencia: !!contraTendencia,
     ts: now.toISOString(),
     label: `${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}`
   });
@@ -2935,7 +2986,7 @@ function renderAnLog(){
     <div class="an-log-item">
       <div style="flex:1;min-width:0">
         <div style="font-size:12px;font-weight:900;color:${rc(e.rec)}">${e.ticker} ${e.pos} — ${e.rec}</div>
-        <div style="font-size:10px;color:var(--text2)">${e.tf} · ${e.label} · Conf. ${e.confLabel} (${e.conf})</div>
+        <div style="font-size:10px;color:var(--text2)">${e.tf} · ${e.label} · Conf. ${e.confLabel} (${e.conf})${e.contraTendencia?' · <span style="color:#ffd100">⚠️ Contra tendencia</span>':''}</div>
       </div>
       <button onclick="deleteAnalysis(${i})" style="background:none;border:none;color:var(--text2);font-size:16px;cursor:pointer;padding:2px 4px;flex-shrink:0">×</button>
     </div>`).join('');
