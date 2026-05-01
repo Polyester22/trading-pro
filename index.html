@@ -416,6 +416,9 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
       <!-- Result area -->
       <div id="an-result"></div>
 
+      <!-- Interpretación visual automática del gráfico -->
+      <div id="an-chart-result" style="margin-top:8px"></div>
+
       <!-- Saved analyses log -->
       <div id="an-log-wrap" style="display:none">
         <div style="font-size:10px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">📋 Análisis guardados</div>
@@ -2599,6 +2602,8 @@ async function runTickerAnalysis(){
 
   document.getElementById('an-result').innerHTML = buildAnalysisHTML(ticker, pos, tf, tc, isManual);
   renderAnLog();
+  // Automatic chart fetch + Claude interpretation (async, non-blocking)
+  fetchAndInterpretChart(ticker, tf);
 }
 
 function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
@@ -8360,6 +8365,169 @@ renderHistorial = function(){
   _origRenderHistorial.apply(this, arguments);
   applyColOrderToBody();
 };
+
+/* ══ GRÁFICO AUTOMÁTICO — Binance klines → canvas → Claude ════════════════ */
+
+async function fetchAndInterpretChart(ticker, tf) {
+  const el = document.getElementById('an-chart-result');
+  if (!el) return;
+  el.innerHTML = `<div style="font-size:11px;color:var(--text2);padding:8px;text-align:center;border-top:1px solid var(--border);margin-top:8px">📊 Obteniendo gráfico…</div>`;
+
+  try {
+    const b64 = await buildChartImage(ticker, tf);
+    if (!b64) { el.innerHTML = ''; return; }
+
+    el.innerHTML = `<div style="border-top:1px solid var(--border);margin-top:8px;padding-top:8px;font-size:11px;color:var(--text2);text-align:center">🤖 Interpretando gráfico…</div>`;
+
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 350,
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: b64 } },
+            { type: 'text', text: `Sos un analista técnico experto en crypto. Analizá este gráfico de ${ticker} (${tf}) y respondé exactamente en este formato, sin texto extra:
+
+📊 ESTRUCTURA: [tendencia actual y patrón principal]
+🎯 ZONAS CLAVE: [soporte y/o resistencia más relevante visible]
+📈 SEÑAL: [qué sugiere — compra, venta, esperar, y por qué]
+⚠️ RIESGO: [nivel que invalidaría la señal]
+
+Máximo una línea por punto. Sé concreto con los precios que ves.` }
+          ]
+        }]
+      })
+    });
+
+    const data = await resp.json();
+    if (data.error) throw new Error(data.error.message);
+    const text = (data.content?.find(b => b.type === 'text')?.text || '').trim();
+    const lines = text.split('\n').filter(l => l.trim());
+
+    el.innerHTML = `<div style="border-top:1px solid var(--border);margin-top:8px;padding-top:10px">
+      <div style="font-size:10px;font-weight:800;color:#00aaff;text-transform:uppercase;letter-spacing:.5px;margin-bottom:7px">🤖 Lectura del gráfico · ${ticker} ${tf}</div>
+      ${lines.map(l=>`<div style="font-size:12px;font-weight:700;color:var(--text);line-height:1.7">${l}</div>`).join('')}
+    </div>`;
+  } catch(e) {
+    el.innerHTML = `<div style="font-size:11px;color:var(--text2);padding:6px;border-top:1px solid var(--border);margin-top:8px">⚠️ No se pudo interpretar el gráfico: ${e.message}</div>`;
+  }
+}
+
+async function buildChartImage(ticker, tf) {
+  // Map TF to Binance interval
+  const ivMap = { '1m':'1m','5m':'5m','15m':'15m','1h':'1h','4h':'4h','1d':'1d','4H':'4h','1H':'1h' };
+  const interval = ivMap[tf] || '15m';
+  const symbol = ticker.replace(/USDT$/i,'').toUpperCase() + 'USDT';
+
+  let klines;
+  try {
+    const url = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=80`;
+    const r = await fetch(url);
+    if (!r.ok) throw new Error('Binance error');
+    klines = await r.json();
+    if (!Array.isArray(klines) || klines.length < 5) throw new Error('Sin datos');
+  } catch(e) {
+    return null; // silently skip if Binance unreachable
+  }
+
+  const W = 640, H = 380;
+  const canvas = document.createElement('canvas');
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  const candles = klines.map(k => ({
+    o: +k[1], h: +k[2], l: +k[3], c: +k[4], v: +k[5]
+  }));
+  const n = candles.length;
+  const pad = { top: 28, bottom: 55, left: 6, right: 62 };
+  const cW = W - pad.left - pad.right;
+  const cH = H - pad.top - pad.bottom;
+
+  const maxH = Math.max(...candles.map(c => c.h));
+  const minL = Math.min(...candles.map(c => c.l));
+  const range = maxH - minL || 1;
+  const maxV = Math.max(...candles.map(c => c.v), 1);
+
+  function py(p) { return pad.top + cH * (1 - (p - minL) / range); }
+  function px(i) { return pad.left + (i + 0.5) * cW / n; }
+  const bw = Math.max(1, cW / n * 0.72);
+
+  // Background
+  ctx.fillStyle = '#0f1117';
+  ctx.fillRect(0, 0, W, H);
+
+  // Grid
+  ctx.strokeStyle = '#1e2035';
+  ctx.lineWidth = 1;
+  [0, 0.25, 0.5, 0.75, 1].forEach(t => {
+    const y = pad.top + cH * t;
+    ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(W - pad.right, y); ctx.stroke();
+    const price = maxH - range * t;
+    ctx.fillStyle = '#7070a0';
+    ctx.font = '9px monospace';
+    ctx.fillText(price >= 100 ? price.toFixed(1) : price.toFixed(4), W - pad.right + 3, y + 3);
+  });
+
+  // Volume bars (bottom 15%)
+  const volH = cH * 0.15;
+  candles.forEach((c, i) => {
+    const x = px(i);
+    const h = (c.v / maxV) * volH;
+    ctx.fillStyle = c.c >= c.o ? 'rgba(0,180,80,.28)' : 'rgba(220,50,60,.28)';
+    ctx.fillRect(x - bw/2, pad.top + cH - h, bw, h);
+  });
+
+  // SMA 20
+  if (n >= 20) {
+    ctx.strokeStyle = '#ffd100';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    let started = false;
+    for (let i = 19; i < n; i++) {
+      const avg = candles.slice(i - 19, i + 1).reduce((s, c) => s + c.c, 0) / 20;
+      const x = px(i), y = py(avg);
+      if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+
+  // Candles
+  candles.forEach((c, i) => {
+    const x = px(i);
+    const isUp = c.c >= c.o;
+    const col = isUp ? '#00c853' : '#ef5350';
+    ctx.strokeStyle = col;
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x, py(c.h)); ctx.lineTo(x, py(c.l)); ctx.stroke();
+    const y1 = Math.min(py(c.o), py(c.c));
+    const bh = Math.max(Math.abs(py(c.o) - py(c.c)), 1);
+    ctx.fillStyle = col;
+    ctx.fillRect(x - bw / 2, y1, bw, bh);
+  });
+
+  // Last price line
+  const last = candles[n - 1].c;
+  const ly = py(last);
+  ctx.strokeStyle = '#ff6b00';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([3, 3]);
+  ctx.beginPath(); ctx.moveTo(pad.left, ly); ctx.lineTo(W - pad.right, ly); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = '#ff6b00';
+  ctx.font = 'bold 9px monospace';
+  ctx.fillText(last >= 100 ? last.toFixed(2) : last.toFixed(4), W - pad.right + 3, ly + 3);
+
+  // Title
+  ctx.fillStyle = '#e8e8f5';
+  ctx.font = 'bold 12px sans-serif';
+  ctx.fillText(`${ticker.toUpperCase()} / USDT  ·  ${interval}`, pad.left + 4, 18);
+
+  return canvas.toDataURL('image/jpeg', 0.88).split(',')[1];
+}
 
 /* ══ BOOT ══════════════════════════════════════════════════════════════════ */
 document.addEventListener('DOMContentLoaded', ()=>{
