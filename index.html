@@ -2663,7 +2663,32 @@ function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
   if(tkN >= 3) conf += 10;
   if(dtp.hasData) conf += 5;
   conf = Math.min(100, conf);
-  // Penalise manual mode slightly (no penalty on logic, just visual honesty)
+
+  // ── TIMING ASSESSMENT (direction vs timing separation) ────────────────────
+  // Proxy for RSI overextension using available momentum data:
+  // accel = c1h - (c24/24) → how much faster than average hourly move
+  const absAccelN  = Math.abs(accel);
+  const absC1h     = Math.abs(c1h);
+  // Extended if accelerating >0.8% above avg hourly OR 1H move > 1.8%
+  let timing = 'optimal';
+  if      (absAccelN > 1.5 || absC1h > 3.0) timing = 'late';
+  else if (absAccelN > 0.8 || absC1h > 1.8) timing = 'extended';
+
+  const timingMeta = {
+    optimal:  { label:'ÓPTIMO',    color:'#00c853', sub:'Timing de entrada válido',           emoji:'🟢' },
+    extended: { label:'EXTENDIDO', color:'#ffd100', sub:'Movimiento ya acelerado — riesgo',   emoji:'🟡' },
+    late:     { label:'TARDÍO',    color:'#ff3d57', sub:'Entrada tardía — esperá retroceso',  emoji:'🔴' }
+  };
+  const timingInfo = timingMeta[timing];
+
+  // Penalize confidence by timing
+  if(timing === 'late')     conf = Math.min(conf, 44);   // caps at "Media"
+  if(timing === 'extended') conf = Math.min(conf, 62);   // limits "Alta"
+  // Penalize confidence by RSI proxy: very fast 1H = likely overbought
+  if(absC1h > 2.5) conf -= 10;
+
+  conf = Math.max(0, Math.min(100, conf));
+
   const confLabel = conf >= 70 ? 'Alta' : conf >= 45 ? 'Media' : 'Baja';
   const confColor = conf >= 70 ? '#00c853' : conf >= 45 ? '#ffd100' : '#ff6b00';
 
@@ -2676,6 +2701,14 @@ function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
 
   if(contraBias){
     recAction='NO ENTRAR'; recEmoji='⏸';
+    recColor='#ffd100'; recBg='rgba(255,209,0,.08)'; recBorder='rgba(255,209,0,.4)';
+  } else if(timing === 'late' && score >= 4){
+    // late_trend state: direction is right but timing is wrong
+    recAction=isLong?'ESPERAR RETROCESO':'ESPERAR REBOTE'; recEmoji='⏳';
+    recColor='#ff3d57'; recBg='rgba(255,61,87,.08)'; recBorder='rgba(255,61,87,.4)';
+  } else if(timing === 'extended' && score >= 5){
+    // extended: signal valid but entry risk is high
+    recAction=isLong?'LONG — RIESGO ALTO':'SHORT — RIESGO ALTO'; recEmoji='⚠️';
     recColor='#ffd100'; recBg='rgba(255,209,0,.08)'; recBorder='rgba(255,209,0,.4)';
   } else if(score >= 5 && accelOk && (isManual || dirClear)){
     recAction=isLong?'LONG':'SHORT'; recEmoji=isLong?'✅':'🔴';
@@ -2757,6 +2790,9 @@ function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
     <div class="an-action" style="color:${recColor}">${recEmoji} ${recAction}</div>
     <div class="an-conf" style="color:${recColor}">Confianza: <strong>${confLabel}</strong> (${conf}/100)</div>
     <div style="font-size:10px;color:var(--text2);margin-top:4px">${ticker} · ${pos} · ${tf} · ${ts}${isManual?' · <span style="color:#ffd100">manual</span>':' · <span style="color:#00aaff">auto</span>'}</div>
+    ${timing !== 'optimal' ? `<div id="an-timing-badge" style="margin-top:7px;background:${timingInfo.color}22;border:1px solid ${timingInfo.color}88;border-radius:6px;padding:5px 10px;font-size:11px;font-weight:800;color:${timingInfo.color}">
+      ${timingInfo.emoji} TIMING ${timingInfo.label} — ${timingInfo.sub}
+    </div>` : `<div id="an-timing-badge"></div>`}
   </div>
 
   ${dirCompare}
@@ -8386,6 +8422,26 @@ async function fetchAndInterpretChart(ticker, tf) {
     const candles = klines.map(k => ({ o:+k[1], h:+k[2], l:+k[3], c:+k[4], v:+k[5] }));
     const interp  = interpretTechnical(candles, ticker, interval);
 
+    // ── Update timing badge with REAL RSI from Binance ─────────────────────
+    const badge = document.getElementById('an-timing-badge');
+    if (badge) {
+      const rsi = interp.rsi;
+      const pos = interp.posInRange; // 0-1
+      const rsiOB = rsi > 70, rsiOS = rsi < 30;
+      const nearRes = pos > 0.82, nearSup = pos < 0.18;
+      if (rsiOB || nearRes || rsiOS || nearSup) {
+        const col = (rsiOB || nearRes) ? '#ff3d57' : '#00c853';
+        const parts = [];
+        if (rsiOB)   parts.push(`RSI ${rsi.toFixed(0)} sobrecomprado`);
+        if (rsiOS)   parts.push(`RSI ${rsi.toFixed(0)} sobrevendido`);
+        if (nearRes) parts.push(`Precio en zona de resistencia (${(pos*100).toFixed(0)}% del rango)`);
+        if (nearSup) parts.push(`Precio en zona de soporte (${(pos*100).toFixed(0)}% del rango)`);
+        const existing = badge.textContent.trim();
+        badge.style.cssText = `margin-top:7px;background:${col}22;border:1px solid ${col}88;border-radius:6px;padding:5px 10px;font-size:11px;font-weight:800;color:${col}`;
+        badge.innerHTML = `⚠️ TIMING (confirmado) — ${parts.join(' · ')}`;
+      }
+    }
+
     el.innerHTML = `<div style="border-top:1px solid var(--border);margin-top:8px;padding-top:10px">
       <div style="font-size:10px;font-weight:800;color:#00aaff;text-transform:uppercase;letter-spacing:.5px;margin-bottom:7px">📊 Análisis técnico · ${symbol} ${interval}</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:8px">
@@ -8527,7 +8583,7 @@ function interpretTechnical(candles, ticker, interval) {
   else
     riesgo = `Cierre fuera del rango ${fmt(sup)}–${fmt(res)} define la próxima dirección`;
 
-  return { rsi, macd, macdSignal, trend, vsSMA, estructura, zonas, señal, riesgo, volSignal };
+  return { rsi, macd, macdSignal, trend, vsSMA, estructura, zonas, señal, riesgo, volSignal, posInRange: pos };
 }
 
 /* ══ BOOT ══════════════════════════════════════════════════════════════════ */
