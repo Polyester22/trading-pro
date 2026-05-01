@@ -113,6 +113,8 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
 .bar-fill{height:100%;border-radius:4px;display:flex;align-items:center;padding-left:6px;font-size:11px;font-weight:800;color:#fff;transition:width .5s ease;min-width:2px}
 .bar-fill.pos{background:linear-gradient(90deg,#00a844,#00c853)}.bar-fill.neg{background:linear-gradient(90deg,#c62828,#ff3d57)}.bar-fill.orange{background:linear-gradient(90deg,#e05a00,#ff6b00)}.bar-fill.gold{background:linear-gradient(90deg,#b8860b,#ffd100)}
 .bar-count{font-size:11px;color:var(--text2);min-width:56px;max-width:80px;text-align:right;flex-shrink:0;white-space:nowrap}
+/* CORRELATION WARNING */
+.corr-warn{background:rgba(255,209,0,.08);border:1.5px solid rgba(255,209,0,.3);border-radius:10px;padding:10px 14px;margin-top:8px}
 .donut-wrap{display:flex;align-items:center;gap:16px}
 .donut-legend{flex:1}
 .legend-item{display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:13px;font-weight:700}
@@ -793,6 +795,7 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
     <div id="kpi-projection" style="display:none;background:var(--surface);border:1px solid rgba(255,107,0,.35);border-top:none;border-radius:0 0 10px 10px;padding:10px 12px"></div>
   </div>
   <div id="open-trades-list"></div>
+  <div id="corr-alert-container"></div>
   <div id="risk-exposure-bar" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:10px 14px;margin-top:10px;margin-bottom:6px"></div>
 
   <!-- MOMENTUM SCANNER -->
@@ -2955,6 +2958,7 @@ function renderOpenTrades(){
   renderKpiProjection(open);
   // render capital en riesgo BELOW trades
   renderRiskExposure(open);
+  renderCorrelationAlert(open);
 }
 
 function fmtPriceShort(v){
@@ -4091,6 +4095,261 @@ function renderGraficos(){
   })()}
 
   </div>`; // close desktop-grid
+  el.innerHTML += renderMAEDashboard(T) + renderDrawdownSection(T) + renderPartialStats(T) + renderBeforeAfter(T);
+} 
+
+// ══ FEATURE 1: MAE DASHBOARD ═══════════════════════════════════════════════
+function renderMAEDashboard(T){
+  const withMAE=T.filter(t=>t.maxAdversePct!=null&&Math.abs(t.maxAdversePct)>0);
+  if(withMAE.length<3)return'<div class="desktop-col-full"><div class="chart-box" style="cursor:default"><div class="chart-label">📉 MAE — Excursión Adversa Máxima</div><div style="font-size:12px;color:var(--text2);padding:8px">Necesitás al menos 3 trades con MAE registrado. Se captura automáticamente en trades abiertos con precio live.</div></div></div>';
+  const wins=withMAE.filter(t=>t.resultado>0),losses=withMAE.filter(t=>t.resultado<0);
+  const avgAll=withMAE.reduce((s,t)=>s+Math.abs(t.maxAdversePct),0)/withMAE.length;
+  const avgWin=wins.length?wins.reduce((s,t)=>s+Math.abs(t.maxAdversePct),0)/wins.length:0;
+  const avgLoss=losses.length?losses.reduce((s,t)=>s+Math.abs(t.maxAdversePct),0)/losses.length:0;
+  const bkts=[{l:'0–2%',mn:0,mx:2},{l:'2–5%',mn:2,mx:5},{l:'5–10%',mn:5,mx:10},{l:'10–20%',mn:10,mx:20},{l:'>20%',mn:20,mx:Infinity}];
+  const dist=bkts.map(b=>{const g=withMAE.filter(t=>Math.abs(t.maxAdversePct)>=b.mn&&Math.abs(t.maxAdversePct)<b.mx);const w=g.filter(t=>t.resultado>0).length;return{...b,n:g.length,w,wr:g.length?w/g.length*100:0};});
+  const mxD=Math.max(...dist.map(d=>d.n),1);
+  const winMAEs=wins.map(t=>Math.abs(t.maxAdversePct)).sort((a,b)=>a-b);
+  const p75=winMAEs.length>=4?winMAEs[Math.floor(winMAEs.length*0.75)]:null;
+  const p90=winMAEs.length>=4?winMAEs[Math.floor(winMAEs.length*0.9)]:null;
+  const slLevels=[3,5,7,10,15];
+  const slCal=wins.length>=3?slLevels.map(sl=>{const n=wins.filter(t=>Math.abs(t.maxAdversePct)>=sl).length;return{sl,pct:Math.round(n/wins.length*100),n};}):'';
+  let verdict='',verdictCol='#ffd100';
+  if(p75!==null){
+    if(p75<3){verdict=`Tu MAE en wins es bajo (P75 ${p75.toFixed(1)}%). Podés usar SLs ajustados sin eliminar trades ganadores.`;verdictCol='#00c853';}
+    else if(p75>10){verdict=`Tu MAE en wins es alto (P75 ${p75.toFixed(1)}%). Necesitás SLs amplios (>${p90?p90.toFixed(1):p75.toFixed(1)}%) para no cortar trades que ganan.`;verdictCol='#ff3d57';}
+    else{verdict=`MAE P75=${p75.toFixed(1)}% y P90=${p90?p90.toFixed(1):'—'}%. SL óptimo entre esos valores.`;verdictCol='#ffd100';}
+  }
+  return`<div class="desktop-col-full"><div class="chart-box" style="cursor:default">
+  <div class="chart-label">📉 MAE — Excursión Adversa Máxima (${withMAE.length} trades)</div>
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px">
+    <div style="background:var(--surface2);border-radius:9px;padding:10px;text-align:center"><div style="font-size:9px;color:var(--text2);font-weight:700;text-transform:uppercase;margin-bottom:3px">MAE promedio</div><div style="font-size:20px;font-weight:900;color:#ffd100">${avgAll.toFixed(1)}%</div><div style="font-size:9px;color:var(--text2);margin-top:2px">${withMAE.length} trades</div></div>
+    <div style="background:rgba(0,200,83,.08);border:1px solid rgba(0,200,83,.2);border-radius:9px;padding:10px;text-align:center"><div style="font-size:9px;color:#00c853;font-weight:700;text-transform:uppercase;margin-bottom:3px">MAE en wins</div><div style="font-size:20px;font-weight:900;color:#00c853">${avgWin.toFixed(1)}%</div><div style="font-size:9px;color:var(--text2);margin-top:2px">${wins.length} trades</div></div>
+    <div style="background:rgba(255,61,87,.08);border:1px solid rgba(255,61,87,.2);border-radius:9px;padding:10px;text-align:center"><div style="font-size:9px;color:#ff3d57;font-weight:700;text-transform:uppercase;margin-bottom:3px">MAE en losses</div><div style="font-size:20px;font-weight:900;color:#ff3d57">${avgLoss.toFixed(1)}%</div><div style="font-size:9px;color:var(--text2);margin-top:2px">${losses.length} trades</div></div>
+  </div>
+  <div style="font-size:10px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Distribución MAE</div>
+  ${dist.map(d=>`<div class="bar-row" style="margin-bottom:5px"><div class="bar-name" style="width:46px;font-size:11px">${d.l}</div><div class="bar-track" style="height:20px"><div class="bar-fill ${d.wr>=50?'pos':'neg'}" style="width:${Math.max(d.n/mxD*100,d.n?2:0)}%">${d.n>0?d.n+'t':''}</div></div><div class="bar-count">${d.n?d.wr.toFixed(0)+'%WR':'—'}</div></div>`).join('')}
+  ${slCal?`<div style="background:rgba(255,209,0,.07);border:1px solid rgba(255,209,0,.2);border-radius:10px;padding:12px;margin-top:12px">
+    <div style="font-size:10px;font-weight:800;color:#ffd100;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">🎯 Calibración SL — % de tus wins que habrías cortado antes de tiempo</div>
+    ${slCal.map(s=>`<div style="display:flex;align-items:center;gap:8px;margin-bottom:5px"><div style="font-size:11px;font-weight:700;width:46px;color:var(--text2);flex-shrink:0">SL ${s.sl}%</div><div style="flex:1;background:var(--surface2);border-radius:3px;height:14px;overflow:hidden"><div style="width:${s.pct}%;height:100%;background:${s.pct>30?'#ff3d57':s.pct>15?'#ffd100':'#00c853'};border-radius:3px;transition:width .5s"></div></div><div style="font-size:11px;font-weight:800;width:36px;text-align:right;flex-shrink:0;color:${s.pct>30?'#ff3d57':s.pct>15?'#ffd100':'#00c853'}">${s.pct}%</div></div>`).join('')}
+    ${verdict?`<div style="font-size:11px;color:${verdictCol};line-height:1.6;margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,209,0,.2);font-weight:700">${verdict}</div>`:''}
+  </div>`:''}
+</div></div>`;
+}
+
+// ══ FEATURE 2: DRAWDOWN DESDE PICO ═════════════════════════════════════════
+function computeCurrentDD(T){
+  const sorted=[...T].sort((a,b)=>a.fecha.localeCompare(b.fecha));
+  let peak=0,cur=0,peakDate='';
+  sorted.forEach(t=>{cur+=t.resultado;if(cur>peak){peak=cur;peakDate=t.fecha;}});
+  const ddPct=peak>0?(peak-cur)/Math.abs(peak)*100:0;
+  const today=new Date().toISOString().slice(0,10);
+  const todayTrades=T.filter(t=>t.fecha===today);
+  const todayPnl=todayTrades.reduce((s,t)=>s+t.resultado,0);
+  const weekAgo=new Date(Date.now()-7*24*3600*1000).toISOString().slice(0,10);
+  const weekPnl=T.filter(t=>t.fecha>=weekAgo).reduce((s,t)=>s+t.resultado,0);
+  return{ddPct,peak,cur,peakDate,todayPnl,weekPnl,todayCount:todayTrades.length};
+}
+
+function saveDDLimit(type,val){
+  if(!D.config)D.config={};
+  const n=parseFloat(val)||0;
+  if(type==='daily')D.config.dailyLimit=n;
+  else D.config.weeklyLimit=n;
+  persist(D);
+}
+
+function renderDrawdownSection(T){
+  if(!T.length)return'';
+  if(!D.config)D.config={};
+  const dayLim=D.config.dailyLimit||20;
+  const weekLim=D.config.weeklyLimit||40;
+  const dd=computeCurrentDD(T);
+  const dayLoss=Math.max(0,-dd.todayPnl);
+  const weekLoss=Math.max(0,-dd.weekPnl);
+  const dayUsed=dayLim>0?Math.min(dayLoss/dayLim*100,100):0;
+  const weekUsed=weekLim>0?Math.min(weekLoss/weekLim*100,100):0;
+  const ddColor=dd.ddPct<10?'#00c853':dd.ddPct<25?'#ffd100':'#ff3d57';
+  const dayColor=dayUsed<50?'#00c853':dayUsed<80?'#ffd100':'#ff3d57';
+  const weekColor=weekUsed<50?'#00c853':weekUsed<80?'#ffd100':'#ff3d57';
+  const todayCol=dd.todayPnl>=0?'#00c853':'#ff3d57';
+  const weekCol=dd.weekPnl>=0?'#00c853':'#ff3d57';
+  return`<div class="desktop-col-full"><div class="chart-box" style="cursor:default">
+  <div class="chart-label">🛡️ Control de drawdown — estado actual</div>
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px">
+    <div style="background:${dd.ddPct<5?'rgba(0,200,83,.08)':'rgba(255,61,87,.08)'};border:1px solid ${dd.ddPct<5?'rgba(0,200,83,.2)':'rgba(255,61,87,.2)'};border-radius:9px;padding:10px;text-align:center">
+      <div style="font-size:9px;color:${ddColor};font-weight:700;text-transform:uppercase;margin-bottom:3px">DD desde pico</div>
+      <div style="font-size:22px;font-weight:900;color:${ddColor}">${dd.ddPct<0.1?'—':'-'+dd.ddPct.toFixed(1)+'%'}</div>
+      <div style="font-size:9px;color:var(--text2);margin-top:2px">${dd.peakDate?'pico: '+dd.peakDate:'sin pico aún'}</div>
+    </div>
+    <div style="background:var(--surface2);border-radius:9px;padding:10px;text-align:center">
+      <div style="font-size:9px;color:${todayCol};font-weight:700;text-transform:uppercase;margin-bottom:3px">Hoy</div>
+      <div style="font-size:22px;font-weight:900;color:${todayCol}">${dd.todayPnl>=0?'+':''}${dd.todayPnl.toFixed(1)}%</div>
+      <div style="font-size:9px;color:var(--text2);margin-top:2px">${dd.todayCount} trade${dd.todayCount!==1?'s':''}</div>
+    </div>
+    <div style="background:var(--surface2);border-radius:9px;padding:10px;text-align:center">
+      <div style="font-size:9px;color:${weekCol};font-weight:700;text-transform:uppercase;margin-bottom:3px">Últimos 7 días</div>
+      <div style="font-size:22px;font-weight:900;color:${weekCol}">${dd.weekPnl>=0?'+':''}${dd.weekPnl.toFixed(1)}%</div>
+      <div style="font-size:9px;color:var(--text2);margin-top:2px">vs semana anterior</div>
+    </div>
+  </div>
+  <div style="font-size:10px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Límites de pérdida configurables</div>
+  <div style="margin-bottom:10px">
+    <div style="display:flex;justify-content:space-between;font-size:11px;font-weight:700;margin-bottom:4px"><span style="color:var(--text2)">Pérdida diaria usada</span><span style="color:${dayColor}">${dayLoss.toFixed(1)}% / límite ${dayLim}%</span></div>
+    <div style="background:var(--surface2);border-radius:4px;height:10px;overflow:hidden;margin-bottom:10px"><div style="width:${dayUsed}%;height:100%;background:${dayColor};border-radius:4px;transition:width .5s"></div></div>
+    <div style="display:flex;justify-content:space-between;font-size:11px;font-weight:700;margin-bottom:4px"><span style="color:var(--text2)">Pérdida semanal usada</span><span style="color:${weekColor}">${weekLoss.toFixed(1)}% / límite ${weekLim}%</span></div>
+    <div style="background:var(--surface2);border-radius:4px;height:10px;overflow:hidden"><div style="width:${weekUsed}%;height:100%;background:${weekColor};border-radius:4px;transition:width .5s"></div></div>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+    <div><label style="font-size:10px;color:var(--text2);font-weight:700;display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px">Límite diario (%)</label><input type="number" min="1" max="100" step="1" value="${dayLim}" style="width:100%;background:var(--input-bg);border:1.5px solid var(--border);border-radius:8px;color:var(--text);font-family:Nunito,sans-serif;font-size:14px;font-weight:700;padding:8px 10px;outline:none" onchange="saveDDLimit('daily',this.value)"></div>
+    <div><label style="font-size:10px;color:var(--text2);font-weight:700;display:block;margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px">Límite semanal (%)</label><input type="number" min="1" max="300" step="1" value="${weekLim}" style="width:100%;background:var(--input-bg);border:1.5px solid var(--border);border-radius:8px;color:var(--text);font-family:Nunito,sans-serif;font-size:14px;font-weight:700;padding:8px 10px;outline:none" onchange="saveDDLimit('weekly',this.value)"></div>
+  </div>
+  ${dd.ddPct>=25?`<div style="background:rgba(255,61,87,.1);border:1.5px solid rgba(255,61,87,.4);border-radius:8px;padding:10px 12px;margin-top:10px;font-size:12px;font-weight:800;color:#ff3d57">⚠️ Drawdown de ${dd.ddPct.toFixed(1)}% desde el pico — considerá reducir el tamaño de las posiciones hasta recuperar.</div>`:''}
+  ${dayUsed>=80?`<div style="background:rgba(255,61,87,.1);border:1.5px solid rgba(255,61,87,.4);border-radius:8px;padding:10px 12px;margin-top:8px;font-size:12px;font-weight:800;color:#ff3d57">🛑 Hoy ya consumiste el ${dayUsed.toFixed(0)}% de tu límite diario. Considerá pausar.</div>`:''}
+</div></div>`;
+}
+
+// ══ FEATURE 3: ANÁLISIS DE CIERRES PARCIALES ═══════════════════════════════
+function renderPartialStats(T){
+  const withP=T.filter(t=>!t.open&&t.partialCloses&&t.partialCloses.length>0&&t.resultado!=null);
+  if(withP.length<2)return'';
+  let betterHold=0,betterClose=0,totalLeft=0;
+  const rows=withP.map(t=>{
+    const pcs=t.partialCloses;
+    const totalPctClose=pcs.reduce((s,c)=>s+(parseFloat(c.pctClose)||0),0);
+    const weightedResult=totalPctClose>0?pcs.reduce((s,c)=>s+(parseFloat(c.pct)||0)*(parseFloat(c.pctClose)||0)/totalPctClose,0):null;
+    const diff=(t.resultado||0)-(weightedResult||0);
+    if(diff>0)betterHold++;else betterClose++;
+    totalLeft+=Math.max(0,diff);
+    return{ticker:t.ticker,fecha:t.fecha,partial:weightedResult,final:t.resultado,diff,nParts:pcs.length};
+  });
+  const pctBetter=Math.round(betterHold/withP.length*100);
+  const avgLeft=withP.length?totalLeft/withP.length:0;
+  const verdictCol=pctBetter>=60?'#00c853':pctBetter<=40?'#ff3d57':'#ffd100';
+  const verdictText=pctBetter>=60?`En el ${pctBetter}% de los casos, mantener sin parcial hubiera dado más ganancia. Revisá si cerrás parciales demasiado temprano.`:pctBetter<=40?`El cierre parcial fue correcto en el ${100-pctBetter}% de los casos — tu criterio de toma parcial de ganancias funciona.`:`Resultado mixto (${pctBetter}% mejor holdear). Analizá cada caso según el contexto de mercado.`;
+  return`<div class="desktop-col-full"><div class="chart-box" style="cursor:default">
+  <div class="chart-label">✂️ Análisis de cierres parciales (${withP.length} trades)</div>
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px">
+    <div style="background:var(--surface2);border-radius:9px;padding:10px;text-align:center"><div style="font-size:9px;color:${verdictCol};font-weight:700;text-transform:uppercase;margin-bottom:3px">Mejor holdear</div><div style="font-size:20px;font-weight:900;color:${verdictCol}">${pctBetter}%</div><div style="font-size:9px;color:var(--text2);margin-top:2px">${betterHold} de ${withP.length}</div></div>
+    <div style="background:var(--surface2);border-radius:9px;padding:10px;text-align:center"><div style="font-size:9px;color:${100-pctBetter>=60?'#00c853':'#ffd100'};font-weight:700;text-transform:uppercase;margin-bottom:3px">Mejor parcial</div><div style="font-size:20px;font-weight:900;color:${100-pctBetter>=60?'#00c853':'#ffd100'}">${100-pctBetter}%</div><div style="font-size:9px;color:var(--text2);margin-top:2px">${betterClose} de ${withP.length}</div></div>
+    <div style="background:rgba(255,107,0,.08);border:1px solid rgba(255,107,0,.2);border-radius:9px;padding:10px;text-align:center"><div style="font-size:9px;color:#ff6b00;font-weight:700;text-transform:uppercase;margin-bottom:3px">Left on table</div><div style="font-size:20px;font-weight:900;color:#ff6b00">${avgLeft.toFixed(1)}%</div><div style="font-size:9px;color:var(--text2);margin-top:2px">promedio / trade</div></div>
+  </div>
+  <div style="background:${pctBetter>=60?'rgba(0,200,83,.08)':pctBetter<=40?'rgba(255,61,87,.08)':'rgba(255,209,0,.08)'};border:1px solid ${pctBetter>=60?'rgba(0,200,83,.25)':pctBetter<=40?'rgba(255,61,87,.25)':'rgba(255,209,0,.25)'};border-radius:9px;padding:10px 12px;font-size:12px;font-weight:700;color:${verdictCol};line-height:1.5;margin-bottom:10px">${verdictText}</div>
+  ${rows.slice(-5).reverse().map(r=>`<div style="display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-top:1px solid var(--border)"><div><div style="font-size:12px;font-weight:800">${r.ticker} <span style="font-size:10px;color:var(--text2)">${r.fecha}</span></div><div style="font-size:10px;color:var(--text2)">Parcial: ${r.partial!=null?(r.partial>=0?'+':'')+r.partial.toFixed(1)+'%':'—'} → Final: ${r.final>=0?'+':''}${r.final.toFixed(1)}%</div></div><div style="font-size:12px;font-weight:900;color:${r.diff>0?'#ff6b00':'#00c853'};text-align:right;white-space:nowrap">${r.diff>0?'holdear +'+r.diff.toFixed(1)+'%':'parcial +'+Math.abs(r.diff).toFixed(1)+'%'}</div></div>`).join('')}
+</div></div>`;
+}
+
+// ══ FEATURE 4: CORRELACIÓN (usada desde renderOpenTrades) ══════════════════
+const CORR_GROUPS={
+  'Layer 1':['BTC','ETH','SOL','AVAX','ADA','DOT','NEAR','APT','SUI','TON','ATOM'],
+  'DeFi':['UNI','AAVE','CRV','COMP','MKR','SNX','GMX','INJ'],
+  'L2/Infra':['ARB','OP','MATIC','STRK','IMX'],
+  'Alt L1':['NEO','HBAR','LTC','XRP','DOGE','ALGO','ADA'],
+  'Datos/Oráculos':['LINK','GRT','FIL','OCEAN'],
+  'Perps/Trading':['DYDX','GMX','PERP']
+};
+function getGroup(ticker){for(const[g,list]of Object.entries(CORR_GROUPS)){if(list.includes(ticker.toUpperCase()))return g;}return null;}
+
+function renderCorrelationAlert(openTrades){
+  const el=document.getElementById('corr-alert-container');
+  if(!el||openTrades.length<2){if(el)el.innerHTML='';return;}
+  const byGD={};
+  openTrades.forEach(t=>{const g=getGroup(t.ticker);if(!g)return;const k=g+'_'+t.pos;if(!byGD[k])byGD[k]={group:g,pos:t.pos,trades:[]};byGD[k].trades.push(t);});
+  const alerts=Object.values(byGD).filter(g=>g.trades.length>=2);
+  if(!alerts.length){el.innerHTML='';return;}
+  el.innerHTML=`<div class="corr-warn">
+    <div style="font-size:11px;font-weight:800;color:#ffd100;margin-bottom:6px">⚠️ Exposición correlacionada detectada</div>
+    ${alerts.map(a=>`<div style="background:rgba(255,209,0,.06);border-radius:7px;padding:7px 10px;margin-bottom:5px">
+      <div style="font-size:11px;font-weight:800;color:var(--text)">${a.trades.map(t=>t.ticker).join(', ')} — ${a.pos} (${a.group})</div>
+      <div style="font-size:10px;color:var(--text2);margin-top:2px">Activos del mismo grupo en la misma dirección · Margen total: $${a.trades.reduce((s,t)=>s+t.margen,0)}</div>
+    </div>`).join('')}
+    <div style="font-size:10px;color:var(--text2);margin-top:4px">Si el mercado va en contra, todas estas posiciones pierden a la vez. Tu riesgo real es acumulado.</div>
+  </div>`;
+}
+
+// ══ FEATURE 5: ANTES / DESPUÉS DE UN HITO ══════════════════════════════════
+function addMilestone(){
+  const date=(document.getElementById('ms-date')||{}).value;
+  const label=((document.getElementById('ms-label')||{}).value||'').trim();
+  if(!date||!label)return;
+  if(!D.milestones)D.milestones=[];
+  D.milestones.push({id:uid(),date,label});
+  persist(D);
+  document.getElementById('ms-date').value='';
+  document.getElementById('ms-label').value='';
+  renderGraficos();
+}
+function removeMilestone(id){
+  if(!D.milestones)return;
+  D.milestones=D.milestones.filter(m=>m.id!==id);
+  persist(D);
+  renderGraficos();
+}
+
+function renderBeforeAfter(T){
+  if(!D.milestones)D.milestones=[];
+  const ms=D.milestones;
+  const mForm=`<div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:12px">
+    <div style="font-size:10px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">Agregar hito / cambio de sistema</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end">
+      <div><label style="font-size:10px;color:var(--text2);font-weight:700;display:block;margin-bottom:4px">Fecha</label><input type="date" id="ms-date" style="width:100%;background:var(--input-bg);border:1.5px solid var(--border);border-radius:8px;color:var(--text);font-family:Nunito,sans-serif;font-size:13px;font-weight:600;padding:8px 10px;outline:none"></div>
+      <div><label style="font-size:10px;color:var(--text2);font-weight:700;display:block;margin-bottom:4px">Etiqueta</label><input type="text" id="ms-label" placeholder="ej. Nueva estrategia" style="width:100%;background:var(--input-bg);border:1.5px solid var(--border);border-radius:8px;color:var(--text);font-family:Nunito,sans-serif;font-size:13px;font-weight:600;padding:8px 10px;outline:none"></div>
+      <button onclick="addMilestone()" class="btn btn-orange btn-sm" style="margin:0;padding:9px 14px">+</button>
+    </div>
+  </div>`;
+  function statsFor(trades){
+    if(!trades.length)return null;
+    const w=trades.filter(t=>t.resultado>0),l=trades.filter(t=>t.resultado<0);
+    const wr=w.length/trades.length*100;
+    const aW=w.length?w.reduce((s,t)=>s+t.resultado,0)/w.length:0;
+    const aL=l.length?l.reduce((s,t)=>s+t.resultado,0)/l.length:0;
+    const ev=wr/100*aW+(1-wr/100)*aL;
+    const gw=w.reduce((s,t)=>s+t.resultado,0),gl=Math.abs(l.reduce((s,t)=>s+t.resultado,0));
+    return{n:trades.length,wr,ev,pf:gl>0?gw/gl:gw>0?999:0};
+  }
+  function statBlk(s,label,col){
+    if(!s||!s.n)return`<div style="text-align:center;color:var(--text2);font-size:11px;padding:14px">Sin datos</div>`;
+    const ec=s.ev>=0?'#00c853':'#ff3d57';
+    return`<div style="text-align:center">
+      <div style="font-size:10px;font-weight:800;color:${col};margin-bottom:6px">${label} · ${s.n}t</div>
+      <div style="font-size:22px;font-weight:900;color:${ec}">${s.ev>=0?'+':''}${s.ev.toFixed(1)}%</div>
+      <div style="font-size:9px;color:var(--text2);margin-bottom:6px">EV / trade</div>
+      <div style="display:flex;justify-content:center;gap:12px">
+        <div><div style="font-size:13px;font-weight:800;color:${s.wr>=50?'#00c853':'#ff3d57'}">${s.wr.toFixed(0)}%</div><div style="font-size:9px;color:var(--text2)">WR</div></div>
+        <div><div style="font-size:13px;font-weight:800;color:${s.pf>=1?'#00c853':'#ff3d57'}">${s.pf>=999?'∞':s.pf.toFixed(2)}</div><div style="font-size:9px;color:var(--text2)">PF</div></div>
+      </div>
+    </div>`;
+  }
+  if(!ms.length)return`<div class="desktop-col-full"><div class="chart-box" style="cursor:default">
+    <div class="chart-label">📅 Antes vs Después — comparar períodos</div>
+    <div style="font-size:12px;color:var(--text2);margin-bottom:12px;line-height:1.6">Marcá una fecha clave (cambio de estrategia, pausa, nueva regla) para comparar EV, WR y PF antes y después.</div>
+    ${mForm}</div></div>`;
+  const sorted=[...ms].sort((a,b)=>a.date.localeCompare(b.date));
+  const comparisons=sorted.map((m,i)=>{
+    const prevDate=i>0?sorted[i-1].date:null;
+    const nextDate=sorted[i+1]?sorted[i+1].date:null;
+    const before=T.filter(t=>t.fecha<m.date&&(prevDate?t.fecha>=prevDate:true));
+    const after=T.filter(t=>t.fecha>=m.date&&(nextDate?t.fecha<nextDate:true));
+    return{m,before:statsFor(before),after:statsFor(after)};
+  });
+  return`<div class="desktop-col-full"><div class="chart-box" style="cursor:default">
+  <div class="chart-label">📅 Antes vs Después — comparar períodos</div>
+  ${mForm}
+  ${comparisons.map(c=>`<div style="background:var(--surface2);border-radius:10px;padding:12px;margin-bottom:10px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+      <div><div style="font-size:13px;font-weight:900;color:#ff6b00">📌 ${c.m.label}</div><div style="font-size:10px;color:var(--text2)">${c.m.date}</div></div>
+      <button onclick="removeMilestone('${c.m.id}')" style="background:none;border:none;color:#ff3d57;cursor:pointer;font-size:14px;font-weight:700;padding:4px 8px">✕</button>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 32px 1fr;gap:4px;align-items:center">
+      <div style="background:rgba(255,61,87,.06);border:1px solid rgba(255,61,87,.2);border-radius:8px;padding:10px">${statBlk(c.before,'Antes','#ff3d57')}</div>
+      <div style="text-align:center;font-size:18px;color:var(--text2)">→</div>
+      <div style="background:rgba(0,200,83,.06);border:1px solid rgba(0,200,83,.2);border-radius:8px;padding:10px">${statBlk(c.after,'Después','#00c853')}</div>
+    </div>
+    ${c.before&&c.after&&c.before.n>0&&c.after.n>0?`<div style="margin-top:8px;font-size:11px;font-weight:800;color:${c.after.ev>c.before.ev?'#00c853':c.after.ev<c.before.ev?'#ff3d57':'#ffd100'};background:var(--card);border-radius:7px;padding:7px 10px">
+      ${c.after.ev>c.before.ev?'✅':'❌'} EV ${c.after.ev>c.before.ev?'mejoró':'empeoró'} ${c.after.ev>=c.before.ev?'+':''}${(c.after.ev-c.before.ev).toFixed(1)}% · WR ${c.after.wr>c.before.wr?'↑':'↓'} ${Math.abs(c.after.wr-c.before.wr).toFixed(0)}pp · PF ${c.after.pf>=999?'∞':c.after.pf.toFixed(2)} vs ${c.before.pf>=999?'∞':c.before.pf.toFixed(2)}
+    </div>`:''}
+  </div>`).join('')}
+</div></div>`;
 }
 
 // ══ HELPERS ══
