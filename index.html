@@ -2656,7 +2656,7 @@ function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
   });
   const exhL = exhaustionLabel(exhEntry);
 
-  // ── CONFIDENCE ────────────────────────────────────────────────────────────
+  // ── CONFIDENCE (base) ─────────────────────────────────────────────────────
   let conf = Math.round(score / 7 * 60);
   if(!contraBias) conf += 15;
   if(acCls==='fast') conf += 10;
@@ -2664,61 +2664,98 @@ function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
   if(dtp.hasData) conf += 5;
   conf = Math.min(100, conf);
 
-  // ── TIMING ASSESSMENT (direction vs timing separation) ────────────────────
-  // Proxy for RSI overextension using available momentum data:
-  // accel = c1h - (c24/24) → how much faster than average hourly move
-  const absAccelN  = Math.abs(accel);
-  const absC1h     = Math.abs(c1h);
-  // Extended if accelerating >0.8% above avg hourly OR 1H move > 1.8%
+  // ── TIMING ASSESSMENT ─────────────────────────────────────────────────────
+  const absAccelN = Math.abs(accel);
+  const absC1h    = Math.abs(c1h);
   let timing = 'optimal';
   if      (absAccelN > 1.5 || absC1h > 3.0) timing = 'late';
   else if (absAccelN > 0.8 || absC1h > 1.8) timing = 'extended';
 
   const timingMeta = {
-    optimal:  { label:'ÓPTIMO',    color:'#00c853', sub:'Timing de entrada válido',           emoji:'🟢' },
-    extended: { label:'EXTENDIDO', color:'#ffd100', sub:'Movimiento ya acelerado — riesgo',   emoji:'🟡' },
-    late:     { label:'TARDÍO',    color:'#ff3d57', sub:'Entrada tardía — esperá retroceso',  emoji:'🔴' }
+    optimal:  { label:'ÓPTIMO',    color:'#00c853', sub:'Timing de entrada válido',          emoji:'🟢' },
+    extended: { label:'EXTENDIDO', color:'#ffd100', sub:'Movimiento acelerado — riesgo',     emoji:'🟡' },
+    late:     { label:'TARDÍO',    color:'#ff3d57', sub:'Entrada tardía — esperá retroceso', emoji:'🔴' }
   };
   const timingInfo = timingMeta[timing];
 
-  // Penalize confidence by timing
-  if(timing === 'late')     conf = Math.min(conf, 44);   // caps at "Media"
-  if(timing === 'extended') conf = Math.min(conf, 62);   // limits "Alta"
-  // Penalize confidence by RSI proxy: very fast 1H = likely overbought
-  if(absC1h > 2.5) conf -= 10;
+  // ── TRADE TYPE DETECTION — jerarquía de prioridad ─────────────────────────
+  // 1. Agotado  2. Rango  3. Ruptura  4. Continuación
+  const accelDirectional = isLong ? accel > 0.05 : accel < -0.05;
+  const absC4h = Math.abs(c4h);
+  let tradeType;
 
+  if(exhEntry >= 70 || (timing === 'late' && exhEntry >= 50)){
+    tradeType = 'agotado';
+  } else if(score <= 3 && absC1h < 0.8 && absC4h < 1.5){
+    tradeType = 'rango';
+  } else if(score <= 2){
+    tradeType = 'rango';
+  } else if(timing === 'optimal' && score >= 5 && accelDirectional && absAccelN > 0.5 && absC1h > 0.8){
+    tradeType = 'ruptura';  // Binance klines refinará esto con breakout de máximos/mínimos
+  } else if(score >= 5){
+    tradeType = 'continuacion';
+  } else {
+    tradeType = 'continuacion';
+  }
+
+  const tradeTypeMeta = {
+    ruptura:     { label:'RUPTURA',     emoji:'⚡', color:'#00aaff', sub:'Entrada temprana — dejar correr' },
+    continuacion:{ label:'CONTINUACIÓN',emoji:'→',  color:'#00c853', sub:'Tendencia activa — gestión conservadora' },
+    rango:       { label:'RANGO',       emoji:'↔',  color:'#ffd100', sub:'Sin señal clara — evitar operar' },
+    agotado:     { label:'AGOTADO',     emoji:'🔴', color:'#ff3d57', sub:'Movimiento extendido — no entrar' }
+  };
+  const ttMeta = tradeTypeMeta[tradeType];
+
+  // ── SCORE ADJUSTMENT por tipo ──────────────────────────────────────────────
+  const scoreAdj = { ruptura:+2, continuacion:-1, agotado:-3, rango:0 };
+  const scoreRaw = score;
+  const scoreAdjusted = Math.max(0, Math.min(7, score + (scoreAdj[tradeType]||0)));
+  const tierAdjusted  = getTier(scoreAdjusted);
+
+  // ── CONFIDENCE — ajustes por timing y tradeType ────────────────────────────
+  if(timing === 'late')        conf = Math.min(conf, 44);
+  if(timing === 'extended')    conf = Math.min(conf, 62);
+  if(absC1h > 2.5)             conf -= 10;
+  if(tradeType === 'agotado')  conf = Math.min(conf, 28);
+  if(tradeType === 'rango')    conf = Math.min(conf, 38);
+  if(tradeType === 'ruptura')  conf = Math.min(100, conf + 10);
   conf = Math.max(0, Math.min(100, conf));
 
   const confLabel = conf >= 70 ? 'Alta' : conf >= 45 ? 'Media' : 'Baja';
   const confColor = conf >= 70 ? '#00c853' : conf >= 45 ? '#ffd100' : '#ff6b00';
 
-  // ── RECOMMENDATION ────────────────────────────────────────────────────────
+  // ── RECOMMENDATION — prioridad: agotado > rango > timing > score ───────────
   let recAction, recColor, recBg, recBorder, recEmoji;
-  const accelOk = isLong ? accel > 0.05 : accel < -0.05;
-
-  // In auto mode, also consider whether the auto-chosen direction is clearly dominant
+  const accelOk  = isLong ? accel > 0.05 : accel < -0.05;
   const dirClear = !isManual && Math.abs(auto.sLong - auto.sShort) >= 2;
 
-  if(contraBias){
+  if(tradeType === 'agotado'){
+    recAction=isLong?'NO ENTRAR — AGOTADO':'NO ENTRAR — AGOTADO'; recEmoji='🔴';
+    recColor='#ff3d57'; recBg='rgba(255,61,87,.1)'; recBorder='rgba(255,61,87,.5)';
+  } else if(tradeType === 'rango'){
+    recAction='SIN SEÑAL — RANGO'; recEmoji='↔';
+    recColor='#ffd100'; recBg='rgba(255,209,0,.08)'; recBorder='rgba(255,209,0,.4)';
+  } else if(contraBias){
     recAction='NO ENTRAR'; recEmoji='⏸';
     recColor='#ffd100'; recBg='rgba(255,209,0,.08)'; recBorder='rgba(255,209,0,.4)';
-  } else if(timing === 'late' && score >= 4){
-    // late_trend state: direction is right but timing is wrong
+  } else if(timing === 'late' && scoreRaw >= 4){
     recAction=isLong?'ESPERAR RETROCESO':'ESPERAR REBOTE'; recEmoji='⏳';
     recColor='#ff3d57'; recBg='rgba(255,61,87,.08)'; recBorder='rgba(255,61,87,.4)';
-  } else if(timing === 'extended' && score >= 5){
-    // extended: signal valid but entry risk is high
+  } else if(timing === 'extended' && scoreRaw >= 5){
     recAction=isLong?'LONG — RIESGO ALTO':'SHORT — RIESGO ALTO'; recEmoji='⚠️';
     recColor='#ffd100'; recBg='rgba(255,209,0,.08)'; recBorder='rgba(255,209,0,.4)';
-  } else if(score >= 5 && accelOk && (isManual || dirClear)){
+  } else if(tradeType === 'ruptura' && scoreAdjusted >= 5){
+    recAction=isLong?'LONG — RUPTURA':'SHORT — RUPTURA'; recEmoji='⚡';
+    recColor='#00aaff'; recBg='rgba(0,170,255,.1)'; recBorder='rgba(0,170,255,.4)';
+  } else if(scoreRaw >= 5 && accelOk && (isManual || dirClear)){
     recAction=isLong?'LONG':'SHORT'; recEmoji=isLong?'✅':'🔴';
     recColor=isLong?'#00c853':'#ff3d57';
     recBg=isLong?'rgba(0,200,83,.1)':'rgba(255,61,87,.1)';
     recBorder=isLong?'rgba(0,200,83,.4)':'rgba(255,61,87,.4)';
-  } else if(score >= 5 && !accelOk){
+  } else if(scoreRaw >= 5 && !accelOk){
     recAction=isLong?'LONG — ESPERAR ACELERACIÓN':'SHORT — ESPERAR ACELERACIÓN'; recEmoji='🟡';
     recColor='#ffd100'; recBg='rgba(255,209,0,.08)'; recBorder='rgba(255,209,0,.4)';
-  } else if(score >= 3){
+  } else if(scoreRaw >= 3){
     recAction=isLong?'LONG CAUTELOSO':'SHORT CAUTELOSO'; recEmoji='🟡';
     recColor='#ffd100'; recBg='rgba(255,209,0,.08)'; recBorder='rgba(255,209,0,.4)';
   } else {
@@ -2751,6 +2788,11 @@ function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
   if(!isManual)      bullets.push(`TF sugerido: ${tf} — ${tfReason}`);
   if(tkN >= 2)       bullets.push(`Historial ${ticker} ${pos}: ${tkN} trades · WR ${tkWR.toFixed(0)}% · EV ${tkEV>=0?'+':''}${tkEV.toFixed(1)}%`);
   if(!dtp.hasData)   bullets.push(`Sin historial MFE propio — usando priors calibrados para TP/SL`);
+  // Trade type specific advice
+  if(tradeType==='ruptura')      bullets.unshift('⚡ Ruptura detectada — dejar correr el runner si supera TP1');
+  if(tradeType==='continuacion') bullets.unshift('→ Continuación — gestión conservadora: cerrar 50% en TP1');
+  if(tradeType==='agotado')      bullets.unshift('🔴 Movimiento agotado — evitar entrada, esperar reset');
+  if(tradeType==='rango')        bullets.unshift('↔ Mercado en rango — esperar ruptura definida antes de operar');
   const bulletsHTML = bullets.slice(0,4).map(b=>`<div class="an-bullet">${b}</div>`).join('');
 
   // ── DIRECTION comparison (only in auto mode) ──────────────────────────────
@@ -2790,9 +2832,14 @@ function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
     <div class="an-action" style="color:${recColor}">${recEmoji} ${recAction}</div>
     <div class="an-conf" style="color:${recColor}">Confianza: <strong>${confLabel}</strong> (${conf}/100)</div>
     <div style="font-size:10px;color:var(--text2);margin-top:4px">${ticker} · ${pos} · ${tf} · ${ts}${isManual?' · <span style="color:#ffd100">manual</span>':' · <span style="color:#00aaff">auto</span>'}</div>
-    ${timing !== 'optimal' ? `<div id="an-timing-badge" style="margin-top:7px;background:${timingInfo.color}22;border:1px solid ${timingInfo.color}88;border-radius:6px;padding:5px 10px;font-size:11px;font-weight:800;color:${timingInfo.color}">
-      ${timingInfo.emoji} TIMING ${timingInfo.label} — ${timingInfo.sub}
-    </div>` : `<div id="an-timing-badge"></div>`}
+    <div style="display:flex;gap:6px;margin-top:7px;flex-wrap:wrap">
+      <div style="background:${ttMeta.color}22;border:1px solid ${ttMeta.color}88;border-radius:6px;padding:4px 9px;font-size:11px;font-weight:800;color:${ttMeta.color}">
+        ${ttMeta.emoji} ${ttMeta.label} — ${ttMeta.sub}
+      </div>
+      ${timing !== 'optimal' ? `<div id="an-timing-badge" style="background:${timingInfo.color}22;border:1px solid ${timingInfo.color}88;border-radius:6px;padding:4px 9px;font-size:11px;font-weight:800;color:${timingInfo.color}">
+        ${timingInfo.emoji} ${timingInfo.label}
+      </div>` : `<div id="an-timing-badge"></div>`}
+    </div>
   </div>
 
   ${dirCompare}
@@ -2808,7 +2855,7 @@ function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
     </div>
     <div class="an-cell">
       <div class="an-cell-lbl">Score mkt</div>
-      <div class="an-cell-val" style="color:${tier==='fuerte'?'#00c853':tier==='medio'?'#ffd100':'#ff6b00'}">${score}/7 · ${tier}</div>
+      <div class="an-cell-val" style="color:${tierAdjusted==='fuerte'?'#00c853':tierAdjusted==='medio'?'#ffd100':'#ff6b00'}">${scoreRaw}/7${scoreAdj[tradeType]!==0?` <span style="font-size:10px;color:${scoreAdj[tradeType]>0?'#00c853':'#ff3d57'}">(${scoreAdj[tradeType]>0?'+':''}${scoreAdj[tradeType]})</span>`:''} · ${tierAdjusted}</div>
     </div>
     <div class="an-cell">
       <div class="an-cell-lbl">Agotamiento</div>
@@ -5679,6 +5726,22 @@ function buildSnapshotForTicker(ticker, tradePosOverride){
   const biasOk  = isLong ? (amp >= 55 && btc1h > 0) : (amp < 45 && btc1h < 0);
   const sesgomkt = contraBias ? 'En contra' : biasOk ? 'A favor' : 'Neutral';
 
+  // Timing assessment for snapshot
+  const absAccelN2 = Math.abs(accel);
+  const absC1h2    = Math.abs(c1h);
+  let snapTiming = 'optimal';
+  if      (absAccelN2 > 1.5 || absC1h2 > 3.0) snapTiming = 'late';
+  else if (absAccelN2 > 0.8 || absC1h2 > 1.8) snapTiming = 'extended';
+
+  // TradeType for snapshot
+  const accelDir2 = isLong ? accel > 0.05 : accel < -0.05;
+  let snapTradeType;
+  if(exhEntry >= 70 || (snapTiming === 'late' && exhEntry >= 50)) snapTradeType = 'agotado';
+  else if(autoScore <= 3 && absC1h2 < 0.8 && Math.abs(c4h) < 1.5) snapTradeType = 'rango';
+  else if(autoScore <= 2) snapTradeType = 'rango';
+  else if(snapTiming === 'optimal' && autoScore >= 5 && accelDir2 && absAccelN2 > 0.5) snapTradeType = 'ruptura';
+  else snapTradeType = 'continuacion';
+
   return {
     ticker,
     dirSugerida,            // 'LONG' | 'SHORT' | 'LONG CAUTELOSO' | 'SHORT CAUTELOSO' | 'NO ENTRAR'
@@ -5693,6 +5756,8 @@ function buildSnapshotForTicker(ticker, tradePosOverride){
     mom1h:  c1h,
     mom4h:  c4h,
     mom24h: c24,
+    timing: snapTiming,
+    tradeType: snapTradeType,
     ts: new Date().toISOString()
   };
 }
@@ -5728,23 +5793,32 @@ function annotateFollowedSystem(){
 
 // ── 2. detectTradeType ───────────────────────────────────────────────────
 // Classifies each trade into one of 4 types based on snapshot + trade data
+// Priority: agotado > rango > ruptura > continuacion
 function detectTradeType(trade){
-  var snap = trade.anSnapshot;
-  var momentum  = snap ? (snap.scoreMkt || 0) : 0;
-  var agot      = snap ? (snap.agotamiento || 0) : 0;
-  var confianza = snap ? (snap.confianza || 0) : 0;
-  var temp      = trade.temp || '';
-  var salida    = (trade.salida || '').toLowerCase();
+  var snap     = trade.anSnapshot;
+  var momentum = snap ? (snap.scoreMkt  || 0) : 0;
+  var agot     = snap ? (snap.agotamiento || 0) : 0;
+  var conf     = snap ? (snap.confianza  || 0) : 0;
+  var temp     = trade.temp  || '';
+  var timing   = snap ? (snap.timing    || 'optimal') : 'optimal';
 
-  // Agotado: high exhaustion at entry
-  if(agot >= 60) return 'agotado';
-  // Ruptura: strong momentum + short TF
-  if(momentum >= 5 && (temp === '1m' || temp === '5m' || temp === '15m')) return 'ruptura';
-  // Continuacion: strong momentum on medium+ TF, not exhausted
-  if(momentum >= 4 && (temp === '1h' || temp === '4h' || temp === '1d')) return 'continuacion';
-  // Rango: low momentum, any TF
-  if(momentum < 3) return 'rango';
-  // Default
+  // 1. AGOTADO — máxima prioridad de filtrado
+  if(agot >= 70) return 'agotado';
+  if(timing === 'late' && agot >= 50) return 'agotado';
+
+  // 2. RANGO — sin señal, evitar operar
+  if(momentum <= 2) return 'rango';
+  if(momentum <= 3 && conf < 40) return 'rango';
+
+  // 3. RUPTURA — entrada temprana con momentum en expansión
+  // Short TF + score fuerte + conf alta + no agotado = ruptura
+  if(momentum >= 5 && conf >= 55 && (temp==='1m'||temp==='5m'||temp==='15m') && agot < 40) return 'ruptura';
+  // Any TF: very high score + early timing
+  if(momentum >= 6 && timing === 'optimal' && agot < 35) return 'ruptura';
+
+  // 4. CONTINUACIÓN — por defecto
+  if(momentum >= 4 && agot < 60) return 'continuacion';
+
   return 'continuacion';
 }
 
@@ -8422,11 +8496,22 @@ async function fetchAndInterpretChart(ticker, tf) {
     const candles = klines.map(k => ({ o:+k[1], h:+k[2], l:+k[3], c:+k[4], v:+k[5] }));
     const interp  = interpretTechnical(candles, ticker, interval);
 
-    // ── Update timing badge with REAL RSI from Binance ─────────────────────
+    // ── Confirmación de breakout con klines reales ──────────────────────────
+    const last   = candles[candles.length - 1].c;
+    const prev20H = candles.slice(-21, -1).map(c => c.h);
+    const prev20L = candles.slice(-21, -1).map(c => c.l);
+    const high20  = Math.max(...prev20H);
+    const low20   = Math.min(...prev20L);
+    // breakout = precio actual rompiendo el rango de las últimas 20 velas
+    const klineBreakoutLong  = last > high20;
+    const klineBreakoutShort = last < low20;
+
+    // ── Update timing badge with REAL RSI + breakout confirmation ──────────
     const badge = document.getElementById('an-timing-badge');
+    const ttBadge = document.querySelector('[data-tradetype-badge]');
     if (badge) {
       const rsi = interp.rsi;
-      const pos = interp.posInRange; // 0-1
+      const pos = interp.posInRange;
       const rsiOB = rsi > 70, rsiOS = rsi < 30;
       const nearRes = pos > 0.82, nearSup = pos < 0.18;
       if (rsiOB || nearRes || rsiOS || nearSup) {
@@ -8434,11 +8519,29 @@ async function fetchAndInterpretChart(ticker, tf) {
         const parts = [];
         if (rsiOB)   parts.push(`RSI ${rsi.toFixed(0)} sobrecomprado`);
         if (rsiOS)   parts.push(`RSI ${rsi.toFixed(0)} sobrevendido`);
-        if (nearRes) parts.push(`Precio en zona de resistencia (${(pos*100).toFixed(0)}% del rango)`);
-        if (nearSup) parts.push(`Precio en zona de soporte (${(pos*100).toFixed(0)}% del rango)`);
-        const existing = badge.textContent.trim();
-        badge.style.cssText = `margin-top:7px;background:${col}22;border:1px solid ${col}88;border-radius:6px;padding:5px 10px;font-size:11px;font-weight:800;color:${col}`;
-        badge.innerHTML = `⚠️ TIMING (confirmado) — ${parts.join(' · ')}`;
+        if (nearRes) parts.push(`${(pos*100).toFixed(0)}% del rango — zona de resistencia`);
+        if (nearSup) parts.push(`${(pos*100).toFixed(0)}% del rango — zona de soporte`);
+        badge.style.cssText = `background:${col}22;border:1px solid ${col}88;border-radius:6px;padding:4px 9px;font-size:11px;font-weight:800;color:${col}`;
+        badge.innerHTML = `⚠️ TARDÍO confirmado — ${parts.join(' · ')}`;
+      }
+    }
+
+    // ── Refinar tradeType con breakout real (actualiza badge si aplica) ─────
+    const recBox = document.querySelector('.an-rec');
+    if (recBox) {
+      const typeDiv = recBox.querySelector('div[style*="border-radius:6px"]:first-child');
+      // Si detectamos ruptura real (breaking máximo/mínimo de 20 velas)
+      if (klineBreakoutLong || klineBreakoutShort) {
+        const fmt = p => p >= 1000 ? p.toFixed(1) : p >= 1 ? p.toFixed(3) : p.toFixed(6);
+        const breakLevel = klineBreakoutLong ? fmt(high20) : fmt(low20);
+        const existing = recBox.querySelector('[data-breakout]');
+        if (!existing) {
+          const div = document.createElement('div');
+          div.setAttribute('data-breakout','1');
+          div.style.cssText = 'margin-top:5px;background:#00aaff22;border:1px solid #00aaff88;border-radius:6px;padding:4px 9px;font-size:11px;font-weight:800;color:#00aaff';
+          div.textContent = `⚡ RUPTURA CONFIRMADA — precio ${klineBreakoutLong?'sobre':'bajo'} máximo/mínimo de 20 velas (${breakLevel})`;
+          recBox.appendChild(div);
+        }
       }
     }
 
