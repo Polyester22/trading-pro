@@ -2887,15 +2887,19 @@ function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
   ${histHTML}
   ${!dtp.hasData?`<div style="font-size:9px;color:var(--text2);background:rgba(255,209,0,.06);border:1px solid rgba(255,209,0,.2);border-radius:6px;padding:6px 10px;margin-bottom:10px">⚠️ ${dtp.source}</div>`:''}
 
-  <button class="an-save-btn" onclick="saveAnalysis('${ticker}','${pos}','${tf}','${recAction}',${conf},'${confLabel}')">
+  <button class="an-save-btn" onclick="saveAnalysis('${ticker}','${pos}','${tf}','${recAction}',${conf},'${confLabel}','${tradeType}')">
     📋 Guardar análisis
-  </button>`;
+  </button>
+  ${renderCalibrationBadge(tradeType)}
+  <div style="margin-top:6px;text-align:right">
+    <button onclick="recalibrate()" style="background:none;border:none;font-family:Nunito,sans-serif;font-size:10px;font-weight:700;color:var(--text2);cursor:pointer;padding:2px 6px">⟳ Recalibrar sistema</button>
+  </div>`;
 }
 
-function saveAnalysis(ticker, pos, tf, rec, conf, confLabel){
+function saveAnalysis(ticker, pos, tf, rec, conf, confLabel, tradeType){
   const now = new Date();
   analyzerLog.unshift({
-    ticker, pos, tf, rec, conf, confLabel,
+    ticker, pos, tf, rec, conf, confLabel, tradeType: tradeType||'continuacion',
     ts: now.toISOString(),
     label: `${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}`
   });
@@ -2904,6 +2908,14 @@ function saveAnalysis(ticker, pos, tf, rec, conf, confLabel){
   renderAnLog();
   const btn = document.querySelector('.an-save-btn');
   if(btn){ btn.textContent='✅ Guardado'; setTimeout(()=>{ btn.innerHTML='📋 Guardar análisis'; },1500); }
+}
+
+function recalibrate(){
+  const result = computeAutoLearning();
+  if(!result){ alert('Se necesitan al menos 5 trades cerrados con snapshot para calibrar.'); return; }
+  renderGraficos(); // refresh stats section if open
+  const btn = document.querySelector('[onclick="recalibrate()"]');
+  if(btn){ btn.textContent='✅ Calibrado con '+result.n+' trades'; setTimeout(()=>{ btn.textContent='⟳ Recalibrar sistema'; },2000); }
 }
 
 function deleteAnalysis(idx){
@@ -6092,6 +6104,85 @@ function getTradeRecommendation(t, livePct, totalMins, tc){
   const closed=D.trades.filter(x=>!x.open&&x.resultado!==undefined);
   const isLong=t.pos==='Long';
   const pct=livePct||0;
+  const snap=t.anSnapshot||{};
+
+  // ── TradeType del trade (guardado en snapshot o anotado) ──────────────────
+  const entryTT = t.tradeType || snap.tradeType || 'continuacion';
+
+  // ── Detectar tradeType ACTUAL basado en live data (si disponible) ─────────
+  let currentTT = entryTT;
+  if(tc){
+    const c1h=tc.change1h||0, c4h=tc.change4h||0, c24=tc.change24h||0;
+    const accel=c1h-(c24/24);
+    const absAccelN=Math.abs(accel), absC1h=Math.abs(c1h), absC4h=Math.abs(c4h);
+    const snap_score=snap.scoreMkt||0;
+    const snap_exh=snap.agotamiento||0;
+    // Quick re-evaluation using same rules as analyzer
+    if(snap_exh>=70) currentTT='agotado';
+    else if(snap_score<=3&&absC1h<0.8&&absC4h<1.5) currentTT='rango';
+    else if(absAccelN>0.5&&absC1h>0.8&&pct>=0) currentTT='ruptura';
+    else currentTT='continuacion';
+  }
+
+  // ── Detectar transición de estado (entry → current) ───────────────────────
+  const stateTransition = entryTT !== currentTT ? `${entryTT} → ${currentTT}` : null;
+  const transitionMsg =
+    stateTransition === 'ruptura → continuacion' ? 'Movimiento ya iniciado — gestionar' :
+    stateTransition === 'continuacion → agotado'  ? 'Trade extendido — asegurar ganancias' :
+    stateTransition === 'ruptura → agotado'        ? '⚠️ Movimiento agotado desde ruptura' :
+    null;
+
+  // ── Mensaje dinámico por tipo ──────────────────────────────────────────────
+  const typeMsg={
+    ruptura:'Entraste temprano — dejar correr',
+    continuacion:'Movimiento en curso — gestionar',
+    agotado:'Extendido — asegurar ganancias',
+    rango:'Sin ventaja clara'
+  };
+
+  // ── Auto-learning modifier ────────────────────────────────────────────────
+  const al=loadAutoLearning();
+  const alExh=snap.agotamiento||0;
+
+  // ── PRIORIDAD 1: AGOTADO — cerrar siempre ────────────────────────────────
+  if(currentTT==='agotado'||(entryTT==='agotado'&&pct>0)){
+    const base=typeMsg.agotado+(transitionMsg?` · ${transitionMsg}`:'');
+    return{action:'🔴 Asegurar ganancias',color:'#ff3d57',bg:'rgba(255,61,87,.1)',border:'rgba(255,61,87,.4)',
+      reason:`${base}${pct>0?` · En ganancia (${pct>=0?'+':''}${pct.toFixed(1)}%)`:''} · Riesgo de reversión`};
+  }
+  if(alExh>=70){
+    return{action:'🔴 Cerrar · Extendido',color:'#ff3d57',bg:'rgba(255,61,87,.1)',border:'rgba(255,61,87,.4)',
+      reason:`Agotamiento alto (${alExh}/100) — probabilidad de continuación baja. ${typeMsg.agotado}`};
+  }
+
+  // ── PRIORIDAD 2: RANGO — sin señal ───────────────────────────────────────
+  if(currentTT==='rango'&&entryTT==='rango'){
+    return{action:'⚪ Sin señal',color:'var(--text2)',bg:'var(--surface2)',border:'var(--border)',
+      reason:`${typeMsg.rango}${pct!==0?` · ${pct>=0?'+':''}${pct.toFixed(1)}% actual`:''}${transitionMsg?` · ${transitionMsg}`:''}`};
+  }
+
+  // ── PRIORIDAD 3: RUPTURA — reforzar "dejar correr" ───────────────────────
+  if(entryTT==='ruptura'&&pct>0&&currentTT!=='agotado'){
+    const al_s=al?.groupStats?.ruptura;
+    const tp2hint=al_s&&!al_s.insuf&&al_s.p75MFE?` · TP2 histórico rupturas: +${al_s.p75MFE.toFixed(1)}%`:'';
+    if(pct>=(al_s?.p50MFE||5)*0.85&&tc){
+      // At TP1 level — check if momentum still strong
+      const c1h=tc?.change1h||0; const c4h=tc?.change4h||0;
+      const stillStrong=isLong?(c1h>0&&c4h>0):(!isLong&&c1h<0&&c4h<0);
+      if(stillStrong)
+        return{action:'🟢 Dejar correr — Ruptura',color:'#00aaff',bg:'rgba(0,170,255,.1)',border:'rgba(0,170,255,.4)',
+          reason:`${typeMsg.ruptura}${tp2hint}${transitionMsg?` · ${transitionMsg}`:''}`};
+    }
+    if(currentTT==='continuacion')
+      return{action:'🟡 Gestionar — en continuación',color:'#ffd100',bg:'rgba(255,209,0,.08)',border:'rgba(255,209,0,.4)',
+        reason:`${transitionMsg||typeMsg.continuacion}${tp2hint}`};
+  }
+
+  // ── ALERTA: agotamiento subiendo ─────────────────────────────────────────
+  if(alExh>=50&&alExh<70&&pct>0){
+    return{action:'🟡 Cierre parcial recomendado',color:'#ffd100',bg:'rgba(255,209,0,.08)',border:'rgba(255,209,0,.4)',
+      reason:`Agotamiento ${alExh}/100 — asegurar parcial. ${typeMsg[currentTT]||''}`};
+  }
 
   // ── Ticker price movement (Binance 1h/4h/24h) ────────────
   const has=tc!==null&&tc!==undefined;
@@ -6244,6 +6335,85 @@ function loadMomentumStats(){
 
 function saveMomentumStats(stats){
   try{ localStorage.setItem(MSTATS_KEY, JSON.stringify(stats)); }catch(e){}
+}
+
+/* ══ AUTO-LEARNING ENGINE (bloque 1 — disponible desde init) ═══════════════ */
+var AL_KEY = 'tpro_autolearn_v2';
+function loadAutoLearning(){ try{ var r=localStorage.getItem(AL_KEY); if(r)return JSON.parse(r); }catch(e){} return null; }
+function saveAutoLearning(d){ try{ localStorage.setItem(AL_KEY,JSON.stringify(d)); }catch(e){} }
+
+function computeAutoLearning(){
+  var closed=D.trades.filter(function(t){return !t.open&&t.resultado!==undefined&&t.anSnapshot;});
+  if(closed.length<5)return null;
+  var types=['ruptura','continuacion','rango','agotado'];
+  var groups={ruptura:[],continuacion:[],rango:[],agotado:[]};
+  closed.forEach(function(t){
+    var tt=t.tradeType||(t.anSnapshot&&t.anSnapshot.tradeType)||'continuacion';
+    if(groups[tt])groups[tt].push(t);
+  });
+  function grpStats(trades){
+    if(trades.length<3)return{n:trades.length,insuf:true};
+    var wins=trades.filter(function(t){return t.resultado>0;});
+    var ev=trades.reduce(function(s,t){return s+t.resultado;},0)/trades.length;
+    var mfes=trades.filter(function(t){return t.maxMovePct!=null&&t.resultado>0;}).map(function(t){return t.maxMovePct;}).sort(function(a,b){return a-b;});
+    var pct=function(p){return mfes.length?mfes[Math.min(mfes.length-1,Math.floor(mfes.length*p))]:null;};
+    var confs=trades.filter(function(t){return t.anSnapshot&&t.anSnapshot.confianza!=null;}).map(function(t){return t.anSnapshot.confianza;});
+    return{n:trades.length,wr:wins.length/trades.length*100,ev:ev,p50MFE:pct(.5),p75MFE:pct(.75),p90MFE:pct(.9),avgConf:confs.length?confs.reduce(function(s,x){return s+x;},0)/confs.length:null};
+  }
+  var groupStats={};
+  types.forEach(function(tt){groupStats[tt]=grpStats(groups[tt]);});
+  var confThreshold=50;
+  [70,60,55,50,45,40].forEach(function(minC){
+    if(confThreshold===50){
+      var b=closed.filter(function(t){return (t.anSnapshot&&t.anSnapshot.confianza||0)>=minC;});
+      if(b.length>=5&&b.filter(function(t){return t.resultado>0;}).length/b.length>=0.5)confThreshold=minC;
+    }
+  });
+  var allMFE=closed.filter(function(t){return t.maxMovePct!=null&&t.resultado>0;}).map(function(t){return t.maxMovePct;}).sort(function(a,b){return a-b;});
+  var pM=function(p){return allMFE.length>=5?allMFE[Math.min(allMFE.length-1,Math.floor(allMFE.length*p))]:null;};
+  var timed=closed.filter(function(t){return t.fechahora&&t.closedHora&&t.resultado>0;});
+  var avgOptimalMins=timed.length?timed.reduce(function(s,t){return s+Math.max(0,(new Date(t.closedHora)-new Date(t.fechahora))/60000);},0)/timed.length:null;
+  var avgWR=closed.filter(function(t){return t.resultado>0;}).length/closed.length;
+  var weightFactors={};
+  types.forEach(function(tt){var s=groupStats[tt];if(!s.insuf&&s.n>=5)weightFactors[tt]=Math.min(2,Math.max(0.3,(s.wr/100)/Math.max(avgWR,.01)));});
+  var badSetups=types.filter(function(tt){var s=groupStats[tt];return !s.insuf&&s.n>=5&&s.wr<35;});
+  var byScore={};
+  [5,6,7].forEach(function(sc){var b=closed.filter(function(t){return (t.anSnapshot&&t.anSnapshot.scoreMkt||0)===sc;});if(b.length>=3)byScore[sc]={n:b.length,wr:b.filter(function(t){return t.resultado>0;}).length/b.length*100,ev:b.reduce(function(s,t){return s+t.resultado;},0)/b.length};});
+  var result={n:closed.length,updatedAt:new Date().toISOString(),groupStats:groupStats,confThreshold:confThreshold,tp1Adaptive:pM(.5),tp2Adaptive:pM(.75),runnerAdaptive:pM(.9),avgOptimalMins:avgOptimalMins,weightFactors:weightFactors,badSetups:badSetups,avgWR:avgWR*100,byScore:byScore};
+  saveAutoLearning(result);
+  return result;
+}
+
+function getAutoLearningModifier(tradeType){
+  var al=loadAutoLearning();
+  if(!al)return{confMod:0,tp1:null,tp2:null,runner:null,wf:1,msg:null};
+  var s=al.groupStats&&al.groupStats[tradeType];
+  var wf=(al.weightFactors&&al.weightFactors[tradeType])||1;
+  var confModMap={ruptura:+15,continuacion:-10,agotado:-25,rango:-40};
+  var confMod=confModMap[tradeType]||0;
+  var tp1=s&&!s.insuf&&s.p50MFE!=null?s.p50MFE:al.tp1Adaptive;
+  var tp2=s&&!s.insuf&&s.p75MFE!=null?s.p75MFE:al.tp2Adaptive;
+  var runner=s&&!s.insuf&&s.p90MFE!=null?s.p90MFE:al.runnerAdaptive;
+  return{confMod:confMod,tp1:tp1,tp2:tp2,runner:runner,wf:wf,msg:null,n:al.n,confThreshold:al.confThreshold};
+}
+
+function renderCalibrationBadge(tradeType){
+  var al=loadAutoLearning();
+  if(!al||al.n<5)return'';
+  var s=al.groupStats&&al.groupStats[tradeType];
+  var tp1=al.tp1Adaptive,tp2=al.tp2Adaptive,mins=al.avgOptimalMins;
+  var fmtTime=function(m){return m==null?'—':m<60?Math.round(m)+'m':Math.round(m/60)+'h '+Math.round(m%60)+'m';};
+  var typeColor={ruptura:'#00aaff',continuacion:'#00c853',rango:'#ffd100',agotado:'#ff3d57'}[tradeType]||'var(--text2)';
+  return'<div style="background:rgba(0,170,255,.06);border:1px solid rgba(0,170,255,.2);border-radius:8px;padding:9px 12px;margin-top:6px">'
+    +'<div style="font-size:10px;font-weight:800;color:#00aaff;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">🧠 Sistema calibrado · '+al.n+' trades</div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px;margin-bottom:6px">'
+    +'<div style="background:var(--surface2);border-radius:6px;padding:5px;text-align:center"><div style="font-size:8px;color:var(--text2);font-weight:700">TP1 óptimo</div><div style="font-size:13px;font-weight:900;color:#00c853">'+(tp1!=null?'+'+tp1.toFixed(1)+'%':'—')+'</div></div>'
+    +'<div style="background:var(--surface2);border-radius:6px;padding:5px;text-align:center"><div style="font-size:8px;color:var(--text2);font-weight:700">TP2 óptimo</div><div style="font-size:13px;font-weight:900;color:#ff6b00">'+(tp2!=null?'+'+tp2.toFixed(1)+'%':'—')+'</div></div>'
+    +'<div style="background:var(--surface2);border-radius:6px;padding:5px;text-align:center"><div style="font-size:8px;color:var(--text2);font-weight:700">Tiempo opt.</div><div style="font-size:13px;font-weight:900;color:#ffd100">'+fmtTime(mins)+'</div></div>'
+    +'</div>'
+    +(s&&!s.insuf&&s.n>=5?'<div style="font-size:10px;color:'+typeColor+';font-weight:700">'+tradeType.charAt(0).toUpperCase()+tradeType.slice(1)+': WR '+s.wr.toFixed(0)+'% · EV '+(s.ev>=0?'+':'')+s.ev.toFixed(1)+'% en '+s.n+' trades</div>':'')
+    +'<div style="font-size:9px;color:var(--text2);margin-top:3px">Confianza mínima recomendada: <strong>'+al.confThreshold+'%</strong></div>'
+    +'</div>';
 }
 
 // Thresholds aligned with getMomentumTP: fuerte=6+, medio=4-5, debil=0-3
@@ -7245,7 +7415,12 @@ function saveMCP(){
   }
 
   persist(D);
-  if(mcpFullClose||pctClose===100){ updateMomentumStats(t); }
+  if(mcpFullClose||pctClose===100){
+    updateMomentumStats(t);
+    // Auto-recalibrate every 10 new closed trades
+    const closedCount=D.trades.filter(x=>!x.open&&x.anSnapshot).length;
+    if(closedCount>0&&closedCount%10===0) computeAutoLearning();
+  }
   closeMCP(); updateKPIs(); updateOpenCount(); renderOpenTrades();
   if(mcpFullClose||pctClose===100) setTimeout(()=>switchTab('historial'),300);
 }
@@ -8694,6 +8869,10 @@ document.addEventListener('DOMContentLoaded', ()=>{
   applyColLayout();
   initResizeHandles();
   initDragReorder();
+  // Run auto-learning on boot if we have data and no recent calibration
+  const al=loadAutoLearning();
+  const staleSecs=(Date.now()-(al?.updatedAt?new Date(al.updatedAt).getTime():0))/1000;
+  if(!al||staleSecs>3600) computeAutoLearning();
 });
 </script>
 
