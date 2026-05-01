@@ -8775,7 +8775,7 @@ async function fetchAndInterpretChart(ticker, tf) {
       <div style="font-size:10px;font-weight:800;color:#00aaff;text-transform:uppercase;letter-spacing:.5px;margin-bottom:7px">📊 Análisis técnico · ${symbol} ${interval}</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:8px">
         <div style="background:var(--surface2);border-radius:7px;padding:7px 9px;font-size:10px">
-          <div style="color:var(--text2);font-weight:700;margin-bottom:2px">RSI 14</div>
+          <div style="color:var(--text2);font-weight:700;margin-bottom:2px">RSI 7</div>
           <div style="font-size:14px;font-weight:900;color:${interp.rsi>70?'#ff3d57':interp.rsi<30?'#00c853':'#ffd100'}">${interp.rsi.toFixed(0)}</div>
           <div style="color:var(--text2);font-size:9px">${interp.rsi>70?'Sobrecomprado':interp.rsi<30?'Sobrevendido':'Neutral'}</div>
         </div>
@@ -8841,8 +8841,8 @@ function interpretTechnical(candles, ticker, interval) {
   const sma20 = closes.slice(-20).reduce((s, x) => s + x, 0) / 20;
   const sma50 = n >= 50 ? closes.slice(-50).reduce((s, x) => s + x, 0) / 50 : null;
 
-  // RSI 14
-  const rsi = calcRSI(closes, 14);
+  // RSI 7
+  const rsi = calcRSI(closes, 7);
 
   // MACD (12, 26, 9)
   const ema12 = calcEMA(closes, 12);
