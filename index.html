@@ -2921,7 +2921,7 @@ function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
         <div style="font-size:9px;color:var(--text2);font-weight:700;margin-bottom:3px">SHORT score <span style="opacity:.5">ⓘ</span></div>
         <div style="font-size:18px;font-weight:900;color:${auto.sShort>=5?'#ff3d57':auto.sShort>=3?'#ffd100':'#9999b8'}">${auto.sShort}/7</div>
       </div>
-      <div class="info-tap" onclick="infoTimeframe('${tf}')" style="flex:1;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:8px;text-align:center">
+      <div class="info-tap" onclick="if(window._lastAnalysis)infoTimeframe(window._lastAnalysis.tf)" style="flex:1;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:8px;text-align:center">
         <div style="font-size:9px;color:var(--text2);font-weight:700;margin-bottom:3px">TF sugerido <span style="opacity:.5">ⓘ</span></div>
         <div style="font-size:18px;font-weight:900;color:#ff6b00">${tf}</div>
       </div>
@@ -2950,17 +2950,28 @@ function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
     source:  dtp.source
   } : dtp;
 
+
+  // ── Store all analysis data for safe onclick access ──────────────────────
+  window._lastAnalysis = {
+    bias, biasLabel, tradeType, timing, contraTendencia,
+    conf, confLabel, recAction, recColor,
+    scoreRaw, scoreAdj, exhEntry,
+    exhLabel: exhL.label.replace(/[\u{1F7E2}\u{1F7E1}\u{1F7E0}\u{1F534}] /u,''),
+    exhCol: exhL.col,
+    tf, ticker, pos
+  };
+
   return `
   <div class="an-rec" style="background:${recBg};border:2px solid ${recBorder};margin-bottom:10px">
-    <div class="an-action info-tap" style="color:${recColor}" onclick="infoRiesgo('${recAction}','${recColor}',${conf},'${tradeType}',${contraTendencia},'${timing}','')">${recEmoji} ${recAction}</div>
-    <div class="an-conf info-tap" style="color:${recColor}" onclick="infoConfianza(${conf},'${confLabel}','${tradeType}','${timing}',${contraTendencia})">Confianza: <strong>${confLabel}</strong> (${conf}/100) <span style="opacity:.5;font-size:11px">ⓘ</span></div>
+    <div class="an-action info-tap" style="color:${recColor}" onclick="if(window._lastAnalysis){var a=window._lastAnalysis;infoRiesgo(a.recAction,a.recColor,a.conf,a.tradeType,a.contraTendencia,a.timing,'')}">${recEmoji} ${recAction}</div>
+    <div class="an-conf info-tap" style="color:${recColor}" onclick="if(window._lastAnalysis){var a=window._lastAnalysis;infoConfianza(a.conf,a.confLabel,a.tradeType,a.timing,a.contraTendencia)}">Confianza: <strong>${confLabel}</strong> (${conf}/100) <span style="opacity:.5;font-size:11px">ⓘ</span></div>
     <div style="font-size:10px;color:var(--text2);margin-top:4px">${ticker} · ${pos} · ${tf} · ${ts}${isManual?' · <span style="color:#ffd100">manual</span>':' · <span style="color:#00aaff">auto</span>'}</div>
     <div style="display:flex;gap:6px;margin-top:7px;flex-wrap:wrap">
       <div style="background:${ttMeta.color}22;border:1px solid ${ttMeta.color}88;border-radius:6px;padding:4px 9px;font-size:11px;font-weight:800;color:${ttMeta.color}">
         ${ttMeta.emoji} ${ttMeta.label} — ${ttMeta.sub}
       </div>
       ${contraTendencia ? `<div style="background:rgba(255,209,0,.15);border:1px solid rgba(255,209,0,.5);border-radius:6px;padding:4px 9px;font-size:11px;font-weight:800;color:#ffd100">⚠️ Contra tendencia</div>` : ''}
-      ${timing !== 'optimal' ? `<div id="an-timing-badge" class="info-tap" onclick="infoRiesgo('${recAction}','${recColor}',${conf},'${tradeType}',${contraTendencia},'${timing}','')" style="background:${timingInfo.color}22;border:1px solid ${timingInfo.color}88;border-radius:6px;padding:4px 9px;font-size:11px;font-weight:800;color:${timingInfo.color}">
+      ${timing !== 'optimal' ? `<div id="an-timing-badge" class="info-tap" onclick="if(window._lastAnalysis){var a=window._lastAnalysis;infoRiesgo(a.recAction,a.recColor,a.conf,a.tradeType,a.contraTendencia,a.timing,'')}" style="background:${timingInfo.color}22;border:1px solid ${timingInfo.color}88;border-radius:6px;padding:4px 9px;font-size:11px;font-weight:800;color:${timingInfo.color}">
         ${timingInfo.emoji} ${timingInfo.label} <span style="opacity:.5">ⓘ</span>
       </div>` : `<div id="an-timing-badge"></div>`}
     </div>
@@ -2969,7 +2980,7 @@ function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
   ${dirCompare}
 
   <div class="an-grid">
-    <div class="an-cell info-tap" onclick="infoSesgoPerfil('${bias}','${biasLabel}')">
+    <div class="an-cell info-tap" onclick="if(window._lastAnalysis){var a=window._lastAnalysis;infoSesgoPerfil(a.bias,a.biasLabel)}">
       <div class="an-cell-lbl">Sesgo mercado <span style="opacity:.5">ⓘ</span></div>
       <div class="an-cell-val" style="color:${biasColor}">${biasLabel}</div>
     </div>
@@ -2977,11 +2988,11 @@ function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
       <div class="an-cell-lbl">Estado movimiento <span style="opacity:.5">ⓘ</span></div>
       <div class="an-cell-val" style="color:#00c853">P0 — temprano</div>
     </div>
-    <div class="an-cell info-tap" onclick="if(window._lastAuto)infoScore(${scoreRaw},0,'${tradeType}',window._lastAuto.conditionsShort)">
+    <div class="an-cell info-tap" onclick="if(window._lastAuto&&window._lastAnalysis){var a=window._lastAnalysis;infoScore(a.scoreRaw,0,a.tradeType,window._lastAuto.conditionsShort)}">
       <div class="an-cell-lbl">Score mkt <span style="opacity:.5">ⓘ</span></div>
       <div class="an-cell-val" style="color:${tierAdjusted==='fuerte'?'#00c853':tierAdjusted==='medio'?'#ffd100':'#ff6b00'}">${scoreRaw}/7${scoreAdj[tradeType]!==0?` <span style="font-size:10px;color:${scoreAdj[tradeType]>0?'#00c853':'#ff3d57'}">(${scoreAdj[tradeType]>0?'+':''}${scoreAdj[tradeType]})</span>`:''} · ${tierAdjusted}</div>
     </div>
-    <div class="an-cell info-tap" onclick="infoAgotamiento(${exhEntry},'${exhL.label.replace(/[🟢🟡🟠🔴] /,'')}','${exhL.col}')">
+    <div class="an-cell info-tap" onclick="if(window._lastAnalysis){var a=window._lastAnalysis;infoAgotamiento(a.exhEntry,a.exhLabel,a.exhCol)}">
       <div class="an-cell-lbl">Agotamiento <span style="opacity:.5">ⓘ</span></div>
       <div class="an-cell-val" style="color:${exhL.col}">${exhEntry}/100 · ${exhL.label.replace(/[🟢🟡🟠🔴] /,'')}</div>
     </div>
