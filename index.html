@@ -3081,59 +3081,7 @@ function renderOpenTrades(){
       </div>
 
       <!-- ── DETAIL (colapsable) ── -->
-      ${isExpanded?`
-      <div style="margin-top:10px;border-top:1px solid var(--border);padding-top:10px">
-        <!-- PRICES ROW -->
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:6px;margin-bottom:8px">
-          <div class="open-price-box">
-            <div class="open-price-lbl">Entrada</div>
-            <div class="open-price-val" style="color:#ff6b00;font-size:13px">$${t.entrada?fmtPriceShort(t.entrada):'—'}</div>
-          </div>
-          <div class="open-price-box">
-            <div class="open-price-lbl">${livePrice?'<span class="live-dot"></span>Precio':'Guardado'}</div>
-            <div class="open-price-val" style="color:${pctColor};font-size:13px">$${priceForCalc?fmtPriceShort(priceForCalc):'—'}</div>
-          </div>
-          <div class="open-price-box">
-            <div class="open-price-lbl">Margen</div>
-            <div class="open-price-val" style="font-size:13px">$${t.margen}</div>
-          </div>
-          <div class="open-price-box">
-            <div class="open-price-lbl">⏱ Abierto</div>
-            <div class="open-price-val" style="font-size:12px;color:var(--text2)">${timeStr}</div>
-          </div>
-        </div>
-        ${t.obs?`<div style="margin-bottom:8px;font-size:11px;color:var(--text2);font-style:italic;padding:0 2px">${t.obs}</div>`:''}
-        ${tickerSemaphoreHTML(t, tickerChangeCache[t.ticker]||null)}
-        ${trailingAlertHTML(t, livePct)}
-        ${(()=>{
-          const tp = getMomentumTP(t.ticker, t.pos);
-          if(!tp) return '';
-          return `<div style="background:${tp.tpBg};border:1px solid ${tp.tpBorder};border-radius:8px;padding:8px 10px;margin-top:8px" onclick="event.stopPropagation()">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
-              <div style="font-size:11px;font-weight:900;color:${tp.tpColor}">${tp.tpLabel}</div>
-              <div style="font-size:10px;font-weight:800;background:${tp.tpBg};color:${tp.tpColor};border:1px solid ${tp.tpBorder};border-radius:5px;padding:1px 7px">${tp.tpDetail}</div>
-            </div>
-            <div style="font-size:10px;color:var(--text2);line-height:1.4">${tp.estrategia}</div>
-            ${tp.trailingNote}
-          </div>`;
-        })()}
-        ${renderTPProbBlock(t, livePct)}
-        <!-- Recomendación completa -->
-        <div style="display:flex;align-items:center;gap:8px;background:${rec.bg};border:1px solid ${rec.border};border-radius:8px;padding:8px 10px;margin-top:8px">
-          <div style="flex:1">
-            <div style="font-size:12px;font-weight:900;color:${rec.color}">${rec.action}</div>
-            <div style="font-size:10px;color:var(--text2);margin-top:1px">${rec.reason}</div>
-          </div>
-          ${cev?`<div style="text-align:right;flex-shrink:0"><div style="font-size:9px;color:var(--text2);font-weight:700">EV HIST</div><div style="font-size:13px;font-weight:900;color:${cev.ev>=0?'#00c853':'#ff3d57'}">${cev.ev>=0?'+':''}${cev.ev.toFixed(1)}%</div><div style="font-size:8px;color:var(--text2)">${cev.sources} fuentes</div></div>`:''}
-        </div>
-        <!-- Botones -->
-        <div style="display:flex;gap:6px;margin-top:10px" onclick="event.stopPropagation()">
-          <button class="btn btn-dark btn-sm" style="flex:1;font-size:12px" onclick="loadTradeForEdit('${t.id}')">✏️ Editar</button>
-          <button class="btn btn-dark btn-sm" style="flex:1;font-size:12px" onclick="openMCP('${t.id}',false)">📉 Cierre parcial</button>
-          <button class="btn btn-dark btn-sm" style="flex:1;font-size:12px" onclick="openPromedio('${t.id}')">➕ Promediar</button>
-          <button class="btn btn-orange btn-sm" style="flex:1;font-size:12px" onclick="openMCP('${t.id}',true)">✅ Cerrar</button>
-        </div>
-      </div>`:''}
+      ${detailHTML}
     </div>`;
   }).join('');
   // render KPI projection
