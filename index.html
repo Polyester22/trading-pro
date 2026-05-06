@@ -2651,6 +2651,8 @@ async function runTickerAnalysis(){
     tf  = auto.tf;
   }
 
+  const _autoForModal = !analyzerManual ? autoDetectDirection(tc) : null;
+  window._lastAuto = _autoForModal;
   document.getElementById('an-result').innerHTML = buildAnalysisHTML(ticker, pos, tf, tc, isManual);
   // Store last analysis state for RSI badge contextualisation
   _lastAnalysisState.pos = pos;
@@ -2911,11 +2913,11 @@ function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
   // ── DIRECTION comparison (only in auto mode) ──────────────────────────────
   const dirCompare = !isManual ? `
     <div style="display:flex;gap:6px;margin-bottom:10px">
-      <div class="info-tap" onclick="infoScore(${auto.sLong},${scoreAdj[tradeType]||0},'${tradeType}',${JSON.stringify(auto.conditionsLong||[])})" style="flex:1;background:${auto.sLong>=auto.sShort?'rgba(0,200,83,.1)':'var(--card)'};border:1.5px solid ${auto.sLong>=auto.sShort?'rgba(0,200,83,.4)':'var(--border)'};border-radius:8px;padding:8px;text-align:center">
+      <div class="info-tap" onclick="if(window._lastAuto)infoScore(window._lastAuto.sLong,0,'long',window._lastAuto.conditionsLong)" style="flex:1;background:${auto.sLong>=auto.sShort?'rgba(0,200,83,.1)':'var(--card)'};border:1.5px solid ${auto.sLong>=auto.sShort?'rgba(0,200,83,.4)':'var(--border)'};border-radius:8px;padding:8px;text-align:center">
         <div style="font-size:9px;color:var(--text2);font-weight:700;margin-bottom:3px">LONG score <span style="opacity:.5">ⓘ</span></div>
         <div style="font-size:18px;font-weight:900;color:${auto.sLong>=5?'#00c853':auto.sLong>=3?'#ffd100':'#9999b8'}">${auto.sLong}/7</div>
       </div>
-      <div class="info-tap" onclick="infoScore(${auto.sShort},${scoreAdj[tradeType]||0},'${tradeType}',${JSON.stringify(auto.conditionsShort||[])})" style="flex:1;background:${auto.sShort>auto.sLong?'rgba(255,61,87,.1)':'var(--card)'};border:1.5px solid ${auto.sShort>auto.sLong?'rgba(255,61,87,.4)':'var(--border)'};border-radius:8px;padding:8px;text-align:center">
+      <div class="info-tap" onclick="if(window._lastAuto)infoScore(window._lastAuto.sShort,0,'short',window._lastAuto.conditionsShort)" style="flex:1;background:${auto.sShort>auto.sLong?'rgba(255,61,87,.1)':'var(--card)'};border:1.5px solid ${auto.sShort>auto.sLong?'rgba(255,61,87,.4)':'var(--border)'};border-radius:8px;padding:8px;text-align:center">
         <div style="font-size:9px;color:var(--text2);font-weight:700;margin-bottom:3px">SHORT score <span style="opacity:.5">ⓘ</span></div>
         <div style="font-size:18px;font-weight:900;color:${auto.sShort>=5?'#ff3d57':auto.sShort>=3?'#ffd100':'#9999b8'}">${auto.sShort}/7</div>
       </div>
@@ -2975,7 +2977,7 @@ function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
       <div class="an-cell-lbl">Estado movimiento <span style="opacity:.5">ⓘ</span></div>
       <div class="an-cell-val" style="color:#00c853">P0 — temprano</div>
     </div>
-    <div class="an-cell info-tap" onclick="infoScore(${scoreRaw},${scoreAdj[tradeType]||0},'${tradeType}',${JSON.stringify(auto.conditionsShort||[])})">
+    <div class="an-cell info-tap" onclick="if(window._lastAuto)infoScore(${scoreRaw},0,'${tradeType}',window._lastAuto.conditionsShort)">
       <div class="an-cell-lbl">Score mkt <span style="opacity:.5">ⓘ</span></div>
       <div class="an-cell-val" style="color:${tierAdjusted==='fuerte'?'#00c853':tierAdjusted==='medio'?'#ffd100':'#ff6b00'}">${scoreRaw}/7${scoreAdj[tradeType]!==0?` <span style="font-size:10px;color:${scoreAdj[tradeType]>0?'#00c853':'#ff3d57'}">(${scoreAdj[tradeType]>0?'+':''}${scoreAdj[tradeType]})</span>`:''} · ${tierAdjusted}</div>
     </div>
