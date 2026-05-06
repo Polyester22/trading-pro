@@ -8903,40 +8903,164 @@ async function fetchAndInterpretChart(ticker, tf) {
       }
     }
 
+    // Store interp for safe onclick access — avoids quote escaping hell
+    window._lastInterp = interp;
     el.innerHTML = `<div style="border-top:1px solid var(--border);margin-top:8px;padding-top:10px">
       <div style="font-size:10px;font-weight:800;color:#00aaff;text-transform:uppercase;letter-spacing:.5px;margin-bottom:7px">📊 Análisis técnico · ${symbol} ${interval}</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:8px">
-        <div style="background:var(--surface2);border-radius:7px;padding:7px 9px;font-size:10px">
-          <div style="color:var(--text2);font-weight:700;margin-bottom:2px">RSI 7</div>
+        <div class="info-tap" onclick="infoRSI(${interp.rsi})" style="background:var(--surface2);border-radius:7px;padding:7px 9px;font-size:10px">
+          <div style="color:var(--text2);font-weight:700;margin-bottom:2px">RSI 7 <span style="opacity:.5">ⓘ</span></div>
           <div style="font-size:14px;font-weight:900;color:${interp.rsi>70?'#ff3d57':interp.rsi<30?'#00c853':'#ffd100'}">${interp.rsi.toFixed(0)}</div>
           <div style="color:var(--text2);font-size:9px">${interp.rsi>70?'Sobrecomprado':interp.rsi<30?'Sobrevendido':'Neutral'}</div>
         </div>
-        <div style="background:var(--surface2);border-radius:7px;padding:7px 9px;font-size:10px">
-          <div style="color:var(--text2);font-weight:700;margin-bottom:2px">MACD</div>
+        <div class="info-tap" onclick="infoMACD(${interp.macd},'${interp.macdSignal}')" style="background:var(--surface2);border-radius:7px;padding:7px 9px;font-size:10px">
+          <div style="color:var(--text2);font-weight:700;margin-bottom:2px">MACD <span style="opacity:.5">ⓘ</span></div>
           <div style="font-size:14px;font-weight:900;color:${interp.macd>0?'#00c853':'#ff3d57'}">${interp.macd>=0?'+':''}${interp.macd.toFixed(4)}</div>
           <div style="color:var(--text2);font-size:9px">${interp.macdSignal}</div>
         </div>
-        <div style="background:var(--surface2);border-radius:7px;padding:7px 9px;font-size:10px">
-          <div style="color:var(--text2);font-weight:700;margin-bottom:2px">Tendencia</div>
+        <div class="info-tap" onclick="infoTendencia('${interp.trend}','${interp.vsSMA}')" style="background:var(--surface2);border-radius:7px;padding:7px 9px;font-size:10px">
+          <div style="color:var(--text2);font-weight:700;margin-bottom:2px">Tendencia <span style="opacity:.5">ⓘ</span></div>
           <div style="font-size:13px;font-weight:900;color:${interp.trend==='alcista'?'#00c853':interp.trend==='bajista'?'#ff3d57':'#ffd100'}">${interp.trend.toUpperCase()}</div>
           <div style="color:var(--text2);font-size:9px">vs SMA20 · ${interp.vsSMA}</div>
         </div>
-        <div style="background:var(--surface2);border-radius:7px;padding:7px 9px;font-size:10px">
-          <div style="color:var(--text2);font-weight:700;margin-bottom:2px">Volumen</div>
+        <div class="info-tap" onclick="infoVolumen('${interp.volSignal}')" style="background:var(--surface2);border-radius:7px;padding:7px 9px;font-size:10px">
+          <div style="color:var(--text2);font-weight:700;margin-bottom:2px">Volumen <span style="opacity:.5">ⓘ</span></div>
           <div style="font-size:13px;font-weight:900;color:${interp.volSignal==='alto'?'#ff6b00':'var(--text2)'}">${interp.volSignal.toUpperCase()}</div>
           <div style="color:var(--text2);font-size:9px">vs media 20 velas</div>
         </div>
       </div>
       <div style="font-size:11px;font-weight:700;color:var(--text);line-height:1.7">
-        <div>📊 <strong>Estructura:</strong> ${interp.estructura}</div>
-        <div>🎯 <strong>Zonas clave:</strong> ${interp.zonas}</div>
-        <div>📈 <strong>Señal:</strong> ${interp.señal}</div>
-        <div>⚠️ <strong>Riesgo:</strong> ${interp.riesgo}</div>
+        <div class="info-tap" onclick="if(window._lastInterp)infoEstructura(window._lastInterp.estructura,window._lastInterp.zonas,window._lastInterp.señal,window._lastInterp.riesgo)">📊 <strong>Estructura:</strong> ${interp.estructura} <span style="opacity:.4">ⓘ</span></div>
+        <div class="info-tap" onclick="if(window._lastInterp)infoEstructura(window._lastInterp.estructura,window._lastInterp.zonas,window._lastInterp.señal,window._lastInterp.riesgo)">🎯 <strong>Zonas clave:</strong> ${interp.zonas} <span style="opacity:.4">ⓘ</span></div>
+        <div class="info-tap" onclick="if(window._lastInterp)infoEstructura(window._lastInterp.estructura,window._lastInterp.zonas,window._lastInterp.señal,window._lastInterp.riesgo)">📈 <strong>Señal:</strong> ${interp.señal} <span style="opacity:.4">ⓘ</span></div>
+        <div class="info-tap" onclick="if(window._lastInterp)infoEstructura(window._lastInterp.estructura,window._lastInterp.zonas,window._lastInterp.señal,window._lastInterp.riesgo)">⚠️ <strong>Riesgo:</strong> ${interp.riesgo} <span style="opacity:.4">ⓘ</span></div>
       </div>
     </div>`;
   } catch(e) {
     el.innerHTML = `<div style="font-size:11px;color:var(--text2);padding:6px;border-top:1px solid var(--border);margin-top:8px">⚠️ Gráfico no disponible: ${e.message}</div>`;
   }
+}
+
+
+function infoRSI(rsi){
+  const state = rsi>70?'Sobrecomprado':rsi<30?'Sobrevendido':'Neutral';
+  const col   = rsi>70?'#ff3d57':rsi<30?'#00c853':'#ffd100';
+  const tradeType = _lastAnalysisState.tradeType;
+  const pos       = _lastAnalysisState.pos;
+  const forShort  = rsi > 70 && pos === 'Short';
+  const forLong   = rsi < 30 && pos === 'Long';
+  const contextNote = forShort
+    ? '<div style="margin-top:8px;padding:8px;background:rgba(0,200,83,.08);border:1px solid rgba(0,200,83,.3);border-radius:8px;font-size:12px;color:#00c853;font-weight:800">✅ RSI sobrecomprado + Short = posible agotamiento alcista — señal favorable para tu dirección</div>'
+    : forLong
+    ? '<div style="margin-top:8px;padding:8px;background:rgba(0,200,83,.08);border:1px solid rgba(0,200,83,.3);border-radius:8px;font-size:12px;color:#00c853;font-weight:800">✅ RSI sobrevendido + Long = posible agotamiento bajista — señal favorable para tu dirección</div>'
+    : (rsi>70||rsi<30) ? '<div style="margin-top:8px;padding:8px;background:rgba(255,61,87,.08);border:1px solid rgba(255,61,87,.3);border-radius:8px;font-size:12px;color:#ff3d57;font-weight:800">⚠️ RSI extremo en contra de tu dirección — riesgo de extensión del movimiento contrario</div>'
+    : '';
+  showInfoModal(
+    `RSI 7 — ${rsi.toFixed(0)} · ${state}`,
+    'Índice de Fuerza Relativa (período 7 velas)',
+    `<div class="im-section"><div class="im-label">¿Qué es el RSI?</div>
+    Mide la <strong>velocidad y magnitud</strong> de los movimientos de precio recientes. Oscila entre 0 y 100. Valores extremos sugieren que el movimiento puede estar agotado.</div>
+    <div class="im-section"><div class="im-label">Valor actual</div>
+    <div style="font-size:22px;font-weight:900;color:${col}">${rsi.toFixed(0)}</div>
+    <div style="color:${col};font-weight:800">${state}</div>
+    ${contextNote}
+    </div>
+    <div class="im-section"><div class="im-label">Escala de interpretación</div>
+    <div class="im-row"><span>&gt; 70</span><span style="color:#ff3d57;font-weight:800">Sobrecomprado — posible reversión bajista</span></div>
+    <div class="im-row"><span>50–70</span><span style="color:#ffd100;font-weight:800">Territorio alcista — momentum activo</span></div>
+    <div class="im-row"><span>30–50</span><span style="color:#ffd100;font-weight:800">Territorio bajista — presión vendedora</span></div>
+    <div class="im-row"><span>&lt; 30</span><span style="color:#00c853;font-weight:800">Sobrevendido — posible reversión alcista</span></div>
+    </div>
+    <div class="im-section"><div class="im-label">Por qué período 7</div>
+    El RSI 7 es más <strong>reactivo</strong> que el RSI 14 estándar. Genera señales más rápidas y es más útil en timeframes bajos (5m–1h) donde los movimientos son más veloces.</div>`
+  );
+}
+
+function infoMACD(macd, macdSignal){
+  const col = macd>0?'#00c853':'#ff3d57';
+  const isCross = macdSignal.includes('Cruce');
+  const crossNote = isCross ? `<div style="margin-top:8px;padding:8px;background:rgba(0,170,255,.08);border:1px solid rgba(0,170,255,.3);border-radius:8px;font-size:12px;color:#00aaff;font-weight:800">⚡ ${macdSignal} — señal de cambio de momentum</div>` : '';
+  showInfoModal(
+    `MACD — ${macd>=0?'+':''}${macd.toFixed(4)}`,
+    'Moving Average Convergence/Divergence (12, 26, 9)',
+    `<div class="im-section"><div class="im-label">¿Qué es el MACD?</div>
+    Mide la diferencia entre dos medias móviles exponenciales (EMA12 - EMA26). Cuando el MACD cruza la señal (EMA9 del MACD), indica un posible cambio de momentum.</div>
+    <div class="im-section"><div class="im-label">Valor actual</div>
+    <div style="font-size:20px;font-weight:900;color:${col}">${macd>=0?'+':''}${macd.toFixed(4)}</div>
+    <div style="color:var(--text2);font-weight:800;margin-top:3px">${macdSignal}</div>
+    ${crossNote}
+    </div>
+    <div class="im-section"><div class="im-label">Cómo leerlo</div>
+    <div class="im-row"><span>MACD &gt; 0</span><span style="color:#00c853;font-weight:800">Tendencia alcista</span></div>
+    <div class="im-row"><span>MACD &lt; 0</span><span style="color:#ff3d57;font-weight:800">Tendencia bajista</span></div>
+    <div class="im-row"><span>Cruce alcista</span><span style="color:#00c853;font-weight:800">MACD cruza señal hacia arriba — compra</span></div>
+    <div class="im-row"><span>Cruce bajista</span><span style="color:#ff3d57;font-weight:800">MACD cruza señal hacia abajo — venta</span></div>
+    </div>
+    <div class="im-section"><div class="im-label">Limitación</div>El MACD es un indicador <strong>rezagado</strong> — confirma tendencias ya iniciadas, no las predice. Más útil combinado con RSI y estructura de precio.</div>`
+  );
+}
+
+function infoTendencia(trend, vsSMA){
+  const col = trend==='alcista'?'#00c853':trend==='bajista'?'#ff3d57':'#ffd100';
+  const desc = trend==='alcista'
+    ? 'El precio se encuentra <strong>por encima de la SMA20</strong>. La tendencia de corto plazo es alcista. Los Longs tienen estructura a favor.'
+    : trend==='bajista'
+    ? 'El precio se encuentra <strong>por debajo de la SMA20</strong>. La tendencia de corto plazo es bajista. Los Shorts tienen estructura a favor.'
+    : 'El precio oscila <strong>alrededor de la SMA20</strong>. No hay tendencia clara definida. Mayor riesgo de señales falsas.';
+  showInfoModal(
+    `Tendencia: ${trend.toUpperCase()}`,
+    'Dirección del precio vs SMA20 (media móvil 20 velas)',
+    `<div class="im-section"><div class="im-label">¿Qué es la SMA20?</div>
+    La media móvil simple de las últimas 20 velas. Actúa como <strong>línea de referencia</strong> de la tendencia de corto plazo. Precio por encima = alcista. Por debajo = bajista.</div>
+    <div class="im-section"><div class="im-label">Estado actual</div>
+    <div style="font-size:18px;font-weight:900;color:${col};margin-bottom:6px">${trend.toUpperCase()}</div>
+    <div>${desc}</div>
+    <div style="margin-top:6px;font-size:12px;color:var(--text2)">${vsSMA}</div>
+    </div>
+    <div class="im-section"><div class="im-label">Por qué importa para tu trade</div>
+    Operar en la dirección de la tendencia aumenta la probabilidad de éxito. Un Short con tendencia bajista tiene más probabilidad de alcanzar el TP que uno contra tendencia.</div>
+    <div class="im-section"><div class="im-label">Limitación</div>La SMA20 mide solo el <strong>corto plazo</strong>. Para tendencias más estructurales se usa SMA50 o SMA200. En crypto, las tendencias se revierten con más frecuencia que en otros mercados.</div>`
+  );
+}
+
+function infoVolumen(volSignal){
+  const col = volSignal==='alto'?'#ff6b00':'var(--text2)';
+  const desc = volSignal==='alto'
+    ? 'El volumen actual está <strong>por encima de la media de las últimas 20 velas</strong>. Esto valida el movimiento — hay participación real del mercado detrás del precio.'
+    : 'El volumen está <strong>por debajo o cerca de la media</strong>. Movimientos con bajo volumen son menos confiables y más susceptibles a reversión.';
+  showInfoModal(
+    `Volumen: ${volSignal.toUpperCase()}`,
+    'Volumen actual vs media de las últimas 20 velas',
+    `<div class="im-section"><div class="im-label">¿Por qué importa el volumen?</div>
+    El volumen es la <strong>gasolina del movimiento</strong>. Un precio que sube/baja con alto volumen tiene más probabilidad de continuar. Sin volumen, los movimientos se agotan rápido.</div>
+    <div class="im-section"><div class="im-label">Estado actual</div>
+    <div style="font-size:18px;font-weight:900;color:${col};margin-bottom:6px">${volSignal.toUpperCase()}</div>
+    <div>${desc}</div>
+    </div>
+    <div class="im-section"><div class="im-label">Cómo usarlo</div>
+    <div class="im-row"><span>Ruptura + volumen alto</span><span style="color:#00c853;font-weight:800">Señal fuerte — válida</span></div>
+    <div class="im-row"><span>Ruptura + volumen bajo</span><span style="color:#ffd100;font-weight:800">Desconfiar — puede ser fakeout</span></div>
+    <div class="im-row"><span>Consolidación + volumen bajo</span><span style="color:var(--text2);font-weight:800">Normal — esperar catalizador</span></div>
+    <div class="im-row"><span>Caída + volumen alto</span><span style="color:#ff3d57;font-weight:800">Capitulación — cuidado con reversión</span></div>
+    </div>`
+  );
+}
+
+function infoEstructura(estructura, zonas, señal, riesgo){
+  showInfoModal(
+    'Estructura técnica del precio',
+    'Análisis de medias móviles, Bollinger y zonas clave',
+    `<div class="im-section"><div class="im-label">Estructura</div><div style="font-size:13px">${estructura}</div></div>
+    <div class="im-section"><div class="im-label">Zonas clave</div><div style="font-size:13px">${zonas}</div></div>
+    <div class="im-section"><div class="im-label">Señal detectada</div><div style="font-size:13px">${señal}</div></div>
+    <div class="im-section"><div class="im-label">Factor de riesgo</div><div style="font-size:13px;color:#ffd100">${riesgo}</div></div>
+    <div class="im-section"><div class="im-label">Glosario</div>
+    <div class="im-row"><span>SMA20/50</span><span style="font-weight:700">Media móvil — soporte/resistencia dinámica</span></div>
+    <div class="im-row"><span>Bollinger</span><span style="font-weight:700">Bandas de volatilidad — precio dentro/fuera</span></div>
+    <div class="im-row"><span>Soporte</span><span style="font-weight:700">Zona donde el precio rebota hacia arriba</span></div>
+    <div class="im-row"><span>Resistencia</span><span style="font-weight:700">Zona donde el precio rebota hacia abajo</span></div>
+    </div>`
+  );
 }
 
 function calcEMA(data, period) {
