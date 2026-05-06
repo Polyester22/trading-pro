@@ -2653,7 +2653,14 @@ async function runTickerAnalysis(){
 
   const _autoForModal = !analyzerManual ? autoDetectDirection(tc) : null;
   window._lastAuto = _autoForModal;
-  document.getElementById('an-result').innerHTML = buildAnalysisHTML(ticker, pos, tf, tc, isManual);
+  try {
+    document.getElementById('an-result').innerHTML = buildAnalysisHTML(ticker, pos, tf, tc, isManual);
+  } catch(buildErr) {
+    document.getElementById('an-result').innerHTML = 
+      '<div style="font-size:12px;color:#ff3d57;padding:12px;background:rgba(255,61,87,.1);border-radius:8px">⚠️ Error interno: ' + buildErr.message + '</div>';
+    console.error('buildAnalysisHTML error:', buildErr);
+    return;
+  }
   // Store last analysis state for RSI badge contextualisation
   _lastAnalysisState.pos = pos;
   renderAnLog();
@@ -2952,14 +2959,19 @@ function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
 
 
   // ── Store all analysis data for safe onclick access ──────────────────────
-  window._lastAnalysis = {
-    bias, biasLabel, tradeType, timing, contraTendencia,
-    conf, confLabel, recAction, recColor,
-    scoreRaw, exhEntry,
-    exhLabel: (exhL.label||'').replace(/[^\w\s\.\-\/\(\)%]\s*/g,'').trim(),
-    exhCol: exhL.col,
-    tf, ticker, pos
-  };
+  try {
+    window._lastAnalysis = {
+      bias: bias||'neutral', biasLabel: String(biasLabel||''), 
+      tradeType: String(tradeType||''), timing: String(timing||'optimal'), 
+      contraTendencia: !!contraTendencia,
+      conf: conf||0, confLabel: String(confLabel||''), 
+      recAction: String(recAction||''), recColor: String(recColor||''),
+      scoreRaw: scoreRaw||0, exhEntry: exhEntry||0,
+      exhLabel: String((exhL&&exhL.label)||'').replace(/[\u{1F534}\u{1F7E0}\u{1F7E1}\u{1F7E2}]/gu,' ').replace(/\s+/g,' ').trim(),
+      exhCol: String((exhL&&exhL.col)||'var(--text2)'),
+      tf: String(tf||''), ticker: String(ticker||''), pos: String(pos||'')
+    };
+  } catch(_e) { window._lastAnalysis = null; }
 
   return `
   <div class="an-rec" style="background:${recBg};border:2px solid ${recBorder};margin-bottom:10px">
