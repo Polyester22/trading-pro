@@ -2913,16 +2913,16 @@ function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
   // ── DIRECTION comparison (only in auto mode) ──────────────────────────────
   const dirCompare = !isManual ? `
     <div style="display:flex;gap:6px;margin-bottom:10px">
-      <div class="info-tap" onclick="if(window._lastAuto)infoScore(window._lastAuto.sLong,0,'long',window._lastAuto.conditionsLong)" style="flex:1;background:${auto.sLong>=auto.sShort?'rgba(0,200,83,.1)':'var(--card)'};border:1.5px solid ${auto.sLong>=auto.sShort?'rgba(0,200,83,.4)':'var(--border)'};border-radius:8px;padding:8px;text-align:center">
-        <div style="font-size:9px;color:var(--text2);font-weight:700;margin-bottom:3px">LONG score <span style="opacity:.5">ⓘ</span></div>
+      <div class="" data-info="score-long" style="flex:1;background:${auto.sLong>=auto.sShort?'rgba(0,200,83,.1)':'var(--card)'};border:1.5px solid ${auto.sLong>=auto.sShort?'rgba(0,200,83,.4)':'var(--border)'};border-radius:8px;padding:8px;text-align:center">
+        <div style="font-size:9px;color:var(--text2);font-weight:700;margin-bottom:3px">LONG score <span style="opacity:.4;font-size:9px">ⓘ</span></div>
         <div style="font-size:18px;font-weight:900;color:${auto.sLong>=5?'#00c853':auto.sLong>=3?'#ffd100':'#9999b8'}">${auto.sLong}/7</div>
       </div>
-      <div class="info-tap" onclick="if(window._lastAuto)infoScore(window._lastAuto.sShort,0,'short',window._lastAuto.conditionsShort)" style="flex:1;background:${auto.sShort>auto.sLong?'rgba(255,61,87,.1)':'var(--card)'};border:1.5px solid ${auto.sShort>auto.sLong?'rgba(255,61,87,.4)':'var(--border)'};border-radius:8px;padding:8px;text-align:center">
-        <div style="font-size:9px;color:var(--text2);font-weight:700;margin-bottom:3px">SHORT score <span style="opacity:.5">ⓘ</span></div>
+      <div class="" data-info="score-short" style="flex:1;background:${auto.sShort>auto.sLong?'rgba(255,61,87,.1)':'var(--card)'};border:1.5px solid ${auto.sShort>auto.sLong?'rgba(255,61,87,.4)':'var(--border)'};border-radius:8px;padding:8px;text-align:center">
+        <div style="font-size:9px;color:var(--text2);font-weight:700;margin-bottom:3px">SHORT score <span style="opacity:.4;font-size:9px">ⓘ</span></div>
         <div style="font-size:18px;font-weight:900;color:${auto.sShort>=5?'#ff3d57':auto.sShort>=3?'#ffd100':'#9999b8'}">${auto.sShort}/7</div>
       </div>
-      <div class="info-tap" onclick="if(window._lastAnalysis)infoTimeframe(window._lastAnalysis.tf)" style="flex:1;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:8px;text-align:center">
-        <div style="font-size:9px;color:var(--text2);font-weight:700;margin-bottom:3px">TF sugerido <span style="opacity:.5">ⓘ</span></div>
+      <div class="" data-info="tf" style="flex:1;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:8px;text-align:center">
+        <div style="font-size:9px;color:var(--text2);font-weight:700;margin-bottom:3px">TF sugerido <span style="opacity:.4;font-size:9px">ⓘ</span></div>
         <div style="font-size:18px;font-weight:900;color:#ff6b00">${tf}</div>
       </div>
     </div>` : `<div style="font-size:9px;color:#ffd100;background:rgba(255,209,0,.07);border:1px solid rgba(255,209,0,.25);border-radius:6px;padding:5px 10px;margin-bottom:10px">⚠️ Modo manual — analizando hipótesis ${pos} · ${tf}</div>`;
@@ -2955,24 +2955,24 @@ function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
   window._lastAnalysis = {
     bias, biasLabel, tradeType, timing, contraTendencia,
     conf, confLabel, recAction, recColor,
-    scoreRaw, scoreAdj, exhEntry,
-    exhLabel: exhL.label.replace(/[\u{1F7E2}\u{1F7E1}\u{1F7E0}\u{1F534}] /u,''),
+    scoreRaw, exhEntry,
+    exhLabel: (exhL.label||'').replace(/[^\w\s\.\-\/\(\)%]\s*/g,'').trim(),
     exhCol: exhL.col,
     tf, ticker, pos
   };
 
   return `
   <div class="an-rec" style="background:${recBg};border:2px solid ${recBorder};margin-bottom:10px">
-    <div class="an-action info-tap" style="color:${recColor}" onclick="if(window._lastAnalysis){var a=window._lastAnalysis;infoRiesgo(a.recAction,a.recColor,a.conf,a.tradeType,a.contraTendencia,a.timing,'')}">${recEmoji} ${recAction}</div>
-    <div class="an-conf info-tap" style="color:${recColor}" onclick="if(window._lastAnalysis){var a=window._lastAnalysis;infoConfianza(a.conf,a.confLabel,a.tradeType,a.timing,a.contraTendencia)}">Confianza: <strong>${confLabel}</strong> (${conf}/100) <span style="opacity:.5;font-size:11px">ⓘ</span></div>
+    <div class="an-action info-tap" style="color:${recColor}" data-info="riesgo" style="cursor:pointer">${recEmoji} ${recAction}</div>
+    <div class="an-conf info-tap" style="color:${recColor}" data-info="confianza">Confianza: <strong>${confLabel}</strong> (${conf}/100) <span style="opacity:.5;font-size:11px">ⓘ</span></div>
     <div style="font-size:10px;color:var(--text2);margin-top:4px">${ticker} · ${pos} · ${tf} · ${ts}${isManual?' · <span style="color:#ffd100">manual</span>':' · <span style="color:#00aaff">auto</span>'}</div>
     <div style="display:flex;gap:6px;margin-top:7px;flex-wrap:wrap">
       <div style="background:${ttMeta.color}22;border:1px solid ${ttMeta.color}88;border-radius:6px;padding:4px 9px;font-size:11px;font-weight:800;color:${ttMeta.color}">
         ${ttMeta.emoji} ${ttMeta.label} — ${ttMeta.sub}
       </div>
       ${contraTendencia ? `<div style="background:rgba(255,209,0,.15);border:1px solid rgba(255,209,0,.5);border-radius:6px;padding:4px 9px;font-size:11px;font-weight:800;color:#ffd100">⚠️ Contra tendencia</div>` : ''}
-      ${timing !== 'optimal' ? `<div id="an-timing-badge" class="info-tap" onclick="if(window._lastAnalysis){var a=window._lastAnalysis;infoRiesgo(a.recAction,a.recColor,a.conf,a.tradeType,a.contraTendencia,a.timing,'')}" style="background:${timingInfo.color}22;border:1px solid ${timingInfo.color}88;border-radius:6px;padding:4px 9px;font-size:11px;font-weight:800;color:${timingInfo.color}">
-        ${timingInfo.emoji} ${timingInfo.label} <span style="opacity:.5">ⓘ</span>
+      ${timing !== 'optimal' ? `<div id="an-timing-badge" class="" data-info="riesgo" style="background:${timingInfo.color}22;border:1px solid ${timingInfo.color}88;border-radius:6px;padding:4px 9px;font-size:11px;font-weight:800;color:${timingInfo.color}">
+        ${timingInfo.emoji} ${timingInfo.label} <span style="opacity:.4;font-size:9px">ⓘ</span>
       </div>` : `<div id="an-timing-badge"></div>`}
     </div>
   </div>
@@ -2980,20 +2980,20 @@ function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
   ${dirCompare}
 
   <div class="an-grid">
-    <div class="an-cell info-tap" onclick="if(window._lastAnalysis){var a=window._lastAnalysis;infoSesgoPerfil(a.bias,a.biasLabel)}">
-      <div class="an-cell-lbl">Sesgo mercado <span style="opacity:.5">ⓘ</span></div>
+    <div class="an-cell " data-info="sesgo">
+      <div class="an-cell-lbl">Sesgo mercado <span style="opacity:.4;font-size:9px">ⓘ</span></div>
       <div class="an-cell-val" style="color:${biasColor}">${biasLabel}</div>
     </div>
-    <div class="an-cell info-tap" onclick="infoEstadoMovimiento('temprano',1,null,0)">
-      <div class="an-cell-lbl">Estado movimiento <span style="opacity:.5">ⓘ</span></div>
+    <div class="an-cell " data-info="estado">
+      <div class="an-cell-lbl">Estado movimiento <span style="opacity:.4;font-size:9px">ⓘ</span></div>
       <div class="an-cell-val" style="color:#00c853">P0 — temprano</div>
     </div>
-    <div class="an-cell info-tap" onclick="if(window._lastAuto&&window._lastAnalysis){var a=window._lastAnalysis;infoScore(a.scoreRaw,0,a.tradeType,window._lastAuto.conditionsShort)}">
-      <div class="an-cell-lbl">Score mkt <span style="opacity:.5">ⓘ</span></div>
+    <div class="an-cell " data-info="score-mkt">
+      <div class="an-cell-lbl">Score mkt <span style="opacity:.4;font-size:9px">ⓘ</span></div>
       <div class="an-cell-val" style="color:${tierAdjusted==='fuerte'?'#00c853':tierAdjusted==='medio'?'#ffd100':'#ff6b00'}">${scoreRaw}/7${scoreAdj[tradeType]!==0?` <span style="font-size:10px;color:${scoreAdj[tradeType]>0?'#00c853':'#ff3d57'}">(${scoreAdj[tradeType]>0?'+':''}${scoreAdj[tradeType]})</span>`:''} · ${tierAdjusted}</div>
     </div>
-    <div class="an-cell info-tap" onclick="if(window._lastAnalysis){var a=window._lastAnalysis;infoAgotamiento(a.exhEntry,a.exhLabel,a.exhCol)}">
-      <div class="an-cell-lbl">Agotamiento <span style="opacity:.5">ⓘ</span></div>
+    <div class="an-cell " data-info="agotamiento">
+      <div class="an-cell-lbl">Agotamiento <span style="opacity:.4;font-size:9px">ⓘ</span></div>
       <div class="an-cell-val" style="color:${exhL.col}">${exhEntry}/100 · ${exhL.label.replace(/[🟢🟡🟠🔴] /,'')}</div>
     </div>
     <div class="an-cell" style="grid-column:1/-1;${contraTendencia?'background:rgba(255,209,0,.06);border:1px solid rgba(255,209,0,.25);border-radius:8px;':''}">
@@ -9585,6 +9585,27 @@ async function runTDAnalysis(){
     btn.disabled=false;btn.innerHTML='\u26a1 TD';
   }
 }
+
+
+// ── Info modal delegation — handles data-info clicks anywhere in page ──
+document.addEventListener('click', function(e){
+  var el = e.target.closest('[data-info]');
+  if(!el) return;
+  e.stopPropagation();
+  var key = el.dataset.info;
+  var a   = window._lastAnalysis;
+  var au  = window._lastAuto;
+  if(!a) return;
+  if(key === 'score-long'  && au) infoScore(au.sLong,  0, 'long',  au.conditionsLong  || []);
+  else if(key === 'score-short' && au) infoScore(au.sShort, 0, 'short', au.conditionsShort || []);
+  else if(key === 'score-mkt' && au) infoScore(a.scoreRaw, 0, a.tradeType, au.conditionsShort || []);
+  else if(key === 'tf')         infoTimeframe(a.tf);
+  else if(key === 'riesgo')     infoRiesgo(a.recAction, a.recColor, a.conf, a.tradeType, a.contraTendencia, a.timing, '');
+  else if(key === 'confianza')  infoConfianza(a.conf, a.confLabel, a.tradeType, a.timing, a.contraTendencia);
+  else if(key === 'sesgo')      infoSesgoPerfil(a.bias, a.biasLabel);
+  else if(key === 'estado')     infoEstadoMovimiento('temprano', 1, null, 0);
+  else if(key === 'agotamiento') infoAgotamiento(a.exhEntry, a.exhLabel, a.exhCol);
+});
 
 </script>
 
