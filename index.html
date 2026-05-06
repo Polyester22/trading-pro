@@ -2961,7 +2961,7 @@ function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
   // ── Store all analysis data for safe onclick access ──────────────────────
   try {
     window._lastAnalysis = {
-      bias: bias||'neutral', biasLabel: String(biasLabel||''), 
+      bias: trendBias||'neutral', biasLabel: String(trendBiasLabel||''), 
       tradeType: String(tradeType||''), timing: String(timing||'optimal'), 
       contraTendencia: !!contraTendencia,
       conf: conf||0, confLabel: String(confLabel||''), 
@@ -2992,7 +2992,7 @@ function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
   ${dirCompare}
 
   <div class="an-grid">
-    <div class="an-cell info-tap" data-info="sesgo" data-bias="${bias}" data-biaslabel="${biasLabel}" onclick="handleInfoTap(this)">
+    <div class="an-cell info-tap" data-info="sesgo" data-bias="${trendBias}" data-biaslabel="${trendBiasLabel}" onclick="handleInfoTap(this)">
       <div class="an-cell-lbl">Sesgo mercado <span style="opacity:.4;font-size:9px">ⓘ</span></div>
       <div class="an-cell-val" style="color:${biasColor}">${biasLabel}</div>
     </div>
