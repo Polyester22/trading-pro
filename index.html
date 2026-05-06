@@ -257,6 +257,24 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
   display:block;
   padding-right:8px; /* leave room for resize handle */
 }
+
+/* ── Info Tooltip Modal ─────────────────────────────────────────── */
+#info-modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:9999;display:none;align-items:flex-end;justify-content:center;padding:0}
+#info-modal-overlay.open{display:flex}
+#info-modal{background:var(--card);border:1px solid var(--border);border-radius:16px 16px 0 0;width:100%;max-width:520px;max-height:80vh;overflow-y:auto;padding:20px 18px 32px;box-shadow:0 -4px 24px rgba(0,0,0,.4)}
+#info-modal-title{font-family:'Nunito',sans-serif;font-size:16px;font-weight:900;color:var(--text);margin-bottom:4px;line-height:1.2}
+#info-modal-subtitle{font-size:11px;font-weight:700;color:var(--text2);margin-bottom:14px}
+#info-modal-body{font-size:13px;color:var(--text);line-height:1.7;font-weight:600}
+#info-modal-body strong{color:#ff6b00}
+#info-modal-body .im-section{margin-bottom:12px}
+#info-modal-body .im-label{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:var(--text2);margin-bottom:4px}
+#info-modal-body .im-row{display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px}
+#info-modal-body .im-row:last-child{border:none}
+#info-modal-body .im-check{font-size:13px}
+#info-modal-close{display:block;width:100%;margin-top:16px;padding:12px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--text);font-family:'Nunito',sans-serif;font-size:14px;font-weight:800;cursor:pointer;text-align:center}
+.info-tap{cursor:pointer;transition:opacity .15s}
+.info-tap:active{opacity:.7}
+
 </style>
 </head>
 <body>
@@ -2570,7 +2588,23 @@ function autoDetectDirection(tc){
   else if(abs1h > 0.5)                  tf = '1h';
   else                                   tf = '4h';   // slow/flat → higher TF
 
-  return { pos, score, sLong, sShort, tf, c1h, c4h, c24, rs, accel, amp, btc1h };
+  // ── Expose conditions for infoScore modal ──────────────────────────────
+  const conditionsLong = [
+    {label:`4H +${c4h.toFixed(2)}% (precio subiendo)`,     ok: c4h > 0},
+    {label:`1H +${c1h.toFixed(2)}% (momentum reciente)`,   ok: c1h > 0},
+    {label:`24H +${c24.toFixed(2)}% (tendencia diaria)`,   ok: c24 > 0},
+    {label:`RS ${rs.toFixed(2)}% (fortaleza vs BTC)`,       ok: rs > 0},
+    {label:`Aceleración ${accel.toFixed(3)} (momentum)`,    ok: accel > 0.05},
+    {label:`${amp}% altcoins alcistas (mercado)`,           ok: amp >= 60},
+  ];
+  const conditionsShort = [
+    {label:`RS ${rs.toFixed(2)}% (debilidad vs BTC)`,       ok: rs < 0},
+    {label:`1H ${c1h.toFixed(2)}% (momentum bajista)`,     ok: c1h < 0},
+    {label:`Aceleración ${accel.toFixed(3)} (bajando)`,     ok: accel < -0.05},
+    {label:`24H ${c24.toFixed(2)}% (tendencia diaria)`,    ok: c24 < 0},
+    {label:`4H ${c4h.toFixed(2)}% (estructura bajista)`,   ok: c4h < 0},
+  ];
+  return { pos, score, sLong, sShort, tf, c1h, c4h, c24, rs, accel, amp, btc1h, conditionsLong, conditionsShort };
 }
 
 async function runTickerAnalysis(){
@@ -2877,16 +2911,16 @@ function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
   // ── DIRECTION comparison (only in auto mode) ──────────────────────────────
   const dirCompare = !isManual ? `
     <div style="display:flex;gap:6px;margin-bottom:10px">
-      <div style="flex:1;background:${auto.sLong>=auto.sShort?'rgba(0,200,83,.1)':'var(--card)'};border:1.5px solid ${auto.sLong>=auto.sShort?'rgba(0,200,83,.4)':'var(--border)'};border-radius:8px;padding:8px;text-align:center">
-        <div style="font-size:9px;color:var(--text2);font-weight:700;margin-bottom:3px">LONG score</div>
+      <div class="info-tap" onclick="infoScore(${auto.sLong},${scoreAdj[tradeType]||0},'${tradeType}',${JSON.stringify(auto.conditionsLong||[])})" style="flex:1;background:${auto.sLong>=auto.sShort?'rgba(0,200,83,.1)':'var(--card)'};border:1.5px solid ${auto.sLong>=auto.sShort?'rgba(0,200,83,.4)':'var(--border)'};border-radius:8px;padding:8px;text-align:center">
+        <div style="font-size:9px;color:var(--text2);font-weight:700;margin-bottom:3px">LONG score <span style="opacity:.5">ⓘ</span></div>
         <div style="font-size:18px;font-weight:900;color:${auto.sLong>=5?'#00c853':auto.sLong>=3?'#ffd100':'#9999b8'}">${auto.sLong}/7</div>
       </div>
-      <div style="flex:1;background:${auto.sShort>auto.sLong?'rgba(255,61,87,.1)':'var(--card)'};border:1.5px solid ${auto.sShort>auto.sLong?'rgba(255,61,87,.4)':'var(--border)'};border-radius:8px;padding:8px;text-align:center">
-        <div style="font-size:9px;color:var(--text2);font-weight:700;margin-bottom:3px">SHORT score</div>
+      <div class="info-tap" onclick="infoScore(${auto.sShort},${scoreAdj[tradeType]||0},'${tradeType}',${JSON.stringify(auto.conditionsShort||[])})" style="flex:1;background:${auto.sShort>auto.sLong?'rgba(255,61,87,.1)':'var(--card)'};border:1.5px solid ${auto.sShort>auto.sLong?'rgba(255,61,87,.4)':'var(--border)'};border-radius:8px;padding:8px;text-align:center">
+        <div style="font-size:9px;color:var(--text2);font-weight:700;margin-bottom:3px">SHORT score <span style="opacity:.5">ⓘ</span></div>
         <div style="font-size:18px;font-weight:900;color:${auto.sShort>=5?'#ff3d57':auto.sShort>=3?'#ffd100':'#9999b8'}">${auto.sShort}/7</div>
       </div>
-      <div style="flex:1;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:8px;text-align:center">
-        <div style="font-size:9px;color:var(--text2);font-weight:700;margin-bottom:3px">TF sugerido</div>
+      <div class="info-tap" onclick="infoTimeframe('${tf}')" style="flex:1;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:8px;text-align:center">
+        <div style="font-size:9px;color:var(--text2);font-weight:700;margin-bottom:3px">TF sugerido <span style="opacity:.5">ⓘ</span></div>
         <div style="font-size:18px;font-weight:900;color:#ff6b00">${tf}</div>
       </div>
     </div>` : `<div style="font-size:9px;color:#ffd100;background:rgba(255,209,0,.07);border:1px solid rgba(255,209,0,.25);border-radius:6px;padding:5px 10px;margin-bottom:10px">⚠️ Modo manual — analizando hipótesis ${pos} · ${tf}</div>`;
@@ -2916,16 +2950,16 @@ function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
 
   return `
   <div class="an-rec" style="background:${recBg};border:2px solid ${recBorder};margin-bottom:10px">
-    <div class="an-action" style="color:${recColor}">${recEmoji} ${recAction}</div>
-    <div class="an-conf" style="color:${recColor}">Confianza: <strong>${confLabel}</strong> (${conf}/100)</div>
+    <div class="an-action info-tap" style="color:${recColor}" onclick="infoRiesgo('${recAction}','${recColor}',${conf},'${tradeType}',${contraTendencia},'${timing}','')">${recEmoji} ${recAction}</div>
+    <div class="an-conf info-tap" style="color:${recColor}" onclick="infoConfianza(${conf},'${confLabel}','${tradeType}','${timing}',${contraTendencia})">Confianza: <strong>${confLabel}</strong> (${conf}/100) <span style="opacity:.5;font-size:11px">ⓘ</span></div>
     <div style="font-size:10px;color:var(--text2);margin-top:4px">${ticker} · ${pos} · ${tf} · ${ts}${isManual?' · <span style="color:#ffd100">manual</span>':' · <span style="color:#00aaff">auto</span>'}</div>
     <div style="display:flex;gap:6px;margin-top:7px;flex-wrap:wrap">
       <div style="background:${ttMeta.color}22;border:1px solid ${ttMeta.color}88;border-radius:6px;padding:4px 9px;font-size:11px;font-weight:800;color:${ttMeta.color}">
         ${ttMeta.emoji} ${ttMeta.label} — ${ttMeta.sub}
       </div>
       ${contraTendencia ? `<div style="background:rgba(255,209,0,.15);border:1px solid rgba(255,209,0,.5);border-radius:6px;padding:4px 9px;font-size:11px;font-weight:800;color:#ffd100">⚠️ Contra tendencia</div>` : ''}
-      ${timing !== 'optimal' ? `<div id="an-timing-badge" style="background:${timingInfo.color}22;border:1px solid ${timingInfo.color}88;border-radius:6px;padding:4px 9px;font-size:11px;font-weight:800;color:${timingInfo.color}">
-        ${timingInfo.emoji} ${timingInfo.label}
+      ${timing !== 'optimal' ? `<div id="an-timing-badge" class="info-tap" onclick="infoRiesgo('${recAction}','${recColor}',${conf},'${tradeType}',${contraTendencia},'${timing}','')" style="background:${timingInfo.color}22;border:1px solid ${timingInfo.color}88;border-radius:6px;padding:4px 9px;font-size:11px;font-weight:800;color:${timingInfo.color}">
+        ${timingInfo.emoji} ${timingInfo.label} <span style="opacity:.5">ⓘ</span>
       </div>` : `<div id="an-timing-badge"></div>`}
     </div>
   </div>
@@ -2933,20 +2967,20 @@ function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
   ${dirCompare}
 
   <div class="an-grid">
-    <div class="an-cell">
-      <div class="an-cell-lbl">Sesgo mercado</div>
+    <div class="an-cell info-tap" onclick="infoSesgoPerfil('${bias}','${biasLabel}')">
+      <div class="an-cell-lbl">Sesgo mercado <span style="opacity:.5">ⓘ</span></div>
       <div class="an-cell-val" style="color:${biasColor}">${biasLabel}</div>
     </div>
-    <div class="an-cell">
-      <div class="an-cell-lbl">Estado movimiento</div>
+    <div class="an-cell info-tap" onclick="infoEstadoMovimiento('temprano',1,null,0)">
+      <div class="an-cell-lbl">Estado movimiento <span style="opacity:.5">ⓘ</span></div>
       <div class="an-cell-val" style="color:#00c853">P0 — temprano</div>
     </div>
-    <div class="an-cell">
-      <div class="an-cell-lbl">Score mkt</div>
+    <div class="an-cell info-tap" onclick="infoScore(${scoreRaw},${scoreAdj[tradeType]||0},'${tradeType}',${JSON.stringify(auto.conditionsShort||[])})">
+      <div class="an-cell-lbl">Score mkt <span style="opacity:.5">ⓘ</span></div>
       <div class="an-cell-val" style="color:${tierAdjusted==='fuerte'?'#00c853':tierAdjusted==='medio'?'#ffd100':'#ff6b00'}">${scoreRaw}/7${scoreAdj[tradeType]!==0?` <span style="font-size:10px;color:${scoreAdj[tradeType]>0?'#00c853':'#ff3d57'}">(${scoreAdj[tradeType]>0?'+':''}${scoreAdj[tradeType]})</span>`:''} · ${tierAdjusted}</div>
     </div>
-    <div class="an-cell">
-      <div class="an-cell-lbl">Agotamiento</div>
+    <div class="an-cell info-tap" onclick="infoAgotamiento(${exhEntry},'${exhL.label.replace(/[🟢🟡🟠🔴] /,'')}','${exhL.col}')">
+      <div class="an-cell-lbl">Agotamiento <span style="opacity:.5">ⓘ</span></div>
       <div class="an-cell-val" style="color:${exhL.col}">${exhEntry}/100 · ${exhL.label.replace(/[🟢🟡🟠🔴] /,'')}</div>
     </div>
     <div class="an-cell" style="grid-column:1/-1;${contraTendencia?'background:rgba(255,209,0,.06);border:1px solid rgba(255,209,0,.25);border-radius:8px;':''}">
@@ -9024,6 +9058,179 @@ document.addEventListener('DOMContentLoaded', ()=>{
   if(!al||staleSecs>3600) computeAutoLearning();
 });
 
+// ── Info Modal ──────────────────────────────────────────────────────────────
+function showInfoModal(title, subtitle, bodyHTML){
+  document.getElementById('info-modal-title').textContent   = title;
+  document.getElementById('info-modal-subtitle').textContent = subtitle;
+  document.getElementById('info-modal-body').innerHTML      = bodyHTML;
+  document.getElementById('info-modal-overlay').classList.add('open');
+}
+function closeInfoModal(){
+  document.getElementById('info-modal-overlay').classList.remove('open');
+}
+// Swipe down to close
+(function(){
+  let sy=0;
+  const m=document.getElementById('info-modal');
+  if(!m)return;
+  m.addEventListener('touchstart',e=>{sy=e.touches[0].clientY;},{passive:true});
+  m.addEventListener('touchend',e=>{if(e.changedTouches[0].clientY-sy>60)closeInfoModal();},{passive:true});
+})();
+
+// ── Info content library ────────────────────────────────────────────────────
+function infoScore(scoreRaw, scoreAdj, tradeType, conditions){
+  const total = scoreRaw;
+  const adj   = scoreAdj;
+  const rows  = (conditions||[]).map(c=>`<div class="im-row"><span>${c.label}</span><span class="im-check">${c.ok?'✅':'❌'}</span></div>`).join('');
+  const adjNote = adj!==0 ? `<div class="im-section"><div class="im-label">Ajuste por tipo</div><div style="font-size:12px;color:${adj>0?'#00c853':'#ff3d57'};font-weight:800">${adj>0?'+':''}${adj} por setup ${tradeType} → score efectivo ${Math.max(0,Math.min(7,total+adj))}/7</div></div>` : '';
+  showInfoModal(
+    `Score ${total}/7 — ${total>=5?'Fuerte':total>=3?'Medio':'Débil'}`,
+    'Condiciones del mercado alineadas con la dirección del trade',
+    `<div class="im-section"><div class="im-label">¿Qué es el score?</div>
+    Son <strong>7 filtros técnicos independientes</strong>. Cada uno que se cumple suma 1 punto. No es una probabilidad de ganar, sino una medida de cuántas señales técnicas están alineadas con la dirección del trade.</div>
+    <div class="im-section"><div class="im-label">Condiciones evaluadas</div>${rows}</div>
+    ${adjNote}
+    <div class="im-section"><div class="im-label">Cómo interpretar</div>
+    <div class="im-row"><span>6–7 / 7</span><span style="color:#00c853;font-weight:800">Fuerte — alta alineación</span></div>
+    <div class="im-row"><span>4–5 / 7</span><span style="color:#ffd100;font-weight:800">Medio — señal moderada</span></div>
+    <div class="im-row"><span>0–3 / 7</span><span style="color:#ff6b00;font-weight:800">Débil — evitar o reducir tamaño</span></div>
+    </div>`
+  );
+}
+
+function infoEstadoMovimiento(stage, ratio, avgDurMins, totalMins){
+  const stageMap = {
+    temprano:  {col:'#00c853', title:'P0 — Temprano', desc:'El trade acaba de comenzar o está en la fase inicial del movimiento esperado. El precio aún tiene recorrido hacia el TP.'},
+    normal:    {col:'#ffd100', title:'P1 — Normal', desc:'El trade está dentro de la duración típica de este setup. Sin urgencia de salida, pero seguir monitoreando.'},
+    extendido: {col:'#ff9100', title:'P2 — Extendido', desc:'El trade supera la duración promedio histórica de este setup. Considerar toma parcial de ganancias o mover SL.'},
+    tardio:    {col:'#ff3d57', title:'P3 — Tardío', desc:'El movimiento está en fase avanzada/agotamiento. Riesgo de reversión elevado. Gestión defensiva.'},
+  };
+  const s = stageMap[stage] || stageMap['normal'];
+  const durLine = avgDurMins ? `<div class="im-row"><span>Duración típica del setup</span><span style="font-weight:800">${avgDurMins>=60?(avgDurMins/60).toFixed(1)+'h':avgDurMins.toFixed(0)+'m'}</span></div>` : '';
+  const curLine = totalMins ? `<div class="im-row"><span>Duración actual del trade</span><span style="font-weight:800">${totalMins>=60?(totalMins/60).toFixed(1)+'h':totalMins+'m'}</span></div>` : '';
+  showInfoModal(
+    s.title,
+    'Posición temporal dentro del ciclo de vida del trade',
+    `<div class="im-section"><div class="im-label">Estado actual</div><div style="font-size:13px;color:${s.col};font-weight:800;margin-bottom:6px">${s.title}</div><div>${s.desc}</div></div>
+    <div class="im-section"><div class="im-label">Datos del trade</div>${durLine}${curLine}</div>
+    <div class="im-section"><div class="im-label">Fases</div>
+    <div class="im-row"><span>P0 Temprano</span><span style="color:#00c853;font-weight:800">< 40% duración típica</span></div>
+    <div class="im-row"><span>P1 Normal</span><span style="color:#ffd100;font-weight:800">40–130% duración típica</span></div>
+    <div class="im-row"><span>P2 Extendido</span><span style="color:#ff9100;font-weight:800">130–200% duración típica</span></div>
+    <div class="im-row"><span>P3 Tardío</span><span style="color:#ff3d57;font-weight:800">> 200% duración típica</span></div>
+    </div>`
+  );
+}
+
+function infoAgotamiento(score, label, col){
+  const interp = score>=70 ? 'El movimiento tiene alta probabilidad de reversión o pausa. Evitar nuevas entradas en la dirección actual.'
+    : score>=50 ? 'Señales de desaceleración. El trade puede seguir pero con menor impulso. Considerar trailing o cierre parcial.'
+    : score>=30 ? 'Movimiento saludable con algo de uso de fuerza. Momentum activo pero vigilar.'
+    : 'Movimiento fresco con bajo agotamiento. Buenas condiciones para continuación del trade.';
+  showInfoModal(
+    `Agotamiento ${score}/100`,
+    'Mide qué tan "gastado" está el movimiento actual',
+    `<div class="im-section"><div class="im-label">¿Qué mide?</div>
+    Combina <strong>extensión de precio</strong> (MFE vs histórico), <strong>momentum</strong> (aceleración/desaceleración), <strong>duración</strong> y señales de <strong>sobrecompra/sobreventa</strong> para estimar si el movimiento tiene combustible restante.</div>
+    <div class="im-section"><div class="im-label">Interpretación actual</div><div style="color:${col};font-weight:800;font-size:13px">${score}/100 — ${label}</div><div style="margin-top:6px">${interp}</div></div>
+    <div class="im-section"><div class="im-label">Escala</div>
+    <div class="im-row"><span>0–30</span><span style="color:#00c853;font-weight:800">Puede seguir — momentum activo</span></div>
+    <div class="im-row"><span>30–50</span><span style="color:#ffd100;font-weight:800">Cuidado — vigilar señales</span></div>
+    <div class="im-row"><span>50–70</span><span style="color:#ff9100;font-weight:800">Alto riesgo — evaluar salida</span></div>
+    <div class="im-row"><span>70–100</span><span style="color:#ff3d57;font-weight:800">Agotado — no entrar / cerrar</span></div>
+    </div>`
+  );
+}
+
+function infoSesgoPerfil(bias, biasLabel){
+  const desc = bias==='alcista' ? 'BTC y el mercado cripto están en momento alcista. El sesgo favorece posiciones Long.'
+    : bias==='bajista' ? 'BTC y el mercado cripto están en momento bajista. El sesgo favorece posiciones Short.'
+    : 'No hay sesgo claro de mercado. Las condiciones son mixtas o en consolidación.';
+  const col  = bias==='alcista' ? '#00c853' : bias==='bajista' ? '#ff3d57' : '#ffd100';
+  showInfoModal(
+    `Sesgo de mercado: ${biasLabel}`,
+    'Dirección dominante del mercado cripto en las últimas 24h',
+    `<div class="im-section"><div class="im-label">Estado actual</div><div style="color:${col};font-weight:800;font-size:14px">${biasLabel}</div><div style="margin-top:6px">${desc}</div></div>
+    <div class="im-section"><div class="im-label">¿Por qué importa?</div>
+    Operar a favor del sesgo de mercado aumenta la probabilidad de éxito. Un short en mercado bajista tiene mucho más respaldo que un short en mercado alcista fuerte.</div>
+    <div class="im-section"><div class="im-label">Fuente</div>BTC momentum (1H, 4H, 24H) + correlación del par analizado con BTC + RS (fortaleza relativa vs BTC).</div>`
+  );
+}
+
+function infoConfianza(conf, confLabel, tradeType, timing, contraTendencia){
+  const factors = [];
+  if(timing==='late')      factors.push({label:'Timing tardío',         effect:'Limita conf. a máx 44%', neg:true});
+  if(timing==='extended')  factors.push({label:'Timing extendido',      effect:'Limita conf. a máx 62%', neg:true});
+  if(tradeType==='agotado')factors.push({label:'Setup agotado',         effect:'Limita conf. a máx 28% (58% con RSI)',neg:true});
+  if(tradeType==='rango')  factors.push({label:'Mercado en rango',      effect:'Limita conf. a máx 38%', neg:true});
+  if(tradeType==='ruptura')factors.push({label:'Setup ruptura',         effect:'+10% bonus',             neg:false});
+  if(contraTendencia)      factors.push({label:'Contra tendencia',      effect:'-20% y máx 50%',         neg:true});
+  const rows = factors.map(f=>`<div class="im-row"><span>${f.label}</span><span style="color:${f.neg?'#ff3d57':'#00c853'};font-weight:800">${f.effect}</span></div>`).join('');
+  showInfoModal(
+    `Confianza ${conf}/100 — ${confLabel}`,
+    'Puntuación combinada de calidad de la oportunidad',
+    `<div class="im-section"><div class="im-label">¿Qué es?</div>
+    Es una síntesis de <strong>score de mercado</strong>, <strong>calidad del setup</strong>, <strong>historial del par/estrategia</strong> y <strong>contexto de timing</strong>. A diferencia del Score (condiciones técnicas), la Confianza incluye penalizaciones por riesgo.</div>
+    ${factors.length?`<div class="im-section"><div class="im-label">Ajustes aplicados</div>${rows}</div>`:''}
+    <div class="im-section"><div class="im-label">Cómo usar</div>
+    <div class="im-row"><span>75–100%</span><span style="color:#00c853;font-weight:800">Alta — tamaño completo</span></div>
+    <div class="im-row"><span>50–74%</span><span style="color:#ffd100;font-weight:800">Media — tamaño reducido</span></div>
+    <div class="im-row"><span>0–49%</span><span style="color:#ff3d57;font-weight:800">Baja — evitar o scalp mínimo</span></div>
+    </div>`
+  );
+}
+
+function infoTimeframe(tf){
+  const tfData = {
+    '1m':  {tipo:'Ultra scalp',   dur:'Segundos–minutos',  ruido:'Muy alto',  target:'0.3–0.8%',  desc:'Movimientos muy rápidos. Alta frecuencia de señales falsas. Solo para traders experimentados con gestión automática.'},
+    '3m':  {tipo:'Scalp rápido',  dur:'2–15 min',          ruido:'Alto',      target:'0.5–1.2%',  desc:'Ideal para movimientos de corto plazo en alta volatilidad. Requiere atención constante.'},
+    '5m':  {tipo:'Scalp',         dur:'5–45 min',          ruido:'Alto',      target:'0.8–2.5%',  desc:'Buen equilibrio entre velocidad y señal. Movimientos explosivos. Trades duran minutos a ~1 hora.'},
+    '15m': {tipo:'Scalp/Intraday',dur:'20 min–2h',         ruido:'Moderado',  target:'1.5–4%',    desc:'Más estructurado que 5m. Movimientos más limpios. Permite respirar el trade sin mucho ruido.'},
+    '30m': {tipo:'Intraday',      dur:'1–4h',              ruido:'Moderado',  target:'2–5%',      desc:'Setup intraday sólido. Menos señales falsas. Buen para tendencias del día.'},
+    '1h':  {tipo:'Intraday/Swing',dur:'2–12h',             ruido:'Bajo',      target:'3–7%',      desc:'Timeframe clásico para crypto. Movimientos significativos y bien definidos. Alta calidad de señal.'},
+    '2h':  {tipo:'Swing corto',   dur:'4–24h',             ruido:'Bajo',      target:'4–9%',      desc:'Estructura de precio clara. Ideal para swings de un día.'},
+    '4h':  {tipo:'Swing',         dur:'1–3 días',          ruido:'Muy bajo',  target:'5–15%',     desc:'Movimientos estructurales. Menos ruido. Targets más amplios. Requiere más capital y paciencia.'},
+    '1d':  {tipo:'Swing largo',   dur:'3–14 días',         ruido:'Mínimo',    target:'10–30%',    desc:'Análisis macro. Movimientos de días a semanas. Para traders con visión de mediano plazo.'},
+  };
+  const d = tfData[tf] || {tipo:'Desconocido', dur:'—', ruido:'—', target:'—', desc:'Timeframe no catalogado.'};
+  showInfoModal(
+    `Timeframe ${tf} — ${d.tipo}`,
+    'Horizonte temporal y características del movimiento esperado',
+    `<div class="im-section"><div>${d.desc}</div></div>
+    <div class="im-section"><div class="im-label">Características</div>
+    <div class="im-row"><span>Tipo de trade</span><span style="color:#ff6b00;font-weight:800">${d.tipo}</span></div>
+    <div class="im-row"><span>Duración esperada</span><span style="font-weight:800">${d.dur}</span></div>
+    <div class="im-row"><span>Nivel de ruido</span><span style="font-weight:800">${d.ruido}</span></div>
+    <div class="im-row"><span>Target típico (sin lev)</span><span style="color:#00c853;font-weight:800">${d.target}</span></div>
+    </div>
+    <div class="im-section"><div class="im-label">Regla general</div>Cuanto más bajo el TF, más ruido, más velocidad y menos recorrido. Cuanto más alto, más estructura y más paciencia requerida.</div>`
+  );
+}
+
+function infoRiesgo(recAction, recColor, conf, tradeType, contraTendencia, timing, rsiContext){
+  const factors = [];
+  if(timing==='late')      factors.push('⏰ Timing tardío — posible entrada en extensión');
+  if(timing==='extended')  factors.push('⏰ Timing extendido — movimiento acelerado');
+  if(tradeType==='agotado' && !rsiContext) factors.push('📉 Setup agotado — alta probabilidad de reversión');
+  if(contraTendencia)      factors.push('↙️ Operando contra la tendencia estructural');
+  if(conf < 50)            factors.push('📊 Confianza baja — señales insuficientes');
+  if(rsiContext==='confirm') factors.push('✅ RSI extremo confirma agotamiento — favorable para esta dirección');
+  if(rsiContext==='risk')    factors.push('⚠️ RSI extremo en contra — riesgo de extensión');
+  const rows = factors.map(f=>`<div class="im-row" style="font-size:12px">${f}</div>`).join('') || '<div class="im-row">Sin factores de riesgo elevado detectados</div>';
+  showInfoModal(
+    recAction.replace(/[🟢🟡🟠🔴⚠️✅⚡↔→]/g,'').trim(),
+    'Factores que determinan el nivel de riesgo',
+    `<div class="im-section"><div class="im-label">Factores detectados</div>${rows}</div>
+    <div class="im-section"><div class="im-label">Nivel de riesgo</div>
+    <div class="im-row"><span>RIESGO ALTO</span><span style="color:#ff3d57;font-weight:800">Múltiples señales negativas</span></div>
+    <div class="im-row"><span>RIESGO MEDIO</span><span style="color:#ffd100;font-weight:800">Algunos factores adversos</span></div>
+    <div class="im-row"><span>RIESGO BAJO</span><span style="color:#00c853;font-weight:800">Condiciones favorables</span></div>
+    </div>
+    <div class="im-section"><div class="im-label">Gestión recomendada</div>A mayor riesgo, menor tamaño de posición y TP más conservador. Nunca forzar una entrada cuando hay múltiples señales negativas.</div>`
+  );
+}
+
+
 // ═══════════════════════════════════════════════════════════
 // TRADINGLATINO LIVE ANALYSIS — EMA 10/55 · Squeeze · ADX
 // ═══════════════════════════════════════════════════════════
@@ -9243,6 +9450,17 @@ async function runTDAnalysis(){
 }
 
 </script>
+
+
+<!-- ── Info Tooltip Modal ── -->
+<div id="info-modal-overlay" onclick="if(event.target===this)closeInfoModal()">
+  <div id="info-modal">
+    <div id="info-modal-title"></div>
+    <div id="info-modal-subtitle"></div>
+    <div id="info-modal-body"></div>
+    <button id="info-modal-close" onclick="closeInfoModal()">Cerrar</button>
+  </div>
+</div>
 
 </body>
 </html>
