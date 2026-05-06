@@ -8985,16 +8985,12 @@ function tdCalcATR(ohlcv,period=14){
   return atr;
 }
 
-async function tdFetchKlines(symbol,interval,startMs,endMs){
-  const klines=[];let cur=startMs;
-  while(cur<endMs){
-    const url=`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&startTime=${cur}&endTime=${endMs}&limit=1000`;
-    const resp=await fetch(url);
-    if(!resp.ok){let msg=`Error ${resp.status}`;try{const j=await resp.json();msg=j.msg||msg;}catch{}throw new Error(msg);}
-    const data=await resp.json();if(!data.length)break;
-    klines.push(...data);if(data.length<1000)break;cur=data[data.length-1][0]+1;
-  }
-  return klines.map(k=>({time:k[0],open:parseFloat(k[1]),high:parseFloat(k[2]),low:parseFloat(k[3]),close:parseFloat(k[4]),volume:parseFloat(k[5])}));
+async function tdFetchKlines(symbol,interval){
+  const url=`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=300`;
+  const resp=await fetch(url);
+  if(!resp.ok){let msg=`Error ${resp.status}`;try{const j=await resp.json();msg=j.msg||msg;}catch{}throw new Error(msg);}
+  const data=await resp.json();
+  return data.map(k=>({time:k[0],open:parseFloat(k[1]),high:parseFloat(k[2]),low:parseFloat(k[3]),close:parseFloat(k[4]),volume:parseFloat(k[5])}));
 }
 
 function tdAnalyzeCombo(ohlcvEntry,ohlcvTrend){
@@ -9043,10 +9039,8 @@ function tdAnalyzeCombo(ohlcvEntry,ohlcvTrend){
 }
 
 const TD_COMBOS=[
-  {entry:'15m',trend:'1h',label:'15m/1h'},{entry:'15m',trend:'4h',label:'15m/4h'},
-  {entry:'30m',trend:'4h',label:'30m/4h'},{entry:'1h',trend:'4h',label:'1h/4h'},
-  {entry:'1h',trend:'1d',label:'1h/1d'},{entry:'4h',trend:'1d',label:'4h/1d'},
-  {entry:'4h',trend:'1w',label:'4h/1w'},{entry:'1d',trend:'1w',label:'1d/1w'},
+  {entry:'5m',trend:'15m',label:'5m/15m'},{entry:'15m',trend:'1h',label:'15m/1h'},
+  {entry:'1h',trend:'4h',label:'1h/4h'},{entry:'4h',trend:'1d',label:'4h/1d'},
 ];
 
 async function runTDAnalysis(){
@@ -9059,10 +9053,9 @@ async function runTDAnalysis(){
   res.innerHTML=`<div style="font-size:11px;color:var(--text2);padding:10px 0;display:flex;align-items:center;gap:8px"><span style="display:inline-block;width:12px;height:12px;border:2px solid var(--border);border-top-color:#ff6b00;border-radius:50%;animation:tdSpin .7s linear infinite"></span>Descargando datos TradingLatino\u2026</div>`;
 
   try{
-    const endMs=Date.now(),startMs=endMs-300*86400000;
     const tfsNeeded=[...new Set(TD_COMBOS.flatMap(c=>[c.entry,c.trend]))];
     const tfData={};
-    for(const tf of tfsNeeded)tfData[tf]=await tdFetchKlines(symbol,tf,startMs,endMs);
+    for(const tf of tfsNeeded)tfData[tf]=await tdFetchKlines(symbol,tf);
 
     const price=tfData['1h'][tfData['1h'].length-1].close;
     const prev=tfData['1h'][tfData['1h'].length-2].close;
