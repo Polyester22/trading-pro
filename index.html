@@ -420,8 +420,6 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
 
       <!-- Result area -->
       <div id="an-result"></div>
-
-      <!-- TradingLatino live analysis result -->
       <div id="td-result" style="margin-top:6px"></div>
 
       <!-- Interpretación visual automática del gráfico -->
@@ -3020,12 +3018,16 @@ function buildDetailHTML(t, livePrice, priceForCalc, pctColor, livePct, timeStr,
     : '';
   return '<div style="margin-top:10px;border-top:1px solid var(--border);padding-top:10px">'
     +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:6px;margin-bottom:8px">'
-    +'<div class="open-price-box"><div class="open-price-lbl">Entrada</div><div class="open-price-val" style="color:#ff6b00;font-size:13px">$'+(t.entrada?fmtPriceShort(t.entrada):'—')+'</div></div>'
-    +'<div class="open-price-box"><div class="open-price-lbl">'+(livePrice?'<span class="live-dot"></span>Precio':'Guardado')+'</div><div class="open-price-val" style="color:'+pctColor+';font-size:13px">$'+(priceForCalc?fmtPriceShort(priceForCalc):'—')+'</div></div>'
-    +'<div class="open-price-box"><div class="open-price-lbl">Margen</div><div class="open-price-val" style="font-size:13px">$'+t.margen+'</div></div>'
-    +'<div class="open-price-box"><div class="open-price-lbl">&#9201; Abierto</div><div class="open-price-val" style="font-size:12px;color:var(--text2)">'+timeStr+'</div></div>'
+    +'<div class="open-price-box"><div class="open-price-lbl">Entrada</div>'
+    +'<div class="open-price-val" style="color:#ff6b00;font-size:13px">$'+(t.entrada?fmtPriceShort(t.entrada):'—')+'</div></div>'
+    +'<div class="open-price-box"><div class="open-price-lbl">'+(livePrice?'<span class="live-dot"></span>Precio':'Guardado')+'</div>'
+    +'<div class="open-price-val" style="color:'+pctColor+';font-size:13px">$'+(priceForCalc?fmtPriceShort(priceForCalc):'—')+'</div></div>'
+    +'<div class="open-price-box"><div class="open-price-lbl">Margen</div>'
+    +'<div class="open-price-val" style="font-size:13px">$'+t.margen+'</div></div>'
+    +'<div class="open-price-box"><div class="open-price-lbl">&#9201; Abierto</div>'
+    +'<div class="open-price-val" style="font-size:12px;color:var(--text2)">'+timeStr+'</div></div>'
     +'</div>'
-    +(t.obs?'<div style="margin-bottom:8px;font-size:11px;color:var(--text2);font-style:italic">'+t.obs+'</div>':'')
+    +(t.obs?'<div style="margin-bottom:8px;font-size:11px;color:var(--text2);font-style:italic;padding:0 2px">'+t.obs+'</div>':'')
     +tickerSemaphoreHTML(t, tickerChangeCache[t.ticker]||null)
     +trailingAlertHTML(t, livePct)
     +tpBlock
@@ -3076,41 +3078,43 @@ function renderOpenTrades(){
     const mins=totalMins%60;
     const timeStr=days>0?`${days}d ${hrs}h`:hrs>0?`${hrs}h ${mins}m`:`${mins}m`;
     const timingClass=t.timing?'timing-'+t.timing.toLowerCase().replace(' ',''):'';
-    const rec=getTradeRecommendation(t,livePct,totalMins,tickerChangeCache[t.ticker]||null);
-    const cev=getCompositeEV(t);
-    const isExpanded=!!openCardExpanded[t.id];
+    const rec = getTradeRecommendation(t,livePct,totalMins,tickerChangeCache[t.ticker]||null);
+    const cev = getCompositeEV(t);
+    const isExpanded = !!openCardExpanded[t.id];
     const showPrice = pnlToggleState[t.id] === 'price';
-    const pricePct  = (t.entrada && priceForCalc && t.entrada > 0)
+    const pricePct = (t.entrada && priceForCalc && t.entrada > 0)
       ? (priceForCalc - t.entrada) / t.entrada * 100 * (t.pos==='Short' ? -1 : 1) : null;
     const displayPct = showPrice ? pricePct : livePct;
-    const levTag     = showPrice ? 'precio' : `x${t.lev||1}`;
+    const levTag = showPrice ? 'precio' : ('x'+(t.lev||1));
     const detailHTML = isExpanded ? buildDetailHTML(t, livePrice, priceForCalc, pctColor, livePct, timeStr, rec, cev) : '';
     return`<div class="open-card" onclick="toggleOpenCard('${t.id}',event)" style="cursor:pointer">
-      <div style="display:flex;align-items:center;gap:8px">
+      <div style="display:flex;align-items:stretch;gap:10px">
         <div style="flex:1;min-width:0">
-          <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:5px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
             <span class="open-card-ticker">${t.ticker}</span>
             <span class="badge badge-${t.pos.toLowerCase()}">${t.pos}</span>
+          </div>
+          <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:6px">
             <span class="open-tag">${t.temp}</span>
             <span class="open-tag">${t.estrategia}</span>
-            ${t.timing?"<span class=\"timing-badge "+timingClass+"\">"+t.timing+"</span>":""}
+            ${t.timing?`<span class="timing-badge ${timingClass}">${t.timing}</span>`:''}
           </div>
           <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
             <div style="font-size:12px;font-weight:900;color:${rec.color}">${rec.action}</div>
-            ${cev?"<div style=\"font-size:11px;font-weight:800;color:"+(cev.ev>=0?"#00c853":"#ff3d57")+";background:"+(cev.ev>=0?"rgba(0,200,83,.1)":"rgba(255,61,87,.1)")+";border-radius:4px;padding:1px 6px\">EV "+(cev.ev>=0?"+":"")+cev.ev.toFixed(1)+"%</div>":""}
+            ${cev?`<div style="font-size:11px;font-weight:800;color:${cev.ev>=0?'#00c853':'#ff3d57'};background:${cev.ev>=0?'rgba(0,200,83,.1)':'rgba(255,61,87,.1)'};border-radius:4px;padding:1px 6px">EV ${cev.ev>=0?'+':''}${cev.ev.toFixed(1)}%</div>`:''}
             <div style="font-size:10px;color:var(--text2)">${timeStr}</div>
           </div>
         </div>
         <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
-          <div onclick="event.stopPropagation();togglePnlView('${t.id}',event)" style="background:${bgResult};border:1.5px solid ${borderResult};border-radius:10px;padding:8px 12px;text-align:right;cursor:pointer">
-            <div style="font-size:9px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px">${livePrice?"<span class=\"live-dot\"></span>Live":"Resultado"}</div>
-            <div style="font-size:20px;font-weight:900;line-height:1;color:${pctColor}">${displayPct!==null?(displayPct>=0?"+":"")+displayPct.toFixed(2)+"%":"—"}</div>
-            <div style="display:flex;justify-content:flex-end;align-items:center;gap:4px;margin-top:2px">
-              <span style="font-size:9px;font-weight:800;color:${showPrice?"#00aaff":"var(--text2)"};background:${showPrice?"rgba(0,170,255,.12)":"rgba(153,153,184,.1)"};border-radius:3px;padding:1px 4px">${levTag}</span>
-              <span style="font-size:12px;font-weight:800;color:${pctColor}">${livePnl!==null?(livePnl>=0?"+":"")+"$"+Math.abs(livePnl).toFixed(2):"—"}</span>
+          <div onclick="event.stopPropagation();togglePnlView('${t.id}',event)" style="background:${bgResult};border:1.5px solid ${borderResult};border-radius:10px;padding:10px 14px;text-align:right;cursor:pointer;user-select:none">
+            <div style="font-size:9px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">${livePrice?'<span class="live-dot"></span>Live':'Resultado'}</div>
+            <div style="font-size:24px;font-weight:900;line-height:1;color:${pctColor}">${displayPct!==null?(displayPct>=0?'+':'')+displayPct.toFixed(2)+'%':'—'}</div>
+            <div style="display:flex;justify-content:flex-end;align-items:center;gap:5px;margin-top:3px">
+              <span style="font-size:10px;font-weight:800;color:${showPrice?'#00aaff':'var(--text2)'};background:${showPrice?'rgba(0,170,255,.12)':'rgba(153,153,184,.1)'};border-radius:4px;padding:1px 5px">${levTag}</span>
+              <span style="font-size:14px;font-weight:800;color:${pctColor}">${livePnl!==null?(livePnl>=0?'+':'')+'$'+Math.abs(livePnl).toFixed(2):'—'}</span>
             </div>
           </div>
-          <div style="font-size:14px;color:var(--text2);user-select:none;transform:rotate(${isExpanded?180:0}deg);transition:transform .2s">&#9660;</div>
+          <div style="font-size:16px;color:var(--text2);user-select:none;transition:transform .25s;transform:rotate(${isExpanded?180:0}deg)">&#9660;</div>
         </div>
       </div>
       ${detailHTML}
@@ -6163,214 +6167,233 @@ function updateOpenCount(){
 
 // ══ TRADE RECOMMENDATION ENGINE ══
 function getTradeRecommendation(t, livePct, totalMins, tc){
-  const closed=D.trades.filter(x=>!x.open&&x.resultado!==undefined);
-  const isLong=t.pos==='Long';
-  const pct=livePct||0;
-  const snap=t.anSnapshot||{};
+  const closed = D.trades.filter(x => !x.open && x.resultado !== undefined);
+  const isLong = t.pos === 'Long';
+  const pct = livePct || 0;
+  const snap = t.anSnapshot || {};
 
-  // ── TradeType del trade (guardado en snapshot o anotado) ──────────────────
-  const entryTT = t.tradeType || snap.tradeType || 'continuacion';
+  // ── Inputs básicos ────────────────────────────────────────────────────────
+  const entryTT  = t.tradeType || snap.tradeType || 'continuacion';
+  const alExh    = snap.agotamiento || 0;
+  const alConf   = snap.confianza   || 0;
+  const al       = loadAutoLearning();
 
-  // ── Detectar tradeType ACTUAL basado en live data (si disponible) ─────────
-  let currentTT = entryTT;
-  if(tc){
-    const c1h=tc.change1h||0, c4h=tc.change4h||0, c24=tc.change24h||0;
-    const accel=c1h-(c24/24);
-    const absAccelN=Math.abs(accel), absC1h=Math.abs(c1h), absC4h=Math.abs(c4h);
-    const snap_score=snap.scoreMkt||0;
-    const snap_exh=snap.agotamiento||0;
-    // Quick re-evaluation using same rules as analyzer
-    if(snap_exh>=70) currentTT='agotado';
-    else if(snap_score<=3&&absC1h<0.8&&absC4h<1.5) currentTT='rango';
-    else if(absAccelN>0.5&&absC1h>0.8&&pct>=0) currentTT='ruptura';
-    else currentTT='continuacion';
-  }
+  // ── Precio del ticker ─────────────────────────────────────────────────────
+  const has  = tc !== null && tc !== undefined;
+  const c1h  = has ? tc.change1h  : null;
+  const c4h  = has ? tc.change4h  : null;
+  const c24  = has ? tc.change24h : null;
+  const tkMov = has
+    ? ` · ${t.ticker} 1h:${c1h>=0?'+':''}${c1h.toFixed(1)}% 4h:${c4h>=0?'+':''}${c4h.toFixed(1)}%`
+    : '';
 
-  // ── Detectar transición de estado (entry → current) ───────────────────────
-  const stateTransition = entryTT !== currentTT ? `${entryTT} → ${currentTT}` : null;
-  const transitionMsg =
-    stateTransition === 'ruptura → continuacion' ? 'Movimiento ya iniciado — gestionar' :
-    stateTransition === 'continuacion → agotado'  ? 'Trade extendido — asegurar ganancias' :
-    stateTransition === 'ruptura → agotado'        ? '⚠️ Movimiento agotado desde ruptura' :
-    null;
+  // Momentum  (positivo = ticker subiendo)
+  const mom =
+    (c1h > 1  && c4h > 2)  ? 'strong_up'   :
+    (c1h < -1 && c4h < -2) ? 'strong_down'  :
+    c1h > 0.5               ? 'weak_up'      :
+    c1h < -0.5              ? 'weak_down'    : 'neutral';
 
-  // ── Mensaje dinámico por tipo ──────────────────────────────────────────────
-  const typeMsg={
-    ruptura:'Entraste temprano — dejar correr',
-    continuacion:'Movimiento en curso — gestionar',
-    agotado:'Extendido — asegurar ganancias',
-    rango:'Sin ventaja clara'
-  };
+  // ¿Momentum a favor del trade?
+  const momFavor =
+    isLong  ? (mom === 'strong_up'  || mom === 'weak_up')   :
+              (mom === 'strong_down' || mom === 'weak_down');
+  const momStrong =
+    isLong  ? mom === 'strong_up'   : mom === 'strong_down';
+  const momAgainst =
+    isLong  ? (mom === 'strong_down' || mom === 'weak_down') :
+              (mom === 'strong_up'   || mom === 'weak_up');
+  const momStrongAgainst =
+    isLong  ? mom === 'strong_down'  : mom === 'strong_up';
 
-  // ── Auto-learning modifier ────────────────────────────────────────────────
-  const al=loadAutoLearning();
-  const alExh=snap.agotamiento||0;
+  // ── Estadísticas históricas ───────────────────────────────────────────────
+  const similar  = closed.filter(x => x.estrategia === t.estrategia && x.pos === t.pos);
+  const tkTrades = closed.filter(x => x.ticker === t.ticker);
+  const tkPos    = tkTrades.filter(x => x.pos === t.pos);
+  const tkPosWR  = tkPos.length ? tkPos.filter(x => x.resultado > 0).length / tkPos.length : null;
+  const tkEV     = tkTrades.length ? tkTrades.reduce((s,x) => s+x.resultado, 0) / tkTrades.length : null;
+  const tkWins   = tkTrades.filter(x => x.resultado > 0);
+  const tkLosses = tkTrades.filter(x => x.resultado < 0);
+  const simWins  = similar.filter(x => x.resultado > 0);
+  const simLosses= similar.filter(x => x.resultado < 0);
+  const tkAvgTP  = tkWins.length  >= 3 ? tkWins.reduce((s,x)  => s+x.resultado,  0) / tkWins.length  : null;
+  const tkAvgSL  = tkLosses.length>= 3 ? Math.abs(tkLosses.reduce((s,x) => s+x.resultado, 0) / tkLosses.length) : null;
+  const simAvgTP = simWins.length  ? simWins.reduce((s,x)  => s+x.resultado,  0) / simWins.length  : null;
+  const simAvgSL = simLosses.length? Math.abs(simLosses.reduce((s,x) => s+x.resultado, 0) / simLosses.length) : null;
+  const effectiveTP = tkAvgTP  || simAvgTP;
+  const effectiveSL = tkAvgSL  || simAvgSL;
+  const durData = closed.filter(x => x.estrategia === t.estrategia && x.fechahora && x.closedHora);
+  const avgDurMins = durData.length
+    ? durData.reduce((s,x) => s + Math.max(0,(new Date(x.closedHora)-new Date(x.fechahora))/60000), 0) / durData.length
+    : null;
 
-  // ── PRIORIDAD 1: AGOTADO — cerrar siempre ────────────────────────────────
-  if(currentTT==='agotado'||(entryTT==='agotado'&&pct>0)){
-    const base=typeMsg.agotado+(transitionMsg?` · ${transitionMsg}`:'');
-    return{action:'🔴 Asegurar ganancias',color:'#ff3d57',bg:'rgba(255,61,87,.1)',border:'rgba(255,61,87,.4)',
-      reason:`${base}${pct>0?` · En ganancia (${pct>=0?'+':''}${pct.toFixed(1)}%)`:''} · Riesgo de reversión`};
-  }
-  if(alExh>=70){
-    return{action:'🔴 Cerrar · Extendido',color:'#ff3d57',bg:'rgba(255,61,87,.1)',border:'rgba(255,61,87,.4)',
-      reason:`Agotamiento alto (${alExh}/100) — probabilidad de continuación baja. ${typeMsg.agotado}`};
-  }
-
-  // ── PRIORIDAD 2: RANGO — sin señal ───────────────────────────────────────
-  if(currentTT==='rango'&&entryTT==='rango'){
-    return{action:'⚪ Sin señal',color:'var(--text2)',bg:'var(--surface2)',border:'var(--border)',
-      reason:`${typeMsg.rango}${pct!==0?` · ${pct>=0?'+':''}${pct.toFixed(1)}% actual`:''}${transitionMsg?` · ${transitionMsg}`:''}`};
-  }
-
-  // ── PRIORIDAD 3: RUPTURA — reforzar "dejar correr" ───────────────────────
-  if(entryTT==='ruptura'&&pct>0&&currentTT!=='agotado'){
-    const al_s=al?.groupStats?.ruptura;
-    const tp2hint=al_s&&!al_s.insuf&&al_s.p75MFE?` · TP2 histórico rupturas: +${al_s.p75MFE.toFixed(1)}%`:'';
-    if(pct>=(al_s?.p50MFE||5)*0.85&&tc){
-      // At TP1 level — check if momentum still strong
-      const c1h=tc?.change1h||0; const c4h=tc?.change4h||0;
-      const stillStrong=isLong?(c1h>0&&c4h>0):(!isLong&&c1h<0&&c4h<0);
-      if(stillStrong)
-        return{action:'🟢 Dejar correr — Ruptura',color:'#00aaff',bg:'rgba(0,170,255,.1)',border:'rgba(0,170,255,.4)',
-          reason:`${typeMsg.ruptura}${tp2hint}${transitionMsg?` · ${transitionMsg}`:''}`};
-    }
-    if(currentTT==='continuacion')
-      return{action:'🟡 Gestionar — en continuación',color:'#ffd100',bg:'rgba(255,209,0,.08)',border:'rgba(255,209,0,.4)',
-        reason:`${transitionMsg||typeMsg.continuacion}${tp2hint}`};
-  }
-
-  // ── ALERTA: agotamiento subiendo ─────────────────────────────────────────
-  if(alExh>=50&&alExh<70&&pct>0){
-    return{action:'🟡 Cierre parcial recomendado',color:'#ffd100',bg:'rgba(255,209,0,.08)',border:'rgba(255,209,0,.4)',
-      reason:`Agotamiento ${alExh}/100 — asegurar parcial. ${typeMsg[currentTT]||''}`};
-  }
-
-  // ── Ticker price movement (Binance 1h/4h/24h) ────────────
-  const has=tc!==null&&tc!==undefined;
-  const c1h=has?tc.change1h:null;
-  const c4h=has?tc.change4h:null;
-  const c24=has?tc.change24h:null;
-  // Direction: positive = ticker going up
-  const trending1h=c1h!==null?(c1h>1?'up':c1h<-1?'down':'flat'):null;
-  const trending4h=c4h!==null?(c4h>2?'up':c4h<-2?'down':'flat'):null;
-  const trending24=c24!==null?(c24>4?'up':c24<-4?'down':'flat'):null;
-  const momentum=  // combined momentum signal
-    trending1h==='up'&&trending4h==='up'?'strong_up':
-    trending1h==='down'&&trending4h==='down'?'strong_down':
-    trending1h==='up'?'weak_up':
-    trending1h==='down'?'weak_down':'neutral';
-  const tkMov=has?` · ${t.ticker} 1h:${c1h>=0?'+':''}${c1h.toFixed(1)}% 4h:${c4h>=0?'+':''}${c4h.toFixed(1)}% 24h:${c24>=0?'+':''}${c24.toFixed(1)}%`:'';
-
-  // ── Historical stats ─────────────────────────────────────
-  const similar=closed.filter(x=>x.estrategia===t.estrategia&&x.pos===t.pos);
-  const tkTrades=closed.filter(x=>x.ticker===t.ticker);
-  const tkPos=tkTrades.filter(x=>x.pos===t.pos);
-  const tkPosWR=tkPos.length?tkPos.filter(x=>x.resultado>0).length/tkPos.length:null;
-  const tkEV=tkTrades.length?tkTrades.reduce((s,x)=>s+x.resultado,0)/tkTrades.length:null;
-  const tkWins=tkTrades.filter(x=>x.resultado>0);
-  const tkLosses=tkTrades.filter(x=>x.resultado<0);
-  const tkAvgTP=tkWins.length>=3?tkWins.reduce((s,x)=>s+x.resultado,0)/tkWins.length:null;
-  const tkAvgSL=tkLosses.length>=3?Math.abs(tkLosses.reduce((s,x)=>s+x.resultado,0)/tkLosses.length):null;
-  const simWins=similar.filter(x=>x.resultado>0);
-  const simLosses=similar.filter(x=>x.resultado<0);
-  const simAvgTP=simWins.length?simWins.reduce((s,x)=>s+x.resultado,0)/simWins.length:null;
-  const simAvgSL=simLosses.length?Math.abs(simLosses.reduce((s,x)=>s+x.resultado,0)/simLosses.length):null;
-  const effectiveTP=tkAvgTP||simAvgTP;
-  const effectiveSL=tkAvgSL||simAvgSL;
-  const durData=closed.filter(x=>x.estrategia===t.estrategia&&x.fechahora&&x.closedHora);
-  const avgDurMins=durData.length?durData.reduce((s,x)=>s+Math.max(0,(new Date(x.closedHora)-new Date(x.fechahora))/60000),0)/durData.length:null;
-
-  // Best exit for this ticker
-  const bySal={};tkPos.forEach(x=>{if(x.salida&&x.salida!=='SL'){if(!bySal[x.salida])bySal[x.salida]=[];bySal[x.salida].push(x.resultado);}});
-  const salidaEntries=Object.entries(bySal).filter(e=>e[1].length>=2).map(([k,v])=>({k,ev:v.reduce((a,x)=>a+x,0)/v.length}));
-  const bestSalida=salidaEntries.length?salidaEntries.sort((a,b)=>b.ev-a.ev)[0].k:null;
-  const salidaHint=bestSalida?` Mejor salida en ${t.ticker}: ${bestSalida}.`:'';
-
-  const atTP=effectiveTP&&pct>=effectiveTP*0.85;
-  const atSL=effectiveSL&&pct<=-effectiveSL*0.8;
-  const overtime=avgDurMins&&totalMins>avgDurMins*1.5;
-  const inProfit=pct>3;
-  const inLoss=pct<-3;
-
-  // ── Clasificación de duración (modificador de contexto) ──────────────────
   const durCtxRec = classifyTradeDuration(t, totalMins);
-  const durHint = durCtxRec.stage === 'extendido'
-    ? ` ⏱ Trade extendido (${Math.round((durCtxRec.ratio||1)*100)}% del tiempo típico).`
-    : durCtxRec.stage === 'temprano'
-    ? ` ⚡ Trade temprano — aún en fase inicial.`
+  const sessCtx   = getMarketSessionContext();
+  const tkCtx     = tkTrades.length >= 3
+    ? ` | ${t.ticker} ${t.pos}: WR ${(tkPosWR!==null?(tkPosWR*100).toFixed(0):'-')}% EV ${tkEV!==null?(tkEV>=0?'+':'')+tkEV.toFixed(1):'?'}%`
     : '';
 
-  // ── Sesión de mercado (modificador de confianza) ──────────────────────────
-  const sessCtxRec = getMarketSessionContext();
-  const sessHint = sessCtxRec.confidence < 0.85
-    ? ` ${sessCtxRec.label}: ${sessCtxRec.note}.`
-    : '';
+  const bySal = {};
+  tkPos.forEach(x => { if(x.salida && x.salida !== 'SL'){ if(!bySal[x.salida]) bySal[x.salida]=[]; bySal[x.salida].push(x.resultado); }});
+  const bestSalida = Object.entries(bySal).filter(e => e[1].length >= 2).sort((a,b) => (b[1].reduce((s,x)=>s+x,0)/b[1].length)-(a[1].reduce((s,x)=>s+x,0)/a[1].length))[0]?.[0] || null;
 
-  // Ticker context
-  const tkCtx=tkTrades.length>=3?` | ${t.ticker}: WR ${(tkPosWR!==null?(tkPosWR*100).toFixed(0):'-')}% EV ${tkEV>=0?'+':''}${tkEV.toFixed(1)}%`
-    :tkTrades.length>0?` | ${t.ticker}: ${tkTrades.length} trade${tkTrades.length>1?'s':''}`:'';
+  // ── Flags de situación ────────────────────────────────────────────────────
+  const inProfit   = pct >  2;
+  const inLoss     = pct < -2;
+  const nearTP     = effectiveTP && pct >= effectiveTP * 0.80;
+  const nearSL     = effectiveSL && pct <= -(effectiveSL * 0.75);
+  const overtime   = avgDurMins && totalMins > avgDurMins * 1.4;
+  const earlyPhase = durCtxRec.stage === 'temprano';
+  const isExtended = durCtxRec.stage === 'extendido';
+  const extRatio   = durCtxRec.ratio || 1;
 
-  // ── DECISION basada en precio del ticker + estadísticas ──
+  // ══════════════════════════════════════════════════════════════════════════
+  // CAPA 1 — VALIDEZ del trade
+  // ══════════════════════════════════════════════════════════════════════════
+  // Un trade se INVALIDA si:
+  //   - momentum fuertemente en contra + en pérdida
+  //   - extendido en pérdida significativa (>1.5x duración, pct < -3%)
+  //   - agotamiento alto
+  //   - cerca del SL histórico
+  const invalidado =
+    nearSL ||
+    (momStrongAgainst && inLoss) ||
+    (isExtended && extRatio > 2.0 && pct < -3) ||
+    alExh >= 70;
 
-  // 🔴 CERRAR
-  if(atSL)
-    return{action:'🔴 Cerrar',color:'#ff3d57',bg:'rgba(255,61,87,.1)',border:'rgba(255,61,87,.35)',
-      reason:`Cerca de tu SL histórico (${(-effectiveSL).toFixed(1)}%) para ${t.estrategia}`+tkCtx+tkMov};
-  if(overtime&&inLoss)
-    return{action:'🔴 Cerrar',color:'#ff3d57',bg:'rgba(255,61,87,.1)',border:'rgba(255,61,87,.35)',
-      reason:`Overtime (${avgDurMins<60?Math.round(avgDurMins)+'m':Math.floor(avgDurMins/60)+'h'} promedio) y en pérdida`+durHint+sessHint+tkCtx+tkMov};
-  if(isLong&&momentum==='strong_down'&&inLoss)
-    return{action:'🔴 Cerrar',color:'#ff3d57',bg:'rgba(255,61,87,.1)',border:'rgba(255,61,87,.35)',
-      reason:`${t.ticker} cayendo fuerte (1h${c1h.toFixed(1)}% · 4h${c4h.toFixed(1)}%) y tu Long en pérdida`+tkCtx};
-  if(!isLong&&momentum==='strong_up'&&inLoss)
-    return{action:'🔴 Cerrar',color:'#ff3d57',bg:'rgba(255,61,87,.1)',border:'rgba(255,61,87,.35)',
-      reason:`${t.ticker} subiendo fuerte (1h+${c1h.toFixed(1)}% · 4h+${c4h.toFixed(1)}%) y tu Short en pérdida`+tkCtx};
+  const validez = invalidado ? 'invalidado' : momFavor ? 'valido' : 'neutral';
 
-  // 🟡 PROTEGER / ESPERAR
-  if(atTP&&isLong&&(trending1h==='down'||trending4h==='down'))
-    return{action:'🟡 Proteger BE',color:'#ffd100',bg:'rgba(255,209,0,.08)',border:'rgba(255,209,0,.4)',
-      reason:`TP histórico alcanzado (${effectiveTP.toFixed(1)}%) pero ${t.ticker} perdiendo momentum.${salidaHint}`+tkCtx+tkMov};
-  if(inProfit&&isLong&&momentum==='strong_down')
-    return{action:'🟡 Proteger BE',color:'#ffd100',bg:'rgba(255,209,0,.08)',border:'rgba(255,209,0,.4)',
-      reason:`${t.ticker} girando a la baja (1h${c1h.toFixed(1)}%) con ganancia. Mové SL a entrada`+tkCtx};
-  if(inProfit&&!isLong&&momentum==='strong_up')
-    return{action:'🟡 Proteger BE',color:'#ffd100',bg:'rgba(255,209,0,.08)',border:'rgba(255,209,0,.4)',
-      reason:`${t.ticker} rebotando (1h+${c1h.toFixed(1)}%) con tu Short en ganancia. Asegurá`+tkCtx};
-  if(inProfit&&overtime)
-    return{action:'🟡 Cierre parcial',color:'#ffd100',bg:'rgba(255,209,0,.08)',border:'rgba(255,209,0,.4)',
-      reason:`Buen resultado + más tiempo del promedio.${salidaHint}`+durHint+sessHint+tkCtx+tkMov};
-  if(inProfit&&atTP)
-    return{action:'🟡 Proteger BE',color:'#ffd100',bg:'rgba(255,209,0,.08)',border:'rgba(255,209,0,.4)',
-      reason:`En tu TP histórico (${effectiveTP.toFixed(1)}%). Mové SL a entrada.${salidaHint}`+tkCtx+tkMov};
-  if(!has&&inLoss)
-    return{action:'🟡 Esperar',color:'#ffd100',bg:'rgba(255,209,0,.08)',border:'rgba(255,209,0,.4)',
-      reason:'Actualizá precios para ver el momentum del ticker'+tkCtx};
+  // ══════════════════════════════════════════════════════════════════════════
+  // CAPA 2 — CALIDAD del trade
+  // ══════════════════════════════════════════════════════════════════════════
+  // Confianza efectiva: se degrada dinámicamente
+  let confEff = alConf;
+  if(inLoss)            confEff -= 20;
+  if(isExtended)        confEff -= (extRatio - 1.4) * 15;
+  if(momAgainst)        confEff -= 15;
+  if(momStrongAgainst)  confEff -= 10;  // extra penalización
+  if(alExh >= 50)       confEff -= 15;
+  if(overtime && inLoss)confEff -= 20;
+  confEff = Math.max(0, Math.min(100, confEff));
 
-  // 🟢 MANTENER / DEJAR CORRER
-  if(atTP&&isLong&&momentum==='strong_up')
-    return{action:'🟢 Dejar correr',color:'#00c853',bg:'rgba(0,200,83,.08)',border:'rgba(0,200,83,.35)',
-      reason:`TP histórico (${effectiveTP.toFixed(1)}%) + ${t.ticker} sigue subiendo fuerte.${salidaHint}`+tkCtx+tkMov};
-  if(atTP&&!isLong&&momentum==='strong_down')
-    return{action:'🟢 Dejar correr',color:'#00c853',bg:'rgba(0,200,83,.08)',border:'rgba(0,200,83,.35)',
-      reason:`TP histórico (${effectiveTP.toFixed(1)}%) + ${t.ticker} sigue bajando.${salidaHint}`+tkCtx+tkMov};
-  if(isLong&&momentum==='strong_up'&&inProfit)
-    return{action:'🟢 Mantener',color:'#00c853',bg:'rgba(0,200,83,.08)',border:'rgba(0,200,83,.35)',
-      reason:`${t.ticker} subiendo fuerte (1h+${c1h.toFixed(1)}% · 4h+${c4h.toFixed(1)}%). Long funcionando`+durHint+sessHint+tkCtx};
-  if(!isLong&&momentum==='strong_down'&&inProfit)
-    return{action:'🟢 Mantener',color:'#00c853',bg:'rgba(0,200,83,.08)',border:'rgba(0,200,83,.35)',
-      reason:`${t.ticker} cayendo fuerte (1h${c1h.toFixed(1)}%). Short bien posicionado`+tkCtx};
-  if(isLong&&(momentum==='weak_up'||momentum==='strong_up')&&!inLoss)
-    return{action:'🟢 Mantener',color:'#00c853',bg:'rgba(0,200,83,.08)',border:'rgba(0,200,83,.35)',
-      reason:`${t.ticker} con momentum positivo (1h+${c1h!==null?c1h.toFixed(1):'?'}%).`+(tkPosWR!==null?` WR ${(tkPosWR*100).toFixed(0)}% en ${t.ticker} ${t.pos}.`:'')+tkCtx};
-  if(!isLong&&(momentum==='weak_down'||momentum==='strong_down')&&!inLoss)
-    return{action:'🟢 Mantener',color:'#00c853',bg:'rgba(0,200,83,.08)',border:'rgba(0,200,83,.35)',
-      reason:`${t.ticker} con momentum negativo (1h${c1h!==null?c1h.toFixed(1):'?'}%). Short a favor`+tkCtx};
+  // Calidad
+  let calidad;
+  if(invalidado || alExh >= 70){
+    calidad = 'agotado';
+  } else if(inProfit && momStrong && !isExtended && confEff >= 60){
+    calidad = 'fuerte';
+  } else if(!inLoss && (momFavor || !has) && confEff >= 50){
+    calidad = 'saludable';
+  } else if(inProfit && momAgainst){
+    calidad = 'desacelerando';
+  } else if(isExtended && (inLoss || momAgainst)){
+    calidad = 'deteriorandose';
+  } else if(inLoss && momAgainst){
+    calidad = 'deteriorandose';
+  } else {
+    calidad = 'saludable';
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // CAPA 3 — GESTIÓN
+  // ══════════════════════════════════════════════════════════════════════════
+
+  // "Extendé TP" requiere TODAS estas condiciones:
+  const puedeExtenderTP =
+    inProfit &&
+    momStrong &&
+    alExh < 40 &&
+    confEff >= 60 &&
+    !isExtended &&
+    (entryTT === 'ruptura' || (effectiveTP && pct >= effectiveTP * 0.80));
+
+  const al_rup = al?.groupStats?.ruptura;
+  const tp1 = effectiveTP ? effectiveTP.toFixed(1) : '5.0';
+  const tp2 = effectiveTP ? (effectiveTP * 1.5).toFixed(1) : '7.5';
+  const runner = effectiveTP ? (effectiveTP * 2.4).toFixed(1) : '12.0';
+  const tp2hint = al_rup && !al_rup.insuf && al_rup.p75MFE ? ` TP2 histórico: +${al_rup.p75MFE.toFixed(1)}%` : '';
+
+  // ── INVALIDADO / AGOTADO → CERRAR ────────────────────────────────────────
+  if(calidad === 'agotado' || invalidado){
+    if(nearSL)
+      return{action:'🔴 Cerrar',color:'#ff3d57',bg:'rgba(255,61,87,.1)',border:'rgba(255,61,87,.4)',
+        reason:`Cerca del SL histórico (${effectiveSL?(-effectiveSL).toFixed(1)+'%':'—'}) — limitá pérdida`+tkCtx+tkMov};
+    if(alExh >= 70)
+      return{action:'🔴 Cerrar · Extendido',color:'#ff3d57',bg:'rgba(255,61,87,.1)',border:'rgba(255,61,87,.4)',
+        reason:`Agotamiento alto (${alExh}/100) — probabilidad de continuación baja`+tkCtx};
+    if(momStrongAgainst && inLoss)
+      return{action:'🔴 Invalidado — cerrar',color:'#ff3d57',bg:'rgba(255,61,87,.1)',border:'rgba(255,61,87,.4)',
+        reason:`Momentum fuertemente en contra + en pérdida (${pct>=0?'+':''}${pct.toFixed(1)}%) — estructura rota`+tkCtx+tkMov};
+    if(isExtended && inLoss)
+      return{action:'🔴 Cerrar · Trade deteriorado',color:'#ff3d57',bg:'rgba(255,61,87,.1)',border:'rgba(255,61,87,.4)',
+        reason:`Extendido (${Math.round(extRatio*100)}% del tiempo típico) y en pérdida — deterioro confirmado`+tkCtx};
+    return{action:'🔴 Cerrar',color:'#ff3d57',bg:'rgba(255,61,87,.1)',border:'rgba(255,61,87,.4)',
+        reason:`Trade invalidado — estructura comprometida`+tkCtx+tkMov};
+  }
+
+  // ── DETERIORÁNDOSE ────────────────────────────────────────────────────────
+  if(calidad === 'deteriorandose'){
+    if(inProfit)
+      return{action:'🟠 Cerrar parcial — deteriorándose',color:'#ff9100',bg:'rgba(255,145,0,.09)',border:'rgba(255,145,0,.4)',
+        reason:`Trade extendido con momentum debilitándose — asegurar parte de la ganancia (${pct>=0?'+':''}${pct.toFixed(1)}%)`+tkCtx+tkMov};
+    return{action:'🟡 Mantener cautela — deteriorándose',color:'#ffd100',bg:'rgba(255,209,0,.08)',border:'rgba(255,209,0,.4)',
+        reason:`En pérdida (${pct>=0?'+':''}${pct.toFixed(1)}%) con momentum en contra — evaluar salida`+tkCtx+tkMov};
+  }
+
+  // ── DESACELERANDO ─────────────────────────────────────────────────────────
+  if(calidad === 'desacelerando'){
+    if(isExtended && inProfit)
+      return{action:'🟠 Trailing activo — desacelerando',color:'#ff9100',bg:'rgba(255,145,0,.09)',border:'rgba(255,145,0,.4)',
+        reason:`Extendido (${Math.round(extRatio*100)}% del típico) con momentum frenando — mové SL cerca`+tkCtx+tkMov};
+    if(nearTP)
+      return{action:'🟡 Proteger BE — en TP',color:'#ffd100',bg:'rgba(255,209,0,.08)',border:'rgba(255,209,0,.4)',
+        reason:`TP histórico alcanzado (+${effectiveTP.toFixed(1)}%) con momentum debilitándose — asegurar entrada`+(bestSalida?` · Mejor salida: ${bestSalida}`:'')+tkCtx};
+    return{action:'🟡 Mantener cautela — frenando',color:'#ffd100',bg:'rgba(255,209,0,.08)',border:'rgba(255,209,0,.4)',
+        reason:`Momentum debilitándose (1h:${c1h!==null?c1h.toFixed(1):'?'}%) — seguir con precaución`+tkCtx+tkMov};
+  }
+
+  // ── FUERTE / SALUDABLE ────────────────────────────────────────────────────
+
+  // Dejar correr: ruptura fuerte, ganando, momentum alineado, no extendido
+  if(puedeExtenderTP && entryTT === 'ruptura')
+    return{action:'🟢 Dejar correr — Ruptura',color:'#00aaff',bg:'rgba(0,170,255,.1)',border:'rgba(0,170,255,.4)',
+      reason:`Ruptura en curso — dejar correr · TP1 -${tp1}% · TP2 -${tp2}% · runner -${runner}%${tp2hint}`+tkCtx};
+
+  // Dejar correr: en TP + momentum fuerte
+  if(nearTP && momStrong && inProfit)
+    return{action:'🟢 Dejar correr — En TP',color:'#00c853',bg:'rgba(0,200,83,.08)',border:'rgba(0,200,83,.4)',
+      reason:`TP histórico (+${effectiveTP.toFixed(1)}%) alcanzado con momentum fuerte — dejar correr${tp2hint}`+(bestSalida?` · ${bestSalida}`:'')+tkCtx+tkMov};
+
+  // Cerrar parcial: en overtime + ganando
+  if(isExtended && inProfit)
+    return{action:'🟡 Cierre parcial — trade extendido',color:'#ffd100',bg:'rgba(255,209,0,.08)',border:'rgba(255,209,0,.4)',
+      reason:`Trade extendido (${Math.round(extRatio*100)}% del típico) con ganancia — asegurar 50%`+(bestSalida?` · ${bestSalida}`:'')+tkCtx};
+
+  // Mantener fuerte
+  if(calidad === 'fuerte')
+    return{action:'🟢 Mantener — setup fuerte',color:'#00c853',bg:'rgba(0,200,83,.08)',border:'rgba(0,200,83,.4)',
+      reason:`Momentum alineado (1h:${c1h!==null?c1h.toFixed(1):'?'}% 4h:${c4h!==null?c4h.toFixed(1):'?'}%) · trade funcionando (${pct>=0?'+':''}${pct.toFixed(1)}%)`+tkCtx};
+
+  // Sin precios aún
+  if(!has)
+    return{action:'⚪ Actualizá precios',color:'var(--text2)',bg:'var(--surface2)',border:'var(--border)',
+      reason:'Sin datos de precio live — tocá "Actualizar precios" para análisis completo'+tkCtx};
+
+  // Mantener saludable con momentum a favor
+  if(momFavor && !inLoss)
+    return{action:'🟢 Mantener',color:'#00c853',bg:'rgba(0,200,83,.08)',border:'rgba(0,200,83,.4)',
+      reason:`${t.ticker} con momentum a favor (1h:${c1h!==null?c1h.toFixed(1):'?'}%) — trade saludable`+tkCtx+tkMov};
+
+  // Mantener neutral sin señal clara
+  if(!inLoss && validez !== 'invalidado')
+    return{action:'🟡 Mantener cautela',color:'#ffd100',bg:'rgba(255,209,0,.08)',border:'rgba(255,209,0,.4)',
+      reason:`Sin señal clara — momentum mixto · trade ${pct>=0?'+':''}${pct.toFixed(1)}%`+tkCtx+tkMov};
 
   // Default
   return{action:'⚪ Sin señal',color:'var(--text2)',bg:'var(--surface2)',border:'var(--border)',
-    reason:(has?'Sin señal clara por ahora':'Actualizá precios para análisis del ticker')+durHint+sessHint+tkCtx+tkMov};
+    reason:`Sin confluencia suficiente para recomendar acción`+tkCtx+tkMov};
 }
+
 
 // ══ AUTO-LEARNING: PROBABILIDAD DE TP ══════════════════════════════════════
 
@@ -8938,123 +8961,110 @@ document.addEventListener('DOMContentLoaded', ()=>{
 });
 
 // ═══════════════════════════════════════════════════════════
-// TRADINGLATINO LIVE ANALYSIS (EMA 10/55 · Squeeze · ADX)
+// TRADINGLATINO LIVE ANALYSIS — EMA 10/55 · Squeeze · ADX
 // ═══════════════════════════════════════════════════════════
 
-// ── Math helpers ──
-function tdSma(arr,p){const r=new Array(arr.length).fill(NaN);for(let i=p-1;i<arr.length;i++){let s=0;for(let j=i-p+1;j<=i;j++)s+=arr[j];r[i]=s/p;}return r;}
-function tdEma(arr,p){const r=new Array(arr.length).fill(NaN);if(arr.length<p)return r;const k=2/(p+1);let s=0;for(let i=0;i<p;i++)s+=arr[i];r[p-1]=s/p;for(let i=p;i<arr.length;i++)r[i]=arr[i]*k+r[i-1]*(1-k);return r;}
-function tdStdev(arr,p){const r=new Array(arr.length).fill(NaN);const m=tdSma(arr,p);for(let i=p-1;i<arr.length;i++){if(isNaN(m[i]))continue;let v=0;for(let j=i-p+1;j<=i;j++)v+=(arr[j]-m[i])**2;r[i]=Math.sqrt(v/p);}return r;}
-function tdHighest(arr,p){const r=new Array(arr.length).fill(NaN);for(let i=p-1;i<arr.length;i++){let mx=-Infinity;for(let j=i-p+1;j<=i;j++)mx=Math.max(mx,arr[j]);r[i]=mx;}return r;}
-function tdLowest(arr,p){const r=new Array(arr.length).fill(NaN);for(let i=p-1;i<arr.length;i++){let mn=Infinity;for(let j=i-p+1;j<=i;j++)mn=Math.min(mn,arr[j]);r[i]=mn;}return r;}
-function tdLinreg(arr,p){const r=new Array(arr.length).fill(NaN);for(let i=p-1;i<arr.length;i++){let sx=0,sy=0,sxy=0,sx2=0;for(let j=0;j<p;j++){sx+=j;sy+=arr[i-p+1+j];sxy+=j*arr[i-p+1+j];sx2+=j*j;}const d=p*sx2-sx*sx;if(d===0){r[i]=sy/p;continue;}const slope=(p*sxy-sx*sy)/d;const intercept=(sy-slope*sx)/p;r[i]=intercept+slope*(p-1);}return r;}
-function tdWilder(arr,p){const r=new Array(arr.length).fill(NaN);let sum=0,count=0,firstIdx=-1;for(let i=0;i<arr.length;i++){if(isNaN(arr[i]))continue;sum+=arr[i];count++;if(count===p){firstIdx=i;break;}}if(firstIdx===-1)return r;r[firstIdx]=sum/p;for(let i=firstIdx+1;i<arr.length;i++){if(!isNaN(arr[i])&&!isNaN(r[i-1]))r[i]=(r[i-1]*(p-1)+arr[i])/p;}return r;}
+function tdSma(a,p){const r=new Array(a.length).fill(NaN);for(let i=p-1;i<a.length;i++){let s=0;for(let j=i-p+1;j<=i;j++)s+=a[j];r[i]=s/p;}return r;}
+function tdEma(a,p){const r=new Array(a.length).fill(NaN);if(a.length<p)return r;const k=2/(p+1);let s=0;for(let i=0;i<p;i++)s+=a[i];r[p-1]=s/p;for(let i=p;i<a.length;i++)r[i]=a[i]*k+r[i-1]*(1-k);return r;}
+function tdStdev(a,p){const r=new Array(a.length).fill(NaN);const m=tdSma(a,p);for(let i=p-1;i<a.length;i++){if(isNaN(m[i]))continue;let v=0;for(let j=i-p+1;j<=i;j++)v+=(a[j]-m[i])**2;r[i]=Math.sqrt(v/p);}return r;}
+function tdHighest(a,p){const r=new Array(a.length).fill(NaN);for(let i=p-1;i<a.length;i++){let mx=-Infinity;for(let j=i-p+1;j<=i;j++)mx=Math.max(mx,a[j]);r[i]=mx;}return r;}
+function tdLowest(a,p){const r=new Array(a.length).fill(NaN);for(let i=p-1;i<a.length;i++){let mn=Infinity;for(let j=i-p+1;j<=i;j++)mn=Math.min(mn,a[j]);r[i]=mn;}return r;}
+function tdLinreg(a,p){const r=new Array(a.length).fill(NaN);for(let i=p-1;i<a.length;i++){let sx=0,sy=0,sxy=0,sx2=0;for(let j=0;j<p;j++){sx+=j;sy+=a[i-p+1+j];sxy+=j*a[i-p+1+j];sx2+=j*j;}const d=p*sx2-sx*sx;if(d===0){r[i]=sy/p;continue;}const sl=(p*sxy-sx*sy)/d;r[i]=(sy-sl*sx)/p+sl*(p-1);}return r;}
+function tdWilder(a,p){const r=new Array(a.length).fill(NaN);let sum=0,cnt=0,fi=-1;for(let i=0;i<a.length;i++){if(isNaN(a[i]))continue;sum+=a[i];cnt++;if(cnt===p){fi=i;break;}}if(fi===-1)return r;r[fi]=sum/p;for(let i=fi+1;i<a.length;i++){if(!isNaN(a[i])&&!isNaN(r[i-1]))r[i]=(r[i-1]*(p-1)+a[i])/p;}return r;}
 
-function tdCalcSqueeze(ohlcv,len=20,bbM=2.0,kcM=1.5){
-  const n=ohlcv.length,C=ohlcv.map(x=>x.close),H=ohlcv.map(x=>x.high),L=ohlcv.map(x=>x.low);
+function tdCalcSqueeze(ohlcv,len=20){
+  const C=ohlcv.map(x=>x.close),H=ohlcv.map(x=>x.high),L=ohlcv.map(x=>x.low),n=ohlcv.length;
   const bb=tdSma(C,len),sd=tdStdev(C,len);
-  const uBB=bb.map((b,i)=>isNaN(b)?NaN:b+bbM*sd[i]),lBB=bb.map((b,i)=>isNaN(b)?NaN:b-bbM*sd[i]);
+  const uBB=bb.map((b,i)=>isNaN(b)?NaN:b+2*sd[i]),lBB=bb.map((b,i)=>isNaN(b)?NaN:b-2*sd[i]);
   const tr=new Array(n).fill(NaN);for(let i=1;i<n;i++)tr[i]=Math.max(H[i]-L[i],Math.abs(H[i]-C[i-1]),Math.abs(L[i]-C[i-1]));
   const atr=tdSma(tr,len),ma=tdSma(C,len);
-  const uKC=ma.map((m,i)=>isNaN(m)||isNaN(atr[i])?NaN:m+kcM*atr[i]),lKC=ma.map((m,i)=>isNaN(m)||isNaN(atr[i])?NaN:m-kcM*atr[i]);
+  const uKC=ma.map((m,i)=>isNaN(m)?NaN:m+1.5*atr[i]),lKC=ma.map((m,i)=>isNaN(m)?NaN:m-1.5*atr[i]);
   const sqzOn=new Array(n).fill(false);
   for(let i=0;i<n;i++)if(!isNaN(lBB[i]))sqzOn[i]=lBB[i]>lKC[i]&&uBB[i]<uKC[i];
   const hh=tdHighest(H,len),ll=tdLowest(L,len);
-  const delta=C.map((c,i)=>isNaN(hh[i])||isNaN(ll[i])||isNaN(bb[i])?NaN:c-((hh[i]+ll[i])/2+bb[i])/2);
-  const val=tdLinreg(delta,len);
-  return{sqzOn,val};
+  const delta=C.map((c,i)=>isNaN(hh[i])?NaN:c-((hh[i]+ll[i])/2+bb[i])/2);
+  return{sqzOn,val:tdLinreg(delta,len)};
 }
 
 function tdCalcADX(ohlcv,p=14){
-  const n=ohlcv.length,C=ohlcv.map(x=>x.close),H=ohlcv.map(x=>x.high),L=ohlcv.map(x=>x.low);
+  const C=ohlcv.map(x=>x.close),H=ohlcv.map(x=>x.high),L=ohlcv.map(x=>x.low),n=ohlcv.length;
   const tr=new Array(n).fill(NaN),dmP=new Array(n).fill(NaN),dmM=new Array(n).fill(NaN);
   for(let i=1;i<n;i++){
     tr[i]=Math.max(H[i]-L[i],Math.abs(H[i]-C[i-1]),Math.abs(L[i]-C[i-1]));
     const up=H[i]-H[i-1],dn=L[i-1]-L[i];
     dmP[i]=up>dn&&up>0?up:0;dmM[i]=dn>up&&dn>0?dn:0;
   }
-  const atr=tdWilder(tr,p),sdmP=tdWilder(dmP,p),sdmM=tdWilder(dmM,p);
+  const atr=tdWilder(tr,p),sdP=tdWilder(dmP,p),sdM=tdWilder(dmM,p);
   const dx=new Array(n).fill(NaN);
-  for(let i=0;i<n;i++){
-    if(!isNaN(atr[i])&&atr[i]>0){const diP=100*sdmP[i]/atr[i],diM=100*sdmM[i]/atr[i],s=diP+diM;if(s>0)dx[i]=100*Math.abs(diP-diM)/s;}
-  }
+  for(let i=0;i<n;i++){if(!isNaN(atr[i])&&atr[i]>0){const dP=100*sdP[i]/atr[i],dM=100*sdM[i]/atr[i],s=dP+dM;if(s>0)dx[i]=100*Math.abs(dP-dM)/s;}}
   return tdWilder(dx,p);
 }
 
-function tdCalcATR(ohlcv,period=14){
+function tdCalcATR(ohlcv,p=14){
   const trs=[];for(let i=1;i<ohlcv.length;i++)trs.push(Math.max(ohlcv[i].high-ohlcv[i].low,Math.abs(ohlcv[i].high-ohlcv[i-1].close),Math.abs(ohlcv[i].low-ohlcv[i-1].close)));
-  let atr=trs.slice(0,period).reduce((a,b)=>a+b,0)/period;
-  for(let i=period;i<trs.length;i++)atr=(atr*(period-1)+trs[i])/period;
+  let atr=trs.slice(0,p).reduce((a,b)=>a+b,0)/p;
+  for(let i=p;i<trs.length;i++)atr=(atr*(p-1)+trs[i])/p;
   return atr;
 }
 
 async function tdFetchKlines(symbol,interval){
-  const url=`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=300`;
-  const resp=await fetch(url);
+  const resp=await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=300`);
   if(!resp.ok){let msg=`Error ${resp.status}`;try{const j=await resp.json();msg=j.msg||msg;}catch{}throw new Error(msg);}
   const data=await resp.json();
-  return data.map(k=>({time:k[0],open:parseFloat(k[1]),high:parseFloat(k[2]),low:parseFloat(k[3]),close:parseFloat(k[4]),volume:parseFloat(k[5])}));
+  return data.map(k=>({time:k[0],open:parseFloat(k[1]),high:parseFloat(k[2]),low:parseFloat(k[3]),close:parseFloat(k[4])}));
 }
 
 function tdAnalyzeCombo(ohlcvEntry,ohlcvTrend){
   const CT=ohlcvTrend.map(x=>x.close);
   const e10T=tdEma(CT,10),e55T=tdEma(CT,55),adxT=tdCalcADX(ohlcvTrend);
-  const iTr=ohlcvTrend.length-2;
-  if(isNaN(e10T[iTr])||isNaN(e55T[iTr])||isNaN(adxT[iTr]))return null;
-  const trendUp=e10T[iTr]>e55T[iTr],adxVal=adxT[iTr],adxOk=adxVal>20;
-
+  const iT=ohlcvTrend.length-2;
+  if(isNaN(e10T[iT])||isNaN(e55T[iT])||isNaN(adxT[iT]))return null;
+  const trendUp=e10T[iT]>e55T[iT],adxVal=adxT[iT],adxOk=adxVal>20;
   const{sqzOn,val}=tdCalcSqueeze(ohlcvEntry);
   const iE=ohlcvEntry.length-2,iE1=iE-1,iE2=iE-2;
   if(isNaN(val[iE])||isNaN(val[iE1])||isNaN(val[iE2]))return null;
-
   const momUp=val[iE]>0,momDn=val[iE]<0;
   const sqzFired=sqzOn[iE1]&&!sqzOn[iE],sqzActive=sqzOn[iE];
-  const momCrossUp=val[iE]>0&&val[iE1]<=0,momCrossDn=val[iE]<0&&val[iE1]>=0;
-  const momTurnUp=val[iE]>val[iE1]&&val[iE1]<=val[iE2],momTurnDn=val[iE]<val[iE1]&&val[iE1]>=val[iE2];
-  const triggerUp=sqzFired||momCrossUp||momTurnUp,triggerDn=sqzFired||momCrossDn||momTurnDn;
-
-  const canLong=trendUp&&adxOk&&momUp&&triggerUp;
-  const canShort=!trendUp&&adxOk&&momDn&&triggerDn;
-  const waitLong=trendUp&&adxOk&&momUp&&!triggerUp;
-  const waitShort=!trendUp&&adxOk&&momDn&&!triggerDn;
-
+  const mCU=val[iE]>0&&val[iE1]<=0,mCD=val[iE]<0&&val[iE1]>=0;
+  const mTU=val[iE]>val[iE1]&&val[iE1]<=val[iE2],mTD=val[iE]<val[iE1]&&val[iE1]>=val[iE2];
+  const trigUp=sqzFired||mCU||mTU,trigDn=sqzFired||mCD||mTD;
+  const canLong=trendUp&&adxOk&&momUp&&trigUp,canShort=!trendUp&&adxOk&&momDn&&trigDn;
+  const waitLong=trendUp&&adxOk&&momUp&&!trigUp,waitShort=!trendUp&&adxOk&&momDn&&!trigDn;
   const atr=tdCalcATR(ohlcvEntry,14);
   const entryPx=ohlcvEntry[ohlcvEntry.length-1].close;
   const tpPrice=canLong?entryPx+atr*2:canShort?entryPx-atr*2:null;
   const slPrice=canLong?entryPx-atr:canShort?entryPx+atr:null;
   const tpPct=tpPrice?Math.abs(tpPrice-entryPx)/entryPx*100:null;
   const slPct=slPrice?Math.abs(slPrice-entryPx)/entryPx*100:null;
-
-  let score=0;
-  if(trendUp||!trendUp)score++;if(adxOk)score++;if(momUp||momDn)score++;
-  if(sqzFired)score+=2;else if(momCrossUp||momCrossDn)score+=1.5;else if(momTurnUp||momTurnDn)score++;
-
+  let score=0;if(adxOk)score++;if(momUp||momDn)score++;
+  if(sqzFired)score+=2;else if(mCU||mCD)score+=1.5;else if(mTU||mTD)score++;
   let signal='neutral';
   if(canLong)signal='long';else if(canShort)signal='short';else if(waitLong)signal='wait-long';else if(waitShort)signal='wait-short';
-
-  let missing=[];
-  if(!adxOk)missing.push(`ADX débil (${adxVal.toFixed(0)}<20)`);
+  const missing=[];
+  if(!adxOk)missing.push('ADX ' +adxVal.toFixed(0)+'<20');
   if(trendUp&&!momUp)missing.push('Momentum negativo');
   if(!trendUp&&!momDn)missing.push('Momentum positivo');
-  if((trendUp&&momUp&&!triggerUp)||((!trendUp)&&momDn&&!triggerDn))missing.push(sqzActive?'Squeeze comprimido':'Esperar giro histograma');
-
-  return{signal,score,trendUp,adxVal,adxOk,momUp,momDn,sqzFired,sqzActive,triggerUp,triggerDn,missing,entryPx,tpPrice,slPrice,tpPct,slPct,atr};
+  if((trendUp&&momUp&&!trigUp)||(!trendUp&&momDn&&!trigDn))missing.push(sqzActive?'Squeeze comprimido':'Esperar giro histograma');
+  return{signal,score,trendUp,adxVal,adxOk,momUp,momDn,sqzFired,sqzActive,trigUp,trigDn,missing,entryPx,tpPrice,slPrice,tpPct,slPct,atr};
 }
 
 const TD_COMBOS=[
-  {entry:'5m',trend:'15m',label:'5m/15m'},{entry:'15m',trend:'1h',label:'15m/1h'},
-  {entry:'1h',trend:'4h',label:'1h/4h'},{entry:'4h',trend:'1d',label:'4h/1d'},
+  {entry:'5m', trend:'15m',label:'5m/15m'},
+  {entry:'15m',trend:'1h', label:'15m/1h'},
+  {entry:'1h', trend:'4h', label:'1h/4h'},
+  {entry:'4h', trend:'1d', label:'4h/1d'},
 ];
 
 async function runTDAnalysis(){
-  const tickerRaw=(document.getElementById('an-ticker').value||'').trim().toUpperCase();
-  if(!tickerRaw){alert('Ingres\u00e1 un ticker primero');return;}
-  const symbol=tickerRaw.endsWith('USDT')?tickerRaw:tickerRaw+'USDT';
+  const raw=(document.getElementById('an-ticker').value||'').trim().toUpperCase();
+  if(!raw){alert('Ingres\u00e1 un ticker primero');return;}
+  const symbol=raw.endsWith('USDT')?raw:raw+'USDT';
   const btn=document.getElementById('td-btn');
   const res=document.getElementById('td-result');
   btn.disabled=true;btn.innerHTML='\u23f3';
-  res.innerHTML=`<div style="font-size:11px;color:var(--text2);padding:10px 0;display:flex;align-items:center;gap:8px"><span style="display:inline-block;width:12px;height:12px;border:2px solid var(--border);border-top-color:#ff6b00;border-radius:50%;animation:tdSpin .7s linear infinite"></span>Descargando datos TradingLatino\u2026</div>`;
-
+  res.innerHTML='<div style="font-size:11px;color:var(--text2);padding:10px 0;display:flex;align-items:center;gap:8px">'
+    +'<span style="display:inline-block;width:12px;height:12px;border:2px solid var(--border);border-top-color:#ff6b00;border-radius:50%;animation:tdSpin .7s linear infinite"></span>'
+    +'Descargando datos TradingLatino\u2026</div>';
   try{
     const tfsNeeded=[...new Set(TD_COMBOS.flatMap(c=>[c.entry,c.trend]))];
     const tfData={};
@@ -9064,131 +9074,109 @@ async function runTDAnalysis(){
     const prev=tfData['1h'][tfData['1h'].length-2].close;
     const priceChange=(price-prev)/prev*100;
 
-    const results=TD_COMBOS.map(combo=>{
-      const r=tdAnalyzeCombo(tfData[combo.entry],tfData[combo.trend]);
-      return r?{...combo,...r}:null;
-    }).filter(Boolean);
-
+    const results=TD_COMBOS.map(c=>{const r=tdAnalyzeCombo(tfData[c.entry],tfData[c.trend]);return r?{...c,...r}:null;}).filter(Boolean);
     const priority={long:4,short:4,'wait-long':2,'wait-short':2,neutral:0};
     results.sort((a,b)=>(priority[b.signal]+b.score)-(priority[a.signal]+a.score));
 
-    const longCount=results.filter(r=>r.signal==='long').length;
-    const shortCount=results.filter(r=>r.signal==='short').length;
-    const waitLongCount=results.filter(r=>r.signal==='wait-long').length;
-    const waitShortCount=results.filter(r=>r.signal==='wait-short').length;
+    const lC=results.filter(r=>r.signal==='long').length;
+    const sC=results.filter(r=>r.signal==='short').length;
+    const wL=results.filter(r=>r.signal==='wait-long').length;
+    const wS=results.filter(r=>r.signal==='wait-short').length;
 
-    let recText,recSub,recClrMain,recBg,recBorder;
-    if(longCount>=2){recText='\u25b2 LONG';recSub=`${longCount} temporalidades confirman entrada long`;recClrMain='#00c853';recBg='rgba(0,200,83,.07)';recBorder='rgba(0,200,83,.4)';}
-    else if(shortCount>=2){recText='\u25bc SHORT';recSub=`${shortCount} temporalidades confirman entrada short`;recClrMain='#ff3d57';recBg='rgba(255,61,87,.07)';recBorder='rgba(255,61,87,.4)';}
-    else if(longCount===1){recText='\u25b2 LONG (d\u00e9bil)';recSub='Solo 1 temporalidad confirma \u2014 mayor riesgo';recClrMain='#00c853';recBg='rgba(0,200,83,.04)';recBorder='rgba(0,200,83,.25)';}
-    else if(shortCount===1){recText='\u25bc SHORT (d\u00e9bil)';recSub='Solo 1 temporalidad confirma \u2014 mayor riesgo';recClrMain='#ff3d57';recBg='rgba(255,61,87,.04)';recBorder='rgba(255,61,87,.25)';}
-    else if(waitLongCount>waitShortCount){recText='\u23f3 ESPERAR LONG';recSub=`${waitLongCount} temporalidades en tendencia alcista, sin trigger a\u00fan`;recClrMain='#ffd740';recBg='rgba(255,215,64,.05)';recBorder='rgba(255,215,64,.3)';}
-    else if(waitShortCount>waitLongCount){recText='\u23f3 ESPERAR SHORT';recSub=`${waitShortCount} temporalidades en tendencia bajista, sin trigger a\u00fan`;recClrMain='#ffd740';recBg='rgba(255,215,64,.05)';recBorder='rgba(255,215,64,.3)';}
-    else{recText='\u2014 NEUTRAL \u2014';recSub='Sin confluencia entre temporalidades';recClrMain='var(--text2)';recBg='var(--surface)';recBorder='var(--border)';}
+    let recText,recSub,recClr,recBg,recBorder;
+    if(lC>=2){recText='\u25b2 LONG';recSub=lC+' temporalidades confirman';recClr='#00c853';recBg='rgba(0,200,83,.07)';recBorder='rgba(0,200,83,.4)';}
+    else if(sC>=2){recText='\u25bc SHORT';recSub=sC+' temporalidades confirman';recClr='#ff3d57';recBg='rgba(255,61,87,.07)';recBorder='rgba(255,61,87,.4)';}
+    else if(lC===1){recText='\u25b2 LONG (d\u00e9bil)';recSub='Solo 1 TF confirma \u2014 mayor riesgo';recClr='#00c853';recBg='rgba(0,200,83,.04)';recBorder='rgba(0,200,83,.25)';}
+    else if(sC===1){recText='\u25bc SHORT (d\u00e9bil)';recSub='Solo 1 TF confirma \u2014 mayor riesgo';recClr='#ff3d57';recBg='rgba(255,61,87,.04)';recBorder='rgba(255,61,87,.25)';}
+    else if(wL>wS){recText='\u23f3 ESPERAR LONG';recSub=wL+' TFs alcistas, sin trigger';recClr='#ffd740';recBg='rgba(255,215,64,.05)';recBorder='rgba(255,215,64,.3)';}
+    else if(wS>wL){recText='\u23f3 ESPERAR SHORT';recSub=wS+' TFs bajistas, sin trigger';recClr='#ffd740';recBg='rgba(255,215,64,.05)';recBorder='rgba(255,215,64,.3)';}
+    else{recText='\u2014 NEUTRAL \u2014';recSub='Sin confluencia';recClr='var(--text2)';recBg='var(--surface)';recBorder='var(--border)';}
 
-    const fmtPx=p=>{if(!p&&p!==0)return'\u2014';if(p>=1000)return'$'+p.toLocaleString('en-US',{maximumFractionDigits:0});if(p>=1)return'$'+p.toFixed(4);return'$'+p.toFixed(6);};
+    const fP=p=>{if(!p&&p!==0)return'\u2014';if(p>=1000)return'$'+p.toLocaleString('en-US',{maximumFractionDigits:0});if(p>=1)return'$'+p.toFixed(4);return'$'+p.toFixed(6);};
+    const cClr={long:'#00c853',short:'#ff3d57','wait-long':'#ffd740','wait-short':'#ffd740',neutral:'var(--text2)'};
+    const cBg={long:'rgba(0,200,83,.1)',short:'rgba(255,61,87,.1)','wait-long':'rgba(255,215,64,.08)','wait-short':'rgba(255,215,64,.08)',neutral:'transparent'};
+    const cBd={long:'rgba(0,200,83,.35)',short:'rgba(255,61,87,.35)','wait-long':'rgba(255,215,64,.3)','wait-short':'rgba(255,215,64,.3)',neutral:'var(--border)'};
+    const cTxt={long:'\u25b2 LONG',short:'\u25bc SHORT','wait-long':'\u23f3 L','wait-short':'\u23f3 S',neutral:'\u2014'};
 
-    const chipClr={long:'#00c853',short:'#ff3d57','wait-long':'#ffd740','wait-short':'#ffd740',neutral:'var(--text2)'};
-    const chipBg={long:'rgba(0,200,83,.1)',short:'rgba(255,61,87,.1)','wait-long':'rgba(255,215,64,.08)','wait-short':'rgba(255,215,64,.08)',neutral:'transparent'};
-    const chipBorder={long:'rgba(0,200,83,.35)',short:'rgba(255,61,87,.35)','wait-long':'rgba(255,215,64,.3)','wait-short':'rgba(255,215,64,.3)',neutral:'var(--border)'};
-    const chipMap={long:'\u25b2 LONG',short:'\u25bc SHORT','wait-long':'\u23f3 L','wait-short':'\u23f3 S',neutral:'\u2014'};
+    const best=results.find(r=>r.signal==='long'||r.signal==='short');
+    const bSide=best?best.signal:'';
 
-    const bestActive=results.find(r=>r.signal==='long'||r.signal==='short');
-    const bSide=bestActive?bestActive.signal:'';
-
-    const chipsHtml=results.map(r=>`<div style="display:flex;align-items:center;gap:5px;background:${chipBg[r.signal]};border:1px solid ${chipBorder[r.signal]};border-radius:20px;padding:4px 10px;font-family:'Nunito',sans-serif;font-size:11px;font-weight:800;color:${chipClr[r.signal]}">${chipMap[r.signal]} ${r.label}</div>`).join('');
+    const chipsHtml=results.map(r=>'<div style="display:flex;align-items:center;gap:5px;background:'+cBg[r.signal]+';border:1px solid '+cBd[r.signal]+';border-radius:20px;padding:4px 10px;font-family:\'Nunito\',sans-serif;font-size:11px;font-weight:800;color:'+cClr[r.signal]+'">'+cTxt[r.signal]+' '+r.label+'</div>').join('');
 
     const rowsHtml=results.map(r=>{
-      const sCol=chipClr[r.signal]||'var(--text2)';
+      const sCol=cClr[r.signal];
       const tCol=r.trendUp?'#00c853':'#ff3d57';
       const mCol=r.momUp?'#00c853':r.momDn?'#ff3d57':'var(--text2)';
       const aCol=r.adxOk?'#00c853':'#ffd740';
       const sqz=r.sqzFired?'\ud83d\udd25':r.sqzActive?'\u23f8':'\u2014';
-      const trg=(r.trendUp&&r.triggerUp)||(!r.trendUp&&r.triggerDn)?'\u2713':'';
-      const trgCol=trg?'#00c853':'var(--text2)';
+      const trg=(r.trendUp&&r.trigUp)||(!r.trendUp&&r.trigDn)?'\u2713':'';
       const isActive=r.signal==='long'||r.signal==='short';
-      const miss=(r.missing||[]).filter(m=>!m.startsWith('\u2705')).join(' \u00b7 ');
-      const subRow=isActive
-        ?`<tr><td colspan="7" style="padding:0 4px 7px;font-family:'Nunito',sans-serif;font-size:11px;font-weight:700">
-            <span style="color:var(--text2)">Entrada </span><span style="color:#ff6b00;font-weight:800">${fmtPx(r.entryPx)}</span>
-            <span style="color:var(--text2)"> \u2192 TP </span><span style="color:#00c853;font-weight:800">${fmtPx(r.tpPrice)}</span>
-            <span style="color:var(--text2)"> / SL </span><span style="color:#ff3d57;font-weight:800">${fmtPx(r.slPrice)}</span>
-            <span style="color:var(--text2);font-size:10px"> (+${r.tpPct?r.tpPct.toFixed(1):'\u2014'}% / -${r.slPct?r.slPct.toFixed(1):'\u2014'}%)</span>
-          </td></tr>`
-        :miss?`<tr><td colspan="7" style="padding:0 4px 7px;font-family:'Nunito',sans-serif;font-size:11px;font-weight:700;color:#ffd740">\u26a0 ${miss}</td></tr>`:'';
-      return `<tr style="border-top:1px solid var(--border)">
-        <td style="font-family:'Nunito',sans-serif;font-size:11px;font-weight:800;padding:7px 4px;color:var(--text);white-space:nowrap">${r.label}</td>
-        <td style="padding:6px 2px"><span style="font-family:'Nunito',sans-serif;font-size:11px;font-weight:800;color:${sCol}">${chipMap[r.signal]||'\u2014'}</span></td>
-        <td style="color:${tCol};font-size:14px;text-align:center;padding:6px 2px">${r.trendUp?'\u25b2':'\u25bc'}</td>
-        <td style="color:${aCol};font-family:'Nunito',sans-serif;font-size:11px;font-weight:800;text-align:center;padding:6px 2px">${r.adxVal.toFixed(0)}</td>
-        <td style="color:${mCol};font-size:14px;text-align:center;padding:6px 2px">${r.momUp?'\u25b2':r.momDn?'\u25bc':'\u2014'}</td>
-        <td style="font-size:14px;text-align:center;padding:6px 2px">${sqz}</td>
-        <td style="color:${trgCol};font-family:'Nunito',sans-serif;font-size:13px;font-weight:900;text-align:center;padding:6px 4px">${trg}</td>
-      </tr>${subRow}`;
+      const miss=r.missing.join(' \u00b7 ');
+      const sub=isActive
+        ?'<tr><td colspan="7" style="padding:0 4px 7px;font-family:\'Nunito\',sans-serif;font-size:11px;font-weight:700">'
+          +'<span style="color:var(--text2)">Entrada </span><span style="color:#ff6b00;font-weight:800">'+fP(r.entryPx)+'</span>'
+          +' <span style="color:var(--text2)">\u2192 TP </span><span style="color:#00c853;font-weight:800">'+fP(r.tpPrice)+'</span>'
+          +' <span style="color:var(--text2)">/ SL </span><span style="color:#ff3d57;font-weight:800">'+fP(r.slPrice)+'</span>'
+          +' <span style="color:var(--text2);font-size:10px">(+'+( r.tpPct?r.tpPct.toFixed(1):'\u2014')+'% / -'+(r.slPct?r.slPct.toFixed(1):'\u2014')+'%)</span>'
+          +'</td></tr>'
+        :miss?'<tr><td colspan="7" style="padding:0 4px 7px;font-family:\'Nunito\',sans-serif;font-size:11px;font-weight:700;color:#ffd740">\u26a0 '+miss+'</td></tr>':'';
+      return '<tr style="border-top:1px solid var(--border)">'
+        +'<td style="font-family:\'Nunito\',sans-serif;font-size:11px;font-weight:800;padding:7px 4px;color:var(--text);white-space:nowrap">'+r.label+'</td>'
+        +'<td style="padding:6px 2px"><span style="font-family:\'Nunito\',sans-serif;font-size:11px;font-weight:800;color:'+sCol+'">'+cTxt[r.signal]+'</span></td>'
+        +'<td style="color:'+tCol+';font-size:14px;text-align:center;padding:6px 2px">'+(r.trendUp?'\u25b2':'\u25bc')+'</td>'
+        +'<td style="color:'+aCol+';font-family:\'Nunito\',sans-serif;font-size:11px;font-weight:800;text-align:center;padding:6px 2px">'+r.adxVal.toFixed(0)+'</td>'
+        +'<td style="color:'+mCol+';font-size:14px;text-align:center;padding:6px 2px">'+(r.momUp?'\u25b2':r.momDn?'\u25bc':'\u2014')+'</td>'
+        +'<td style="font-size:14px;text-align:center;padding:6px 2px">'+sqz+'</td>'
+        +'<td style="color:'+(trg?'#00c853':'var(--text2)')+';font-family:\'Nunito\',sans-serif;font-size:13px;font-weight:900;text-align:center;padding:6px 4px">'+trg+'</td>'
+        +'</tr>'+sub;
     }).join('');
 
-    res.innerHTML=`
-      <style>@keyframes tdSpin{to{transform:rotate(360deg)}}</style>
-      <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-top:6px;box-shadow:0 2px 8px var(--shadow)">
+    let bestCard='';
+    if(best){
+      bestCard='<div style="background:'+(bSide==='long'?'rgba(0,200,83,.06)':'rgba(255,61,87,.06)')+';border-bottom:1px solid '+(bSide==='long'?'rgba(0,200,83,.2)':'rgba(255,61,87,.2)')+';padding:10px 14px">'
+        +'<div style="font-family:\'Nunito\',sans-serif;font-size:9px;font-weight:800;letter-spacing:2px;text-transform:uppercase;color:'+(bSide==='long'?'#00c853':'#ff3d57')+';margin-bottom:8px">'+(bSide==='long'?'\u25b2':'\u25bc')+' ENTRADA \u00b7 '+best.label+'</div>'
+        +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px">'
+        +'<div style="background:var(--input-bg);border:1px solid var(--border);border-radius:8px;padding:8px 10px"><div style="font-family:\'Nunito\',sans-serif;font-size:9px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.8px;margin-bottom:3px">Entrada</div><div style="font-family:\'Nunito\',sans-serif;font-size:13px;font-weight:900;color:#ff6b00">'+fP(best.entryPx)+'</div></div>'
+        +'<div style="background:var(--input-bg);border:1px solid rgba(0,200,83,.3);border-radius:8px;padding:8px 10px"><div style="font-family:\'Nunito\',sans-serif;font-size:9px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.8px;margin-bottom:3px">Take Profit</div><div style="font-family:\'Nunito\',sans-serif;font-size:13px;font-weight:900;color:#00c853">'+fP(best.tpPrice)+'</div><div style="font-family:\'Nunito\',sans-serif;font-size:10px;font-weight:700;color:#00c853">+'+(best.tpPct?best.tpPct.toFixed(1):'\u2014')+'%</div></div>'
+        +'<div style="background:var(--input-bg);border:1px solid rgba(255,61,87,.3);border-radius:8px;padding:8px 10px"><div style="font-family:\'Nunito\',sans-serif;font-size:9px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.8px;margin-bottom:3px">Stop Loss</div><div style="font-family:\'Nunito\',sans-serif;font-size:13px;font-weight:900;color:#ff3d57">'+fP(best.slPrice)+'</div><div style="font-family:\'Nunito\',sans-serif;font-size:10px;font-weight:700;color:#ff3d57">-'+(best.slPct?best.slPct.toFixed(1):'\u2014')+'%</div></div>'
+        +'</div>'
+        +'<div style="font-family:\'Nunito\',sans-serif;font-size:10px;font-weight:700;color:var(--text2);margin-top:6px">R/R 1:2 \u00b7 ATR '+fP(best.atr)+'</div>'
+        +'</div>';
+    }
 
-        <div style="display:flex;align-items:center;justify-content:space-between;background:${recBg};border-bottom:2px solid ${recBorder};padding:12px 14px">
-          <div>
-            <div style="font-family:'Nunito',sans-serif;font-size:22px;font-weight:900;color:${recClrMain};line-height:1.1;letter-spacing:-.5px">${recText}</div>
-            <div style="font-family:'Nunito',sans-serif;font-size:10px;font-weight:700;color:var(--text2);margin-top:3px">${recSub}</div>
-          </div>
-          <div style="text-align:right">
-            <div style="font-family:'Nunito',sans-serif;font-size:18px;font-weight:900;color:var(--text)">${fmtPx(price)}</div>
-            <div style="font-family:'Nunito',sans-serif;font-size:12px;font-weight:800;color:${priceChange>=0?'#00c853':'#ff3d57'};margin-top:2px">${priceChange>=0?'+':''}${priceChange.toFixed(2)}%</div>
-          </div>
-        </div>
-
-        ${bestActive?`
-        <div style="background:${bSide==='long'?'rgba(0,200,83,.06)':'rgba(255,61,87,.06)'};border-bottom:1px solid ${bSide==='long'?'rgba(0,200,83,.2)':'rgba(255,61,87,.2)'};padding:10px 14px">
-          <div style="font-family:'Nunito',sans-serif;font-size:9px;font-weight:800;letter-spacing:2px;text-transform:uppercase;color:${bSide==='long'?'#00c853':'#ff3d57'};margin-bottom:8px">${bSide==='long'?'\u25b2':'\u25bc'} ENTRADA \u00b7 ${bestActive.label}</div>
-          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px">
-            <div style="background:var(--input-bg);border:1px solid var(--border);border-radius:8px;padding:8px 10px">
-              <div style="font-family:'Nunito',sans-serif;font-size:9px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.8px;margin-bottom:3px">Entrada</div>
-              <div style="font-family:'Nunito',sans-serif;font-size:13px;font-weight:900;color:#ff6b00">${fmtPx(bestActive.entryPx)}</div>
-            </div>
-            <div style="background:var(--input-bg);border:1px solid rgba(0,200,83,.3);border-radius:8px;padding:8px 10px">
-              <div style="font-family:'Nunito',sans-serif;font-size:9px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.8px;margin-bottom:3px">Take Profit</div>
-              <div style="font-family:'Nunito',sans-serif;font-size:13px;font-weight:900;color:#00c853">${fmtPx(bestActive.tpPrice)}</div>
-              <div style="font-family:'Nunito',sans-serif;font-size:10px;font-weight:700;color:#00c853">+${bestActive.tpPct?bestActive.tpPct.toFixed(1):'\u2014'}%</div>
-            </div>
-            <div style="background:var(--input-bg);border:1px solid rgba(255,61,87,.3);border-radius:8px;padding:8px 10px">
-              <div style="font-family:'Nunito',sans-serif;font-size:9px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.8px;margin-bottom:3px">Stop Loss</div>
-              <div style="font-family:'Nunito',sans-serif;font-size:13px;font-weight:900;color:#ff3d57">${fmtPx(bestActive.slPrice)}</div>
-              <div style="font-family:'Nunito',sans-serif;font-size:10px;font-weight:700;color:#ff3d57">-${bestActive.slPct?bestActive.slPct.toFixed(1):'\u2014'}%</div>
-            </div>
-          </div>
-          <div style="font-family:'Nunito',sans-serif;font-size:10px;font-weight:700;color:var(--text2);margin-top:6px">R/R 1:2 \u00b7 ATR ${fmtPx(bestActive.atr)}</div>
-        </div>`:''}
-
-        <div style="display:flex;flex-wrap:wrap;gap:5px;padding:10px 14px 4px">${chipsHtml}</div>
-
-        <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
-          <table style="width:100%;border-collapse:collapse;font-size:11px">
-            <thead style="background:var(--surface2)"><tr>
-              <th style="font-size:9px;font-weight:800;color:var(--text2);padding:7px 4px;text-align:left;letter-spacing:.8px;text-transform:uppercase;border-bottom:1px solid var(--border)">TF</th>
-              <th style="font-size:9px;font-weight:800;color:var(--text2);padding:7px 2px;text-align:left;letter-spacing:.8px;text-transform:uppercase;border-bottom:1px solid var(--border)">Se\u00f1al</th>
-              <th style="font-size:9px;font-weight:800;color:var(--text2);padding:7px 2px;text-align:center;letter-spacing:.8px;text-transform:uppercase;border-bottom:1px solid var(--border)">Tr</th>
-              <th style="font-size:9px;font-weight:800;color:var(--text2);padding:7px 2px;text-align:center;letter-spacing:.8px;text-transform:uppercase;border-bottom:1px solid var(--border)">ADX</th>
-              <th style="font-size:9px;font-weight:800;color:var(--text2);padding:7px 2px;text-align:center;letter-spacing:.8px;text-transform:uppercase;border-bottom:1px solid var(--border)">Mo</th>
-              <th style="font-size:9px;font-weight:800;color:var(--text2);padding:7px 2px;text-align:center;letter-spacing:.8px;text-transform:uppercase;border-bottom:1px solid var(--border)">Sq</th>
-              <th style="font-size:9px;font-weight:800;color:var(--text2);padding:7px 4px;text-align:center;letter-spacing:.8px;text-transform:uppercase;border-bottom:1px solid var(--border)">\u2713</th>
-            </tr></thead>
-            <tbody>${rowsHtml}</tbody>
-          </table>
-        </div>
-        <div style="font-family:'Nunito',sans-serif;font-size:10px;font-weight:700;color:var(--text2);padding:8px 14px">\ud83d\udd25 dispar\u00f3 \u00b7 \u23f8 comprimido \u00b7 EMA 10/55 \u00b7 Squeeze \u00b7 ADX 14 \u00b7 ${new Date().toLocaleTimeString('es-AR')}</div>
-      </div>`;
+    res.innerHTML='<style>@keyframes tdSpin{to{transform:rotate(360deg)}}</style>'
+      +'<div style="background:var(--card);border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-top:6px;box-shadow:0 2px 8px var(--shadow)">'
+      +'<div style="display:flex;align-items:center;justify-content:space-between;background:'+recBg+';border-bottom:2px solid '+recBorder+';padding:12px 14px">'
+      +'<div><div style="font-family:\'Nunito\',sans-serif;font-size:22px;font-weight:900;color:'+recClr+';line-height:1.1;letter-spacing:-.5px">'+recText+'</div>'
+      +'<div style="font-family:\'Nunito\',sans-serif;font-size:10px;font-weight:700;color:var(--text2);margin-top:3px">'+recSub+'</div></div>'
+      +'<div style="text-align:right"><div style="font-family:\'Nunito\',sans-serif;font-size:18px;font-weight:900;color:var(--text)">'+fP(price)+'</div>'
+      +'<div style="font-family:\'Nunito\',sans-serif;font-size:12px;font-weight:800;color:'+(priceChange>=0?'#00c853':'#ff3d57')+';margin-top:2px">'+(priceChange>=0?'+':'')+priceChange.toFixed(2)+'%</div></div>'
+      +'</div>'
+      +bestCard
+      +'<div style="display:flex;flex-wrap:wrap;gap:5px;padding:10px 14px 4px">'+chipsHtml+'</div>'
+      +'<div style="overflow-x:auto;-webkit-overflow-scrolling:touch">'
+      +'<table style="width:100%;border-collapse:collapse;font-size:11px">'
+      +'<thead style="background:var(--surface2)"><tr>'
+      +'<th style="font-size:9px;font-weight:800;color:var(--text2);padding:7px 4px;text-align:left;letter-spacing:.8px;text-transform:uppercase;border-bottom:1px solid var(--border)">TF</th>'
+      +'<th style="font-size:9px;font-weight:800;color:var(--text2);padding:7px 2px;text-align:left;letter-spacing:.8px;text-transform:uppercase;border-bottom:1px solid var(--border)">Se\u00f1al</th>'
+      +'<th style="font-size:9px;font-weight:800;color:var(--text2);padding:7px 2px;text-align:center;text-transform:uppercase;border-bottom:1px solid var(--border)">Tr</th>'
+      +'<th style="font-size:9px;font-weight:800;color:var(--text2);padding:7px 2px;text-align:center;text-transform:uppercase;border-bottom:1px solid var(--border)">ADX</th>'
+      +'<th style="font-size:9px;font-weight:800;color:var(--text2);padding:7px 2px;text-align:center;text-transform:uppercase;border-bottom:1px solid var(--border)">Mo</th>'
+      +'<th style="font-size:9px;font-weight:800;color:var(--text2);padding:7px 2px;text-align:center;text-transform:uppercase;border-bottom:1px solid var(--border)">Sq</th>'
+      +'<th style="font-size:9px;font-weight:800;color:var(--text2);padding:7px 4px;text-align:center;text-transform:uppercase;border-bottom:1px solid var(--border)">\u2713</th>'
+      +'</tr></thead>'
+      +'<tbody>'+rowsHtml+'</tbody></table></div>'
+      +'<div style="font-family:\'Nunito\',sans-serif;font-size:10px;font-weight:700;color:var(--text2);padding:8px 14px">'
+      +'\ud83d\udd25 dispar\u00f3 \u00b7 \u23f8 comprimido \u00b7 EMA 10/55 \u00b7 Squeeze \u00b7 ADX 14 \u00b7 '+new Date().toLocaleTimeString('es-AR')+'</div>'
+      +'</div>';
 
   }catch(e){
-    res.innerHTML=`<div style="font-size:12px;color:#ff3d57;padding:10px;background:rgba(255,61,87,.06);border:1px solid rgba(255,61,87,.3);border-radius:8px;font-weight:700">\u26a0 ${e.message}</div>`;
+    res.innerHTML='<div style="font-size:12px;color:#ff3d57;padding:10px;background:rgba(255,61,87,.06);border:1px solid rgba(255,61,87,.3);border-radius:8px;font-weight:700">\u26a0 '+e.message+'</div>';
   }finally{
     btn.disabled=false;btn.innerHTML='\u26a1 TD';
   }
 }
+
 </script>
 
 </body>
