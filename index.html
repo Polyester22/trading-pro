@@ -3036,81 +3036,104 @@ function renderOpenTrades(){
     const mins=totalMins%60;
     const timeStr=days>0?`${days}d ${hrs}h`:hrs>0?`${hrs}h ${mins}m`:`${mins}m`;
     const timingClass=t.timing?'timing-'+t.timing.toLowerCase().replace(' ',''):'';
-    return`<div class="open-card" onclick="loadTradeForEdit('${t.id}')">
-      <!-- TOP ROW: ticker + result block -->
-      <div style="display:flex;align-items:stretch;gap:10px;margin-bottom:10px">
-        <!-- Left: ticker info -->
+    const rec=getTradeRecommendation(t,livePct,totalMins,tickerChangeCache[t.ticker]||null);
+    const cev=getCompositeEV(t);
+    const isExpanded=!!openCardExpanded[t.id];
+    const showPrice = pnlToggleState[t.id] === 'price';
+    const pricePct  = (t.entrada && priceForCalc && t.entrada > 0)
+      ? (priceForCalc - t.entrada) / t.entrada * 100 * (t.pos==='Short' ? -1 : 1) : null;
+    const displayPct = showPrice ? pricePct : livePct;
+    const levTag     = showPrice ? 'precio' : `x${t.lev||1}`;
+    return`<div class="open-card" style="cursor:default">
+
+      <!-- ── SUMMARY ROW (siempre visible) ── -->
+      <div style="display:flex;align-items:center;gap:8px" onclick="toggleOpenCard('${t.id}',event)">
+
+        <!-- Ticker + meta -->
         <div style="flex:1;min-width:0">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+          <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">
             <span class="open-card-ticker">${t.ticker}</span>
             <span class="badge badge-${t.pos.toLowerCase()}">${t.pos}</span>
-          </div>
-          <div style="display:flex;gap:5px;flex-wrap:wrap">
             <span class="open-tag">${t.temp}</span>
             <span class="open-tag">${t.estrategia}</span>
             ${t.timing?`<span class="timing-badge ${timingClass}">${t.timing}</span>`:''}
           </div>
-        </div>
-        <!-- Right: result pill — tap to toggle lev% ↔ price% (GLOBAL) -->
-        <div onclick="togglePnlView('${t.id}', event)" style="background:${bgResult};border:1.5px solid ${borderResult};border-radius:10px;padding:10px 14px;text-align:right;flex-shrink:0;display:flex;flex-direction:column;justify-content:center;min-width:90px;cursor:pointer;user-select:none" title="Tocá para alternar % apalancado / % precio — cambia todos los trades">
-          <div style="font-size:9px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">${livePrice?'<span class="live-dot"></span>Live':'Resultado'}</div>
-          ${(()=>{
-            const showPrice = pnlToggleState[t.id] === 'price';
-            const pricePct  = (t.entrada && priceForCalc && t.entrada > 0)
-              ? (priceForCalc - t.entrada) / t.entrada * 100 * (t.pos==='Short' ? -1 : 1)
-              : null;
-            const displayPct = showPrice ? pricePct : livePct;
-            const tag        = showPrice ? 'precio' : `x${t.lev||1}`;
-            const tagColor   = showPrice ? '#00aaff' : 'var(--text2)';
-            return `<div style="font-size:24px;font-weight:900;line-height:1;color:${pctColor}">${displayPct!==null?(displayPct>=0?'+':'')+displayPct.toFixed(2)+'%':'—'}</div>
-            <div style="display:flex;justify-content:flex-end;align-items:center;gap:5px;margin-top:3px">
-              <span style="font-size:10px;font-weight:800;color:${tagColor};background:${showPrice?'rgba(0,170,255,.12)':'rgba(153,153,184,.1)'};border-radius:4px;padding:1px 5px">${tag}</span>
-              <span style="font-size:14px;font-weight:800;color:${pctColor}">${livePnl!==null?(livePnl>=0?'+':'')+'$'+Math.abs(livePnl).toFixed(2):'—'}</span>
-            </div>`;
-          })()}
-        </div>
-      </div>
-      <!-- PRICES ROW -->
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:6px">
-        <div class="open-price-box">
-          <div class="open-price-lbl">Entrada</div>
-          <div class="open-price-val" style="color:#ff6b00;font-size:13px">$${t.entrada?fmtPriceShort(t.entrada):'—'}</div>
-        </div>
-        <div class="open-price-box">
-          <div class="open-price-lbl">${livePrice?'<span class="live-dot"></span>Precio':'Guardado'}</div>
-          <div class="open-price-val" style="color:${pctColor};font-size:13px">$${priceForCalc?fmtPriceShort(priceForCalc):'—'}</div>
-        </div>
-        <div class="open-price-box">
-          <div class="open-price-lbl">Margen</div>
-          <div class="open-price-val" style="font-size:13px">$${t.margen}</div>
-        </div>
-        <div class="open-price-box">
-          <div class="open-price-lbl">⏱ Abierto</div>
-          <div class="open-price-val" style="font-size:12px;color:var(--text2)">${timeStr}</div>
-        </div>
-      </div>
-      ${t.obs?`<div style="margin-top:8px;font-size:11px;color:var(--text2);font-style:italic;padding:0 2px">${t.obs}</div>`:''}
-      ${tickerSemaphoreHTML(t, tickerChangeCache[t.ticker]||null)}
-      ${trailingAlertHTML(t, livePct)}
-      ${(()=>{
-        const tp = getMomentumTP(t.ticker, t.pos);
-        if(!tp) return '';
-        return `<div style="background:${tp.tpBg};border:1px solid ${tp.tpBorder};border-radius:8px;padding:8px 10px;margin-top:8px" onclick="event.stopPropagation()">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
-            <div style="font-size:11px;font-weight:900;color:${tp.tpColor}">${tp.tpLabel}</div>
-            <div style="font-size:10px;font-weight:800;background:${tp.tpBg};color:${tp.tpColor};border:1px solid ${tp.tpBorder};border-radius:5px;padding:1px 7px">${tp.tpDetail}</div>
+          <!-- Recomendación en una línea -->
+          <div style="display:flex;align-items:center;gap:6px;margin-top:5px">
+            <div style="font-size:12px;font-weight:900;color:${rec.color}">${rec.action}</div>
+            ${cev?`<div style="font-size:11px;font-weight:800;color:${cev.ev>=0?'#00c853':'#ff3d57'};background:${cev.ev>=0?'rgba(0,200,83,.1)':'rgba(255,61,87,.1)'};border-radius:4px;padding:1px 6px">EV ${cev.ev>=0?'+':''}${cev.ev.toFixed(1)}%</div>`:''}
+            <div style="font-size:10px;color:var(--text2)">${timeStr}</div>
           </div>
-          <div style="font-size:10px;color:var(--text2);line-height:1.4">${tp.estrategia}</div>
-          ${tp.trailingNote}
-        </div>`;
-      })()}
-      ${renderTPProbBlock(t, livePct)}
-      ${(()=>{const rec=getTradeRecommendation(t,livePct,totalMins,tickerChangeCache[t.ticker]||null);const cev=getCompositeEV(t);return`<div style="display:flex;align-items:center;gap:8px;background:${rec.bg};border:1px solid ${rec.border};border-radius:8px;padding:8px 10px;margin-top:8px"><div style="flex:1"><div style="font-size:12px;font-weight:900;color:${rec.color}">${rec.action}</div><div style="font-size:10px;color:var(--text2);margin-top:1px">${rec.reason}</div></div>${cev?`<div style="text-align:right;flex-shrink:0"><div style="font-size:9px;color:var(--text2);font-weight:700">EV HIST</div><div style="font-size:13px;font-weight:900;color:${cev.ev>=0?'#00c853':'#ff3d57'}">${cev.ev>=0?'+':''}${cev.ev.toFixed(1)}%</div><div style="font-size:8px;color:var(--text2)">${cev.sources} fuentes</div></div>`:''}</div>`;})()}
-      <div style="display:flex;gap:6px;margin-top:10px" onclick="event.stopPropagation()">
-        <button class="btn btn-dark btn-sm" style="flex:1;font-size:12px" onclick="openMCP('${t.id}',false)">📉 Cierre parcial</button>
-        <button class="btn btn-dark btn-sm" style="flex:1;font-size:12px" onclick="openPromedio('${t.id}')">➕ Promediar</button>
-        <button class="btn btn-orange btn-sm" style="flex:1;font-size:12px" onclick="openMCP('${t.id}',true)">✅ Cerrar</button>
+        </div>
+
+        <!-- Result pill + toggle arrow -->
+        <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
+          <div onclick="togglePnlView('${t.id}',event)" style="background:${bgResult};border:1.5px solid ${borderResult};border-radius:10px;padding:8px 12px;text-align:right;cursor:pointer;user-select:none">
+            <div style="font-size:9px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px">${livePrice?'<span class="live-dot"></span>Live':'Resultado'}</div>
+            <div style="font-size:20px;font-weight:900;line-height:1;color:${pctColor}">${displayPct!==null?(displayPct>=0?'+':'')+displayPct.toFixed(2)+'%':'—'}</div>
+            <div style="display:flex;justify-content:flex-end;align-items:center;gap:4px;margin-top:2px">
+              <span style="font-size:9px;font-weight:800;color:${showPrice?'#00aaff':'var(--text2)'};background:${showPrice?'rgba(0,170,255,.12)':'rgba(153,153,184,.1)'};border-radius:3px;padding:1px 4px">${levTag}</span>
+              <span style="font-size:12px;font-weight:800;color:${pctColor}">${livePnl!==null?(livePnl>=0?'+':'')+'$'+Math.abs(livePnl).toFixed(2):'—'}</span>
+            </div>
+          </div>
+          <div style="font-size:14px;color:var(--text2);user-select:none;transition:transform .2s;transform:rotate(${isExpanded?180:0}deg)" onclick="toggleOpenCard('${t.id}',event)">▼</div>
+        </div>
       </div>
+
+      <!-- ── DETAIL (colapsable) ── -->
+      ${isExpanded?`
+      <div style="margin-top:10px;border-top:1px solid var(--border);padding-top:10px">
+        <!-- PRICES ROW -->
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:6px;margin-bottom:8px">
+          <div class="open-price-box">
+            <div class="open-price-lbl">Entrada</div>
+            <div class="open-price-val" style="color:#ff6b00;font-size:13px">$${t.entrada?fmtPriceShort(t.entrada):'—'}</div>
+          </div>
+          <div class="open-price-box">
+            <div class="open-price-lbl">${livePrice?'<span class="live-dot"></span>Precio':'Guardado'}</div>
+            <div class="open-price-val" style="color:${pctColor};font-size:13px">$${priceForCalc?fmtPriceShort(priceForCalc):'—'}</div>
+          </div>
+          <div class="open-price-box">
+            <div class="open-price-lbl">Margen</div>
+            <div class="open-price-val" style="font-size:13px">$${t.margen}</div>
+          </div>
+          <div class="open-price-box">
+            <div class="open-price-lbl">⏱ Abierto</div>
+            <div class="open-price-val" style="font-size:12px;color:var(--text2)">${timeStr}</div>
+          </div>
+        </div>
+        ${t.obs?`<div style="margin-bottom:8px;font-size:11px;color:var(--text2);font-style:italic;padding:0 2px">${t.obs}</div>`:''}
+        ${tickerSemaphoreHTML(t, tickerChangeCache[t.ticker]||null)}
+        ${trailingAlertHTML(t, livePct)}
+        ${(()=>{
+          const tp = getMomentumTP(t.ticker, t.pos);
+          if(!tp) return '';
+          return `<div style="background:${tp.tpBg};border:1px solid ${tp.tpBorder};border-radius:8px;padding:8px 10px;margin-top:8px" onclick="event.stopPropagation()">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">
+              <div style="font-size:11px;font-weight:900;color:${tp.tpColor}">${tp.tpLabel}</div>
+              <div style="font-size:10px;font-weight:800;background:${tp.tpBg};color:${tp.tpColor};border:1px solid ${tp.tpBorder};border-radius:5px;padding:1px 7px">${tp.tpDetail}</div>
+            </div>
+            <div style="font-size:10px;color:var(--text2);line-height:1.4">${tp.estrategia}</div>
+            ${tp.trailingNote}
+          </div>`;
+        })()}
+        ${renderTPProbBlock(t, livePct)}
+        <!-- Recomendación completa -->
+        <div style="display:flex;align-items:center;gap:8px;background:${rec.bg};border:1px solid ${rec.border};border-radius:8px;padding:8px 10px;margin-top:8px">
+          <div style="flex:1">
+            <div style="font-size:12px;font-weight:900;color:${rec.color}">${rec.action}</div>
+            <div style="font-size:10px;color:var(--text2);margin-top:1px">${rec.reason}</div>
+          </div>
+          ${cev?`<div style="text-align:right;flex-shrink:0"><div style="font-size:9px;color:var(--text2);font-weight:700">EV HIST</div><div style="font-size:13px;font-weight:900;color:${cev.ev>=0?'#00c853':'#ff3d57'}">${cev.ev>=0?'+':''}${cev.ev.toFixed(1)}%</div><div style="font-size:8px;color:var(--text2)">${cev.sources} fuentes</div></div>`:''}
+        </div>
+        <!-- Botones -->
+        <div style="display:flex;gap:6px;margin-top:10px" onclick="event.stopPropagation()">
+          <button class="btn btn-dark btn-sm" style="flex:1;font-size:12px" onclick="loadTradeForEdit('${t.id}')">✏️ Editar</button>
+          <button class="btn btn-dark btn-sm" style="flex:1;font-size:12px" onclick="openMCP('${t.id}',false)">📉 Cierre parcial</button>
+          <button class="btn btn-dark btn-sm" style="flex:1;font-size:12px" onclick="openPromedio('${t.id}')">➕ Promediar</button>
+          <button class="btn btn-orange btn-sm" style="flex:1;font-size:12px" onclick="openMCP('${t.id}',true)">✅ Cerrar</button>
+        </div>
+      </div>`:''}
     </div>`;
   }).join('');
   // render KPI projection
