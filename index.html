@@ -3300,10 +3300,15 @@ function renderOpenTrades(){
             <span class="open-tag">${t.estrategia}</span>
             ${t.timing?`<span class="timing-badge ${timingClass}">${t.timing}</span>`:''}
           </div>
-          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:5px">
             <div style="font-size:12px;font-weight:900;color:${rec.color}">${rec.action}</div>
             ${cev?`<div style="font-size:11px;font-weight:800;color:${cev.ev>=0?'#00c853':'#ff3d57'};background:${cev.ev>=0?'rgba(0,200,83,.1)':'rgba(255,61,87,.1)'};border-radius:4px;padding:1px 6px">EV ${cev.ev>=0?'+':''}${cev.ev.toFixed(1)}%</div>`:''}
             <div style="font-size:10px;color:var(--text2)">${timeStr}</div>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <div style="font-size:10px;color:var(--text2);font-weight:700">Entrada <span style="color:#ff6b00;font-weight:900">$${t.entrada?fmtPriceShort(t.entrada):'—'}</span></div>
+            ${priceForCalc?`<div style="font-size:10px;color:var(--text2);font-weight:700">${livePrice?'<span class="live-dot"></span>':''} Precio <span style="color:${pctColor};font-weight:900">$${fmtPriceShort(priceForCalc)}</span></div>`:''}
+            <div style="font-size:10px;color:var(--text2);font-weight:700">Margen <span style="color:var(--text);font-weight:900">$${t.margen}</span></div>
           </div>
         </div>
         <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
