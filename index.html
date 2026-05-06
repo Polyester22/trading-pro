@@ -2471,6 +2471,8 @@ const pnlToggleState = new Proxy({}, {
   get: (_, id) => pnlGlobalMode,
   set: () => true
 });
+const openCardExpanded = {};
+function toggleOpenCard(id, ev){ ev.stopPropagation(); openCardExpanded[id]=!openCardExpanded[id]; renderOpenTrades(); }
 function togglePnlView(id, event){
   event.stopPropagation();
   pnlGlobalMode = pnlGlobalMode === 'price' ? 'lev' : 'price';
@@ -3002,6 +3004,44 @@ function renderAnLog(){
 
 renderAnLog();
 
+function buildDetailHTML(t, livePrice, priceForCalc, pctColor, livePct, timeStr, rec, cev){
+  var tp = getMomentumTP(t.ticker, t.pos);
+  var tpBlock = tp
+    ? '<div style="background:'+tp.tpBg+';border:1px solid '+tp.tpBorder+';border-radius:8px;padding:8px 10px;margin-top:8px">'
+      +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">'
+      +'<div style="font-size:11px;font-weight:900;color:'+tp.tpColor+'">'+tp.tpLabel+'</div>'
+      +'<div style="font-size:10px;font-weight:800;border-radius:5px;padding:1px 7px;color:'+tp.tpColor+';border:1px solid '+tp.tpBorder+'">'+tp.tpDetail+'</div>'
+      +'</div><div style="font-size:10px;color:var(--text2);line-height:1.4">'+tp.estrategia+'</div>'+tp.trailingNote+'</div>'
+    : '';
+  var cevBlock = cev
+    ? '<div style="text-align:right;flex-shrink:0"><div style="font-size:9px;color:var(--text2);font-weight:700">EV HIST</div>'
+      +'<div style="font-size:13px;font-weight:900;color:'+(cev.ev>=0?'#00c853':'#ff3d57')+'">'+(cev.ev>=0?'+':'')+cev.ev.toFixed(1)+'%</div>'
+      +'<div style="font-size:8px;color:var(--text2)">'+cev.sources+' fuentes</div></div>'
+    : '';
+  return '<div style="margin-top:10px;border-top:1px solid var(--border);padding-top:10px">'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:6px;margin-bottom:8px">'
+    +'<div class="open-price-box"><div class="open-price-lbl">Entrada</div><div class="open-price-val" style="color:#ff6b00;font-size:13px">$'+(t.entrada?fmtPriceShort(t.entrada):'—')+'</div></div>'
+    +'<div class="open-price-box"><div class="open-price-lbl">'+(livePrice?'<span class="live-dot"></span>Precio':'Guardado')+'</div><div class="open-price-val" style="color:'+pctColor+';font-size:13px">$'+(priceForCalc?fmtPriceShort(priceForCalc):'—')+'</div></div>'
+    +'<div class="open-price-box"><div class="open-price-lbl">Margen</div><div class="open-price-val" style="font-size:13px">$'+t.margen+'</div></div>'
+    +'<div class="open-price-box"><div class="open-price-lbl">&#9201; Abierto</div><div class="open-price-val" style="font-size:12px;color:var(--text2)">'+timeStr+'</div></div>'
+    +'</div>'
+    +(t.obs?'<div style="margin-bottom:8px;font-size:11px;color:var(--text2);font-style:italic">'+t.obs+'</div>':'')
+    +tickerSemaphoreHTML(t, tickerChangeCache[t.ticker]||null)
+    +trailingAlertHTML(t, livePct)
+    +tpBlock
+    +renderTPProbBlock(t, livePct)
+    +'<div style="display:flex;align-items:center;gap:8px;background:'+rec.bg+';border:1px solid '+rec.border+';border-radius:8px;padding:8px 10px;margin-top:8px">'
+    +'<div style="flex:1"><div style="font-size:12px;font-weight:900;color:'+rec.color+'">'+rec.action+'</div>'
+    +'<div style="font-size:10px;color:var(--text2);margin-top:1px">'+rec.reason+'</div></div>'
+    +cevBlock+'</div>'
+    +'<div style="display:flex;gap:6px;margin-top:10px" onclick="event.stopPropagation()">'
+    +'<button class="btn btn-dark btn-sm" style="flex:1;font-size:12px" onclick="loadTradeForEdit(this.dataset.id)" data-id="'+t.id+'">&#9998; Editar</button>'
+    +'<button class="btn btn-dark btn-sm" style="flex:1;font-size:12px" onclick="openMCP(this.dataset.id,false)" data-id="'+t.id+'">&#128201; Cierre parcial</button>'
+    +'<button class="btn btn-dark btn-sm" style="flex:1;font-size:12px" onclick="openPromedio(this.dataset.id)" data-id="'+t.id+'">&#10133; Promediar</button>'
+    +'<button class="btn btn-orange btn-sm" style="flex:1;font-size:12px" onclick="openMCP(this.dataset.id,true)" data-id="'+t.id+'">&#9989; Cerrar</button>'
+    +'</div></div>';
+}
+
 function renderOpenTrades(){
   const open=D.trades.filter(t=>t.open).sort((a,b)=>b.fecha.localeCompare(a.fecha));
   // Fetch ticker-specific price changes in background
@@ -3044,43 +3084,35 @@ function renderOpenTrades(){
       ? (priceForCalc - t.entrada) / t.entrada * 100 * (t.pos==='Short' ? -1 : 1) : null;
     const displayPct = showPrice ? pricePct : livePct;
     const levTag     = showPrice ? 'precio' : `x${t.lev||1}`;
-    return`<div class="open-card" style="cursor:default">
-
-      <!-- ── SUMMARY ROW (siempre visible) ── -->
-      <div style="display:flex;align-items:center;gap:8px" onclick="toggleOpenCard('${t.id}',event)">
-
-        <!-- Ticker + meta -->
+    const detailHTML = isExpanded ? buildDetailHTML(t, livePrice, priceForCalc, pctColor, livePct, timeStr, rec, cev) : '';
+    return`<div class="open-card" onclick="toggleOpenCard('${t.id}',event)" style="cursor:pointer">
+      <div style="display:flex;align-items:center;gap:8px">
         <div style="flex:1;min-width:0">
-          <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">
+          <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:5px">
             <span class="open-card-ticker">${t.ticker}</span>
             <span class="badge badge-${t.pos.toLowerCase()}">${t.pos}</span>
             <span class="open-tag">${t.temp}</span>
             <span class="open-tag">${t.estrategia}</span>
-            ${t.timing?`<span class="timing-badge ${timingClass}">${t.timing}</span>`:''}
+            ${t.timing?"<span class=\"timing-badge "+timingClass+"\">"+t.timing+"</span>":""}
           </div>
-          <!-- Recomendación en una línea -->
-          <div style="display:flex;align-items:center;gap:6px;margin-top:5px">
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
             <div style="font-size:12px;font-weight:900;color:${rec.color}">${rec.action}</div>
-            ${cev?`<div style="font-size:11px;font-weight:800;color:${cev.ev>=0?'#00c853':'#ff3d57'};background:${cev.ev>=0?'rgba(0,200,83,.1)':'rgba(255,61,87,.1)'};border-radius:4px;padding:1px 6px">EV ${cev.ev>=0?'+':''}${cev.ev.toFixed(1)}%</div>`:''}
+            ${cev?"<div style=\"font-size:11px;font-weight:800;color:"+(cev.ev>=0?"#00c853":"#ff3d57")+";background:"+(cev.ev>=0?"rgba(0,200,83,.1)":"rgba(255,61,87,.1)")+";border-radius:4px;padding:1px 6px\">EV "+(cev.ev>=0?"+":"")+cev.ev.toFixed(1)+"%</div>":""}
             <div style="font-size:10px;color:var(--text2)">${timeStr}</div>
           </div>
         </div>
-
-        <!-- Result pill + toggle arrow -->
         <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
-          <div onclick="togglePnlView('${t.id}',event)" style="background:${bgResult};border:1.5px solid ${borderResult};border-radius:10px;padding:8px 12px;text-align:right;cursor:pointer;user-select:none">
-            <div style="font-size:9px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px">${livePrice?'<span class="live-dot"></span>Live':'Resultado'}</div>
-            <div style="font-size:20px;font-weight:900;line-height:1;color:${pctColor}">${displayPct!==null?(displayPct>=0?'+':'')+displayPct.toFixed(2)+'%':'—'}</div>
+          <div onclick="event.stopPropagation();togglePnlView('${t.id}',event)" style="background:${bgResult};border:1.5px solid ${borderResult};border-radius:10px;padding:8px 12px;text-align:right;cursor:pointer">
+            <div style="font-size:9px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px">${livePrice?"<span class=\"live-dot\"></span>Live":"Resultado"}</div>
+            <div style="font-size:20px;font-weight:900;line-height:1;color:${pctColor}">${displayPct!==null?(displayPct>=0?"+":"")+displayPct.toFixed(2)+"%":"—"}</div>
             <div style="display:flex;justify-content:flex-end;align-items:center;gap:4px;margin-top:2px">
-              <span style="font-size:9px;font-weight:800;color:${showPrice?'#00aaff':'var(--text2)'};background:${showPrice?'rgba(0,170,255,.12)':'rgba(153,153,184,.1)'};border-radius:3px;padding:1px 4px">${levTag}</span>
-              <span style="font-size:12px;font-weight:800;color:${pctColor}">${livePnl!==null?(livePnl>=0?'+':'')+'$'+Math.abs(livePnl).toFixed(2):'—'}</span>
+              <span style="font-size:9px;font-weight:800;color:${showPrice?"#00aaff":"var(--text2)"};background:${showPrice?"rgba(0,170,255,.12)":"rgba(153,153,184,.1)"};border-radius:3px;padding:1px 4px">${levTag}</span>
+              <span style="font-size:12px;font-weight:800;color:${pctColor}">${livePnl!==null?(livePnl>=0?"+":"")+"$"+Math.abs(livePnl).toFixed(2):"—"}</span>
             </div>
           </div>
-          <div style="font-size:14px;color:var(--text2);user-select:none;transition:transform .2s;transform:rotate(${isExpanded?180:0}deg)" onclick="toggleOpenCard('${t.id}',event)">▼</div>
+          <div style="font-size:14px;color:var(--text2);user-select:none;transform:rotate(${isExpanded?180:0}deg);transition:transform .2s">&#9660;</div>
         </div>
       </div>
-
-      <!-- ── DETAIL (colapsable) ── -->
       ${detailHTML}
     </div>`;
   }).join('');
