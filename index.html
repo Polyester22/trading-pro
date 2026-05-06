@@ -2920,15 +2920,15 @@ function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
   // ── DIRECTION comparison (only in auto mode) ──────────────────────────────
   const dirCompare = !isManual ? `
     <div style="display:flex;gap:6px;margin-bottom:10px">
-      <div class="" data-info="score-long" style="flex:1;background:${auto.sLong>=auto.sShort?'rgba(0,200,83,.1)':'var(--card)'};border:1.5px solid ${auto.sLong>=auto.sShort?'rgba(0,200,83,.4)':'var(--border)'};border-radius:8px;padding:8px;text-align:center">
+      <div class="info-tap" data-info="score-long" onclick="handleInfoTap(this)" style="flex:1;background:${auto.sLong>=auto.sShort?'rgba(0,200,83,.1)':'var(--card)'};border:1.5px solid ${auto.sLong>=auto.sShort?'rgba(0,200,83,.4)':'var(--border)'};border-radius:8px;padding:8px;text-align:center">
         <div style="font-size:9px;color:var(--text2);font-weight:700;margin-bottom:3px">LONG score <span style="opacity:.4;font-size:9px">ⓘ</span></div>
         <div style="font-size:18px;font-weight:900;color:${auto.sLong>=5?'#00c853':auto.sLong>=3?'#ffd100':'#9999b8'}">${auto.sLong}/7</div>
       </div>
-      <div class="" data-info="score-short" style="flex:1;background:${auto.sShort>auto.sLong?'rgba(255,61,87,.1)':'var(--card)'};border:1.5px solid ${auto.sShort>auto.sLong?'rgba(255,61,87,.4)':'var(--border)'};border-radius:8px;padding:8px;text-align:center">
+      <div class="info-tap" data-info="score-short" onclick="handleInfoTap(this)" style="flex:1;background:${auto.sShort>auto.sLong?'rgba(255,61,87,.1)':'var(--card)'};border:1.5px solid ${auto.sShort>auto.sLong?'rgba(255,61,87,.4)':'var(--border)'};border-radius:8px;padding:8px;text-align:center">
         <div style="font-size:9px;color:var(--text2);font-weight:700;margin-bottom:3px">SHORT score <span style="opacity:.4;font-size:9px">ⓘ</span></div>
         <div style="font-size:18px;font-weight:900;color:${auto.sShort>=5?'#ff3d57':auto.sShort>=3?'#ffd100':'#9999b8'}">${auto.sShort}/7</div>
       </div>
-      <div class="" data-info="tf" style="flex:1;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:8px;text-align:center">
+      <div class="info-tap" data-info="tf" onclick="handleInfoTap(this)" style="flex:1;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:8px;text-align:center">
         <div style="font-size:9px;color:var(--text2);font-weight:700;margin-bottom:3px">TF sugerido <span style="opacity:.4;font-size:9px">ⓘ</span></div>
         <div style="font-size:18px;font-weight:900;color:#ff6b00">${tf}</div>
       </div>
@@ -2967,7 +2967,7 @@ function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
       conf: conf||0, confLabel: String(confLabel||''), 
       recAction: String(recAction||''), recColor: String(recColor||''),
       scoreRaw: scoreRaw||0, exhEntry: exhEntry||0,
-      exhLabel: String((exhL&&exhL.label)||'').replace(/[\u{1F534}\u{1F7E0}\u{1F7E1}\u{1F7E2}]/gu,' ').replace(/\s+/g,' ').trim(),
+      exhLabel: String((exhL&&exhL.label)||'').split(' ').slice(1).join(' ').trim() || String((exhL&&exhL.label)||''),
       exhCol: String((exhL&&exhL.col)||'var(--text2)'),
       tf: String(tf||''), ticker: String(ticker||''), pos: String(pos||'')
     };
@@ -2975,15 +2975,15 @@ function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
 
   return `
   <div class="an-rec" style="background:${recBg};border:2px solid ${recBorder};margin-bottom:10px">
-    <div class="an-action info-tap" style="color:${recColor}" data-info="riesgo" style="cursor:pointer">${recEmoji} ${recAction}</div>
-    <div class="an-conf info-tap" style="color:${recColor}" data-info="confianza">Confianza: <strong>${confLabel}</strong> (${conf}/100) <span style="opacity:.5;font-size:11px">ⓘ</span></div>
+    <div class="an-action info-tap" style="color:${recColor};cursor:pointer" data-info="riesgo" onclick="handleInfoTap(this)">${recEmoji} ${recAction}</div>
+    <div class="an-conf info-tap" style="color:${recColor};cursor:pointer" data-info="confianza" onclick="handleInfoTap(this)">Confianza: <strong>${confLabel}</strong> (${conf}/100) <span style="opacity:.5;font-size:11px">ⓘ</span></div>
     <div style="font-size:10px;color:var(--text2);margin-top:4px">${ticker} · ${pos} · ${tf} · ${ts}${isManual?' · <span style="color:#ffd100">manual</span>':' · <span style="color:#00aaff">auto</span>'}</div>
     <div style="display:flex;gap:6px;margin-top:7px;flex-wrap:wrap">
       <div style="background:${ttMeta.color}22;border:1px solid ${ttMeta.color}88;border-radius:6px;padding:4px 9px;font-size:11px;font-weight:800;color:${ttMeta.color}">
         ${ttMeta.emoji} ${ttMeta.label} — ${ttMeta.sub}
       </div>
       ${contraTendencia ? `<div style="background:rgba(255,209,0,.15);border:1px solid rgba(255,209,0,.5);border-radius:6px;padding:4px 9px;font-size:11px;font-weight:800;color:#ffd100">⚠️ Contra tendencia</div>` : ''}
-      ${timing !== 'optimal' ? `<div id="an-timing-badge" class="" data-info="riesgo" style="background:${timingInfo.color}22;border:1px solid ${timingInfo.color}88;border-radius:6px;padding:4px 9px;font-size:11px;font-weight:800;color:${timingInfo.color}">
+      ${timing !== 'optimal' ? `<div id="an-timing-badge" class="info-tap" data-info="riesgo" onclick="handleInfoTap(this)" style="cursor:pointer;background:${timingInfo.color}22;border:1px solid ${timingInfo.color}88;border-radius:6px;padding:4px 9px;font-size:11px;font-weight:800;color:${timingInfo.color}">
         ${timingInfo.emoji} ${timingInfo.label} <span style="opacity:.4;font-size:9px">ⓘ</span>
       </div>` : `<div id="an-timing-badge"></div>`}
     </div>
@@ -2992,19 +2992,19 @@ function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
   ${dirCompare}
 
   <div class="an-grid">
-    <div class="an-cell " data-info="sesgo">
+    <div class="an-cell info-tap" data-info="sesgo" onclick="handleInfoTap(this)">
       <div class="an-cell-lbl">Sesgo mercado <span style="opacity:.4;font-size:9px">ⓘ</span></div>
       <div class="an-cell-val" style="color:${biasColor}">${biasLabel}</div>
     </div>
-    <div class="an-cell " data-info="estado">
+    <div class="an-cell info-tap" data-info="estado" onclick="handleInfoTap(this)">
       <div class="an-cell-lbl">Estado movimiento <span style="opacity:.4;font-size:9px">ⓘ</span></div>
       <div class="an-cell-val" style="color:#00c853">P0 — temprano</div>
     </div>
-    <div class="an-cell " data-info="score-mkt">
+    <div class="an-cell info-tap" data-info="score-mkt" onclick="handleInfoTap(this)">
       <div class="an-cell-lbl">Score mkt <span style="opacity:.4;font-size:9px">ⓘ</span></div>
       <div class="an-cell-val" style="color:${tierAdjusted==='fuerte'?'#00c853':tierAdjusted==='medio'?'#ffd100':'#ff6b00'}">${scoreRaw}/7${scoreAdj[tradeType]!==0?` <span style="font-size:10px;color:${scoreAdj[tradeType]>0?'#00c853':'#ff3d57'}">(${scoreAdj[tradeType]>0?'+':''}${scoreAdj[tradeType]})</span>`:''} · ${tierAdjusted}</div>
     </div>
-    <div class="an-cell " data-info="agotamiento">
+    <div class="an-cell info-tap" data-info="agotamiento" onclick="handleInfoTap(this)">
       <div class="an-cell-lbl">Agotamiento <span style="opacity:.4;font-size:9px">ⓘ</span></div>
       <div class="an-cell-val" style="color:${exhL.col}">${exhEntry}/100 · ${exhL.label.replace(/[🟢🟡🟠🔴] /,'')}</div>
     </div>
@@ -9599,25 +9599,23 @@ async function runTDAnalysis(){
 }
 
 
-// ── Info modal delegation — handles data-info clicks anywhere in page ──
-document.addEventListener('click', function(e){
-  var el = e.target.closest('[data-info]');
-  if(!el) return;
-  e.stopPropagation();
-  var key = el.dataset.info;
-  var a   = window._lastAnalysis;
-  var au  = window._lastAuto;
-  if(!a) return;
+// ── Info modal handler — called directly via onclick="handleInfoTap(this)" ──
+function handleInfoTap(el){
+  var key = el ? el.dataset.info : null;
+  if(!key) return;
+  var a  = window._lastAnalysis;
+  var au = window._lastAuto;
+  if(!a){ console.warn('_lastAnalysis not set'); return; }
   if(key === 'score-long'  && au) infoScore(au.sLong,  0, 'long',  au.conditionsLong  || []);
   else if(key === 'score-short' && au) infoScore(au.sShort, 0, 'short', au.conditionsShort || []);
-  else if(key === 'score-mkt' && au) infoScore(a.scoreRaw, 0, a.tradeType, au.conditionsShort || []);
-  else if(key === 'tf')         infoTimeframe(a.tf);
-  else if(key === 'riesgo')     infoRiesgo(a.recAction, a.recColor, a.conf, a.tradeType, a.contraTendencia, a.timing, '');
-  else if(key === 'confianza')  infoConfianza(a.conf, a.confLabel, a.tradeType, a.timing, a.contraTendencia);
-  else if(key === 'sesgo')      infoSesgoPerfil(a.bias, a.biasLabel);
-  else if(key === 'estado')     infoEstadoMovimiento('temprano', 1, null, 0);
+  else if(key === 'score-mkt') infoScore(a.scoreRaw, 0, a.tradeType, (au && au.conditionsShort) || []);
+  else if(key === 'tf')        infoTimeframe(a.tf);
+  else if(key === 'riesgo')    infoRiesgo(a.recAction, a.recColor, a.conf, a.tradeType, a.contraTendencia, a.timing, '');
+  else if(key === 'confianza') infoConfianza(a.conf, a.confLabel, a.tradeType, a.timing, a.contraTendencia);
+  else if(key === 'sesgo')     infoSesgoPerfil(a.bias, a.biasLabel);
+  else if(key === 'estado')    infoEstadoMovimiento('temprano', 1, null, 0);
   else if(key === 'agotamiento') infoAgotamiento(a.exhEntry, a.exhLabel, a.exhCol);
-});
+}
 
 </script>
 
