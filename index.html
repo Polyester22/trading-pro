@@ -2488,6 +2488,7 @@ function togglePnlView(id, event){
 
 let analyzerOpen  = false;
 let analyzerManual = false;
+let _lastAnalysisState = { tradeType: null, pos: null };  // para badge RSI contextual
 let analyzerLog   = JSON.parse(localStorage.getItem('tpro_an_log') || '[]');
 
 function toggleAnalyzer(){
@@ -2617,6 +2618,8 @@ async function runTickerAnalysis(){
   }
 
   document.getElementById('an-result').innerHTML = buildAnalysisHTML(ticker, pos, tf, tc, isManual);
+  // Store last analysis state for RSI badge contextualisation
+  _lastAnalysisState.pos = pos;
   renderAnLog();
   // Automatic chart fetch + Claude interpretation (async, non-blocking)
   fetchAndInterpretChart(ticker, tf);
@@ -2716,7 +2719,15 @@ function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
   const absC4h = Math.abs(c4h);
   let tradeType;
 
-  if(exhEntry >= 70 || (timing === 'late' && exhEntry >= 50)){
+  // RSI extremo puede reforzar detección de agotado según dirección del trade
+  // rsiExhaustion: true cuando RSI extremo está en contra de la posición (sugiere reversión)
+  const rsiExhaustion =
+    (pos === 'Short' && typeof rsi !== 'undefined' && rsi > 72) ||
+    (pos === 'Long'  && typeof rsi !== 'undefined' && rsi < 28);
+
+  if(exhEntry >= 70 || (timing === 'late' && exhEntry >= 50) ||
+     (timing === 'late' && rsiExhaustion) ||
+     (rsiExhaustion && exhEntry >= 40)){
     tradeType = 'agotado';
   } else if(score <= 3 && absC1h < 0.8 && absC4h < 1.5){
     tradeType = 'rango';
@@ -2737,6 +2748,7 @@ function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
     agotado:               { label:'AGOTADO',            emoji:'🔴', color:'#ff3d57', sub:'Movimiento extendido — no entrar' }
   };
   const ttMeta = tradeTypeMeta[tradeType] || tradeTypeMeta['continuacion'];
+  _lastAnalysisState.tradeType = tradeType;  // expose for RSI badge
 
   // ── trendBias display helpers ─────────────────────────────────────────────
   const trendBiasLabel = trendBias === 'alcista' ? '📈 Alcista' : trendBias === 'bajista' ? '📉 Bajista' : '↔ Lateral';
@@ -2752,7 +2764,11 @@ function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
   if(timing === 'late')        conf = Math.min(conf, 44);
   if(timing === 'extended')    conf = Math.min(conf, 62);
   if(absC1h > 2.5)             conf -= 10;
-  if(tradeType === 'agotado')  conf = Math.min(conf, 28);
+  // 'agotado' con RSI confirmando agotamiento = conf más alta (entrada válida por reversión)
+  if(tradeType === 'agotado'){
+    if(rsiExhaustion) conf = Math.min(conf, 58);  // RSI confirma → conf moderada, no colapsada
+    else              conf = Math.min(conf, 28);   // RSI NO confirma → sigue siendo arriesgado
+  }
   if(tradeType === 'rango')    conf = Math.min(conf, 38);
   if(tradeType === 'ruptura')  conf = Math.min(100, conf + 10);
   // Contra-tendencia: penalizar -20 puntos y nunca superar 50
@@ -2768,8 +2784,14 @@ function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
   const dirClear = !isManual && Math.abs(auto.sLong - auto.sShort) >= 2;
 
   if(tradeType === 'agotado'){
-    recAction=isLong?'NO ENTRAR — AGOTADO':'NO ENTRAR — AGOTADO'; recEmoji='🔴';
-    recColor='#ff3d57'; recBg='rgba(255,61,87,.1)'; recBorder='rgba(255,61,87,.5)';
+    if(rsiExhaustion){
+      // RSI extremo confirma agotamiento en dirección del trade — potencial entrada de reversión
+      recAction = isLong ? 'REVERSIÓN — AGOTAMIENTO CONFIRMADO' : 'SHORT — AGOTAMIENTO CONFIRMADO';
+      recEmoji  = '🔄'; recColor = '#ffd100'; recBg = 'rgba(255,209,0,.08)'; recBorder = 'rgba(255,209,0,.45)';
+    } else {
+      recAction = isLong ? 'NO ENTRAR — AGOTADO' : 'NO ENTRAR — AGOTADO'; recEmoji = '🔴';
+      recColor = '#ff3d57'; recBg = 'rgba(255,61,87,.1)'; recBorder = 'rgba(255,61,87,.5)';
+    }
   } else if(tradeType === 'rango'){
     recAction='SIN SEÑAL — RANGO'; recEmoji='↔';
     recColor='#ffd100'; recBg='rgba(255,209,0,.08)'; recBorder='rgba(255,209,0,.4)';
@@ -2842,7 +2864,11 @@ function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
   } else if(tradeType==='continuacion'){
     bullets.unshift('→ Continuación — gestión conservadora: cerrar 50% en TP1');
   } else if(tradeType==='agotado'){
-    bullets.unshift('🔴 Movimiento agotado — evitar entrada, esperar reset');
+    if(rsiExhaustion){
+      bullets.unshift('🔄 RSI extremo confirma agotamiento — entrada de reversión potencial · gestión ajustada');
+    } else {
+      bullets.unshift('🔴 Movimiento agotado — evitar entrada, esperar reset');
+    }
   } else if(tradeType==='rango'){
     bullets.unshift('↔ Mercado en rango — esperar ruptura definida antes de operar');
   }
@@ -8750,23 +8776,77 @@ async function fetchAndInterpretChart(ticker, tf) {
     const klineBreakoutLong  = last > high20;
     const klineBreakoutShort = last < low20;
 
-    // ── Update timing badge with REAL RSI + breakout confirmation ──────────
+    // ── Update timing badge with REAL RSI + breakout confirmation (context-aware) ──
     const badge = document.getElementById('an-timing-badge');
     const ttBadge = document.querySelector('[data-tradetype-badge]');
     if (badge) {
-      const rsi = interp.rsi;
-      const pos = interp.posInRange;
-      const rsiOB = rsi > 70, rsiOS = rsi < 30;
-      const nearRes = pos > 0.82, nearSup = pos < 0.18;
-      if (rsiOB || nearRes || rsiOS || nearSup) {
-        const col = (rsiOB || nearRes) ? '#ff3d57' : '#00c853';
-        const parts = [];
-        if (rsiOB)   parts.push(`RSI ${rsi.toFixed(0)} sobrecomprado`);
-        if (rsiOS)   parts.push(`RSI ${rsi.toFixed(0)} sobrevendido`);
-        if (nearRes) parts.push(`${(pos*100).toFixed(0)}% del rango — zona de resistencia`);
-        if (nearSup) parts.push(`${(pos*100).toFixed(0)}% del rango — zona de soporte`);
+      const rsi    = interp.rsi;
+      const posR   = interp.posInRange;
+      const rsiOB  = rsi > 70, rsiOS = rsi < 30;
+      const nearRes = posR > 0.82, nearSup = posR < 0.18;
+
+      // ── Context: which trade types benefit from RSI extreme? ──
+      const tradeType = _lastAnalysisState.tradeType;
+      const tradePos  = _lastAnalysisState.pos;
+      const reversal  = tradeType === 'agotado';
+      const isRetest  = tradeType === 'continuacion';  // retest often shows as continuacion
+      // RSI extremo CONFIRMA agotamiento si el setup es reversal/agotado
+      const rsiConfirmsExhaustion =
+        reversal &&
+        ((rsiOB  && tradePos === 'Short') ||
+         (rsiOS  && tradePos === 'Long'));
+      // RSI extremo es riesgo de extensión si es continuation limpia
+      const rsiExtensionRisk =
+        !reversal &&
+        ((rsiOB  && tradePos === 'Short') ||
+         (rsiOS  && tradePos === 'Long'));
+      // RSI a favor (sobrecomprado + Long, o sobrevendido + Short) = momentum
+      const rsiMomentumFavor =
+        (rsiOB && tradePos === 'Long') ||
+        (rsiOS && tradePos === 'Short');
+
+      const parts = [];
+      let badgeType = null;  // 'warning' | 'confirm' | 'momentum' | null
+
+      if(rsiConfirmsExhaustion){
+        // Agotamiento confirmado — positivo para el trade
+        if(rsiOB) parts.push(`RSI ${rsi.toFixed(0)} — agotamiento confirmado ✓`);
+        if(rsiOS) parts.push(`RSI ${rsi.toFixed(0)} — sobrevendido confirmado ✓`);
+        badgeType = 'confirm';
+      } else if(rsiMomentumFavor){
+        // RSI extremo pero en dirección del trade — momentum fuerte
+        if(rsiOB) parts.push(`RSI ${rsi.toFixed(0)} — momentum fuerte a favor`);
+        if(rsiOS) parts.push(`RSI ${rsi.toFixed(0)} — momentum fuerte a favor`);
+        badgeType = 'momentum';
+      } else if(rsiExtensionRisk){
+        // Riesgo de entrada tardía en continuation
+        if(rsiOB) parts.push(`RSI ${rsi.toFixed(0)} sobrecomprado — riesgo extensión`);
+        if(rsiOS) parts.push(`RSI ${rsi.toFixed(0)} sobrevendido — riesgo extensión`);
+        badgeType = 'warning';
+      } else if(rsiOB || rsiOS){
+        // Sin contexto suficiente — neutro informativo
+        if(rsiOB) parts.push(`RSI ${rsi.toFixed(0)} sobrecomprado`);
+        if(rsiOS) parts.push(`RSI ${rsi.toFixed(0)} sobrevendido`);
+        badgeType = 'info';
+      }
+
+      // Zona de precio (siempre informativo, sin cambio)
+      if(nearRes) parts.push(`${(posR*100).toFixed(0)}% del rango — zona resistencia`);
+      if(nearSup) parts.push(`${(posR*100).toFixed(0)}% del rango — zona soporte`);
+
+      if(parts.length > 0){
+        let col, icon, label;
+        if(badgeType === 'confirm'){
+          col = '#00c853'; icon = '✅'; label = 'Agotamiento confirmado';
+        } else if(badgeType === 'momentum'){
+          col = '#00aaff'; icon = '⚡'; label = 'Momentum fuerte';
+        } else if(badgeType === 'warning'){
+          col = '#ff3d57'; icon = '⚠️'; label = 'TARDÍO — riesgo extensión';
+        } else {
+          col = '#ffd100'; icon = 'ℹ️'; label = 'RSI extremo';
+        }
         badge.style.cssText = `background:${col}22;border:1px solid ${col}88;border-radius:6px;padding:4px 9px;font-size:11px;font-weight:800;color:${col}`;
-        badge.innerHTML = `⚠️ TARDÍO confirmado — ${parts.join(' · ')}`;
+        badge.innerHTML = `${icon} ${label} — ${parts.join(' · ')}`;
       }
     }
 
