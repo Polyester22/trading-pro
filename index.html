@@ -2360,7 +2360,7 @@ function getTickerDynamicTP(ticker, pos, tier){
   return { tp1, tp2, runner, source, hasData: true, n: nOwn, avg, p75, p90 };
 }
 
-function getMomentumTP(ticker, pos){
+function getMomentumTP(ticker, pos, consensus){
   const tc = tickerChangeCache[ticker] || null;
   const isLong = pos === 'Long';
 
@@ -2402,20 +2402,27 @@ function getMomentumTP(ticker, pos){
   const acelerando = isLong ? accel > 0.08 : accel < -0.08;
   const rsStrong   = isLong ? rs > 1.5 : rs < -1.5;
 
-  // ── Clasificar tier ───────────────────────────────────────────────────────
-  let level, tpColor, tpBg, tpBorder;
-  if(score >= 6 && acelerando){
-    level    = 'FUERTE';
+  // ── Clasificar tier — luego ajustar por consenso del trade ──────────────
+  let rawLevel;
+  if(score >= 6 && acelerando) rawLevel = 'FUERTE';
+  else if(score >= 4)          rawLevel = 'MEDIO';
+  else                         rawLevel = 'DÉBIL';
+
+  // Si hay consenso, usar cappedMomentumLevel para que nunca contradiga rec principal
+  // null = suprimir bloque táctico completamente
+  const level = consensus ? (consensus.cappedMomentumLevel || rawLevel) : rawLevel;
+  if(consensus && consensus.cappedMomentumLevel === null) return null;  // suprimir
+
+  let tpColor, tpBg, tpBorder;
+  if(level === 'FUERTE'){
     tpColor  = '#00c853';
     tpBg     = 'rgba(0,200,83,.08)';
     tpBorder = 'rgba(0,200,83,.35)';
-  } else if(score >= 4){
-    level    = 'MEDIO';
+  } else if(level === 'MEDIO'){
     tpColor  = '#ffd100';
     tpBg     = 'rgba(255,209,0,.08)';
     tpBorder = 'rgba(255,209,0,.35)';
   } else {
-    level    = 'DÉBIL';
     tpColor  = '#ff6b00';
     tpBg     = 'rgba(255,107,0,.08)';
     tpBorder = 'rgba(255,107,0,.35)';
@@ -3003,7 +3010,12 @@ function renderAnLog(){
 renderAnLog();
 
 function buildDetailHTML(t, livePrice, priceForCalc, pctColor, livePct, timeStr, rec, cev){
-  var tp = getMomentumTP(t.ticker, t.pos);
+  // ── Compute consensus once — all blocks read from here ──
+  const _openFrom = t.fechahora ? new Date(t.fechahora) : t.fecha ? new Date(t.fecha+'T12:00:00') : null;
+  const _totalMins = _openFrom ? Math.max(0, Math.floor((Date.now() - _openFrom.getTime()) / 60000)) : 0;
+  const consensus = calcTradeConsensus(t, livePct, _totalMins, tickerChangeCache[t.ticker]||null);
+  // Pass consensus to getMomentumTP so tactical block never contradicts main rec
+  var tp = getMomentumTP(t.ticker, t.pos, consensus);
   var tpBlock = tp
     ? '<div style="background:'+tp.tpBg+';border:1px solid '+tp.tpBorder+';border-radius:8px;padding:8px 10px;margin-top:8px">'
       +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">'
@@ -3044,6 +3056,194 @@ function buildDetailHTML(t, livePrice, priceForCalc, pctColor, livePct, timeStr,
     +'</div></div>';
 }
 
+
+// ══════════════════════════════════════════════════════════════════════════
+// TRADE CONSENSUS ENGINE — fuente única de verdad para todos los bloques
+// Calcula una sola vez y todos los bloques leen de aquí.
+// ══════════════════════════════════════════════════════════════════════════
+function calcTradeConsensus(t, livePct, totalMins, tc){
+  const isLong  = t.pos === 'Long';
+  const pct     = livePct || 0;
+  const snap    = t.anSnapshot || {};
+  const alExh   = snap.agotamiento || 0;
+  const alConf  = snap.confianza   || 0;
+  const entryTT = t.tradeType || snap.tradeType || 'continuacion';
+
+  // ── Momentum ──────────────────────────────────────────────────────────────
+  const has  = tc !== null && tc !== undefined;
+  const c1h  = has ? (tc.change1h  || 0) : 0;
+  const c4h  = has ? (tc.change4h  || 0) : 0;
+  const c24  = has ? (tc.change24h || 0) : 0;
+
+  const momFavor       = isLong ? (c1h >  0.5 || c4h >  1) : (c1h < -0.5 || c4h < -1);
+  const momStrong      = isLong ? (c1h >  1   && c4h >  2) : (c1h < -1   && c4h < -2);
+  const momAgainst     = isLong ? (c1h < -0.5 || c4h < -1) : (c1h >  0.5 || c4h >  1);
+  const momStrongAg    = isLong ? (c1h < -1   && c4h < -2) : (c1h >  1   && c4h >  2);
+
+  // ── Duración ──────────────────────────────────────────────────────────────
+  const durCtx     = classifyTradeDuration(t, totalMins);
+  const isExtended = durCtx.stage === 'extendido';
+  const extRatio   = durCtx.ratio || 1;
+  const earlyPhase = durCtx.stage === 'temprano';
+
+  // ── Historial ─────────────────────────────────────────────────────────────
+  const closed = D.trades.filter(x => !x.open && x.resultado !== undefined);
+  const similar = closed.filter(x => x.estrategia === t.estrategia && x.pos === t.pos);
+  const tkTrades = closed.filter(x => x.ticker === t.ticker);
+  const tkPos    = tkTrades.filter(x => x.pos === t.pos);
+  const tkPosWR  = tkPos.length ? tkPos.filter(x => x.resultado > 0).length / tkPos.length : null;
+  const tkEV     = tkTrades.length ? tkTrades.reduce((s,x) => s+x.resultado, 0) / tkTrades.length : null;
+  const tkWins   = tkTrades.filter(x => x.resultado > 0);
+  const tkLosses = tkTrades.filter(x => x.resultado < 0);
+  const simWins  = similar.filter(x => x.resultado > 0);
+  const simLosses= similar.filter(x => x.resultado < 0);
+  const tkAvgTP  = tkWins.length   >= 3 ? tkWins.reduce((s,x)   => s+x.resultado, 0) / tkWins.length   : null;
+  const tkAvgSL  = tkLosses.length >= 3 ? Math.abs(tkLosses.reduce((s,x) => s+x.resultado, 0) / tkLosses.length) : null;
+  const simAvgTP = simWins.length   ? simWins.reduce((s,x)   => s+x.resultado, 0) / simWins.length   : null;
+  const simAvgSL = simLosses.length ? Math.abs(simLosses.reduce((s,x) => s+x.resultado, 0) / simLosses.length) : null;
+  const effectiveTP = tkAvgTP  || simAvgTP;
+  const effectiveSL = tkAvgSL  || simAvgSL;
+
+  const nearTP  = effectiveTP && pct >= effectiveTP * 0.80;
+  const nearSL  = effectiveSL && pct <= -(effectiveSL * 0.75);
+
+  // ── Confianza efectiva (degradada dinámicamente) ──────────────────────────
+  let confEff = alConf;
+  if(pct < -2)               confEff -= 20;
+  if(isExtended)             confEff -= Math.min(30, (extRatio - 1.4) * 20);
+  if(momAgainst)             confEff -= 15;
+  if(momStrongAg)            confEff -= 10;
+  if(alExh >= 50)            confEff -= 15;
+  if(isExtended && pct < -2) confEff -= 20;
+  confEff = Math.max(0, Math.min(100, confEff));
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // PUNTUACIÓN DE CONSENSO — cada factor aporta entre -2 y +2
+  // Total: -10 a +10
+  // ══════════════════════════════════════════════════════════════════════════
+  let score = 0;
+  const factors = {};
+
+  // 1. Momentum (más peso: es el factor más inmediato)
+  const momScore = momStrong ? 2 : momFavor ? 1 : momAgainst ? -1 : momStrongAg ? -2 : 0;
+  score += momScore * 1.5;
+  factors.momentum = { score: momScore, label: momStrong?'Fuerte a favor': momFavor?'A favor': momStrongAg?'Fuertemente en contra': momAgainst?'En contra':'Neutro' };
+
+  // 2. P&L actual
+  const pnlScore = pct > 5 ? 2 : pct > 0 ? 1 : pct > -3 ? 0 : pct > -6 ? -1 : -2;
+  score += pnlScore;
+  factors.pnl = { score: pnlScore, label: pnlScore >= 1 ? `En ganancia (${pct>=0?'+':''}${pct.toFixed(1)}%)` : pnlScore === 0 ? `Neutro (${pct>=0?'+':''}${pct.toFixed(1)}%)` : `En pérdida (${pct>=0?'+':''}${pct.toFixed(1)}%)` };
+
+  // 3. Duración
+  const durScore = earlyPhase ? 1 : isExtended ? (extRatio > 2 ? -2 : -1) : 0;
+  score += durScore;
+  factors.duracion = { score: durScore, label: earlyPhase?'Temprano': isExtended?`Extendido (${Math.round(extRatio*100)}%)`:'Normal' };
+
+  // 4. Agotamiento
+  const exhScore = alExh >= 70 ? -2 : alExh >= 50 ? -1 : alExh < 30 ? 1 : 0;
+  score += exhScore;
+  factors.agotamiento = { score: exhScore, label: alExh >= 70 ? `Alto (${alExh}/100)` : alExh >= 50 ? `Moderado (${alExh}/100)` : alExh < 30 ? `Bajo (${alExh}/100)` : `Normal (${alExh}/100)` };
+
+  // 5. Confianza efectiva del setup
+  const confScore = confEff >= 65 ? 1 : confEff < 35 ? -1 : 0;
+  score += confScore;
+  factors.confianza = { score: confScore, label: confEff >= 65 ? `Alta (${Math.round(confEff)}%)` : confEff < 35 ? `Baja (${Math.round(confEff)}%)` : `Media (${Math.round(confEff)}%)` };
+
+  // ── Bonus/penalización especial ──────────────────────────────────────────
+  if(nearSL) score -= 3;
+  if(nearTP && momStrong) score += 1;
+  if(alExh >= 70 || (momStrongAg && pct < -2) || (isExtended && extRatio > 2 && pct < -3)) score = Math.min(score, -3);
+
+  const rawScore = Math.round(score * 10) / 10;
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // CALIDAD FINAL derivada del score
+  // ══════════════════════════════════════════════════════════════════════════
+  let calidad, validez;
+  if(rawScore >= 5)       calidad = 'fuerte';
+  else if(rawScore >= 2)  calidad = 'saludable';
+  else if(rawScore >= 0)  calidad = 'desacelerando';
+  else if(rawScore >= -3) calidad = 'deteriorandose';
+  else                    calidad = 'agotado';
+
+  validez = (calidad === 'agotado' || nearSL) ? 'invalidado' : momFavor ? 'valido' : 'neutral';
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // NIVEL DE MOMENTUM PARA BLOQUE TÁCTICO (cappedMomentumLevel)
+  // El bloque táctico "getMomentumTP" nunca puede decir FUERTE si el trade está deteriorado
+  // ══════════════════════════════════════════════════════════════════════════
+  let cappedMomentumLevel;
+  if(rawScore >= 4 && momStrong)          cappedMomentumLevel = 'FUERTE';
+  else if(rawScore >= 1 && momFavor)      cappedMomentumLevel = 'MEDIO';
+  else if(rawScore < -2)                  cappedMomentumLevel = null;   // suprimir bloque táctico
+  else                                    cappedMomentumLevel = 'DÉBIL';
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // RECOMENDACIÓN UNIFICADA
+  // ══════════════════════════════════════════════════════════════════════════
+  // "Extendé TP" solo si todas las condiciones estrictas se cumplen
+  const puedeExtenderTP = rawScore >= 5 && pct > 2 && momStrong && alExh < 40 && confEff >= 60 && !isExtended;
+
+  const al = loadAutoLearning();
+  const al_rup = al?.groupStats?.ruptura;
+  const tp1s = effectiveTP ? effectiveTP.toFixed(1) : '5.0';
+  const tp2s = effectiveTP ? (effectiveTP * 1.5).toFixed(1) : '7.5';
+  const runS = effectiveTP ? (effectiveTP * 2.4).toFixed(1) : '12.0';
+  const tp2hint = al_rup && !al_rup.insuf && al_rup.p75MFE ? ` TP2 hist: +${al_rup.p75MFE.toFixed(1)}%` : '';
+  const bestSalida = (() => {
+    const by = {}; tkPos.forEach(x => { if(x.salida && x.salida !== 'SL'){ if(!by[x.salida]) by[x.salida]=[]; by[x.salida].push(x.resultado); }}); 
+    return Object.entries(by).filter(e=>e[1].length>=2).sort((a,b)=>(b[1].reduce((s,x)=>s+x,0)/b[1].length)-(a[1].reduce((s,x)=>s+x,0)/a[1].length))[0]?.[0] || null;
+  })();
+  const tkCtx = tkTrades.length >= 3 ? ` | ${t.ticker} ${t.pos}: WR ${(tkPosWR!==null?(tkPosWR*100).toFixed(0):'-')}% EV ${tkEV!==null?(tkEV>=0?'+':'')+tkEV.toFixed(1):'?'}%` : '';
+  const tkMov = has ? ` · ${t.ticker} 1h:${c1h>=0?'+':''}${c1h.toFixed(1)}% 4h:${c4h>=0?'+':''}${c4h.toFixed(1)}%` : '';
+
+  let rec;
+  if(calidad === 'agotado'){
+    if(nearSL)
+      rec = {action:'🔴 Cerrar',color:'#ff3d57',bg:'rgba(255,61,87,.1)',border:'rgba(255,61,87,.4)',reason:`Cerca del SL histórico — limitá pérdida ahora`+tkCtx};
+    else if(alExh >= 70)
+      rec = {action:'🔴 Cerrar · Extendido',color:'#ff3d57',bg:'rgba(255,61,87,.1)',border:'rgba(255,61,87,.4)',reason:`Agotamiento alto (${alExh}/100) — probabilidad de continuación baja`+tkCtx};
+    else if(momStrongAg && pct < -2)
+      rec = {action:'🔴 Invalidado — cerrar',color:'#ff3d57',bg:'rgba(255,61,87,.1)',border:'rgba(255,61,87,.4)',reason:`Momentum fuertemente en contra + en pérdida — estructura rota`+tkCtx+tkMov};
+    else
+      rec = {action:'🔴 Cerrar · Trade deteriorado',color:'#ff3d57',bg:'rgba(255,61,87,.1)',border:'rgba(255,61,87,.4)',reason:`Score consenso: ${rawScore.toFixed(0)} — múltiples señales negativas`+tkCtx};
+  } else if(calidad === 'deteriorandose'){
+    if(pct > 2)
+      rec = {action:'🟠 Cerrar parcial — deteriorándose',color:'#ff9100',bg:'rgba(255,145,0,.09)',border:'rgba(255,145,0,.4)',reason:`Trade deteriorándose con ganancia — asegurar parte antes de que siga cayendo`+tkCtx+tkMov};
+    else
+      rec = {action:'🟡 Mantener cautela — deteriorándose',color:'#ffd100',bg:'rgba(255,209,0,.08)',border:'rgba(255,209,0,.4)',reason:`En pérdida con momentum en contra — evaluar salida pronto`+tkCtx+tkMov};
+  } else if(calidad === 'desacelerando'){
+    if(isExtended && pct > 2)
+      rec = {action:'🟠 Trailing activo — desacelerando',color:'#ff9100',bg:'rgba(255,145,0,.09)',border:'rgba(255,145,0,.4)',reason:`Extendido (${Math.round(extRatio*100)}%) con momentum frenando — mové SL a cercanía de precio`+tkCtx+tkMov};
+    else if(nearTP)
+      rec = {action:'🟡 Proteger BE — momentum frenando',color:'#ffd100',bg:'rgba(255,209,0,.08)',border:'rgba(255,209,0,.4)',reason:`TP histórico alcanzado (+${effectiveTP.toFixed(1)}%) con señales mixtas — asegurar entrada`+(bestSalida?` · ${bestSalida}`:'')+tkCtx};
+    else
+      rec = {action:'🟡 Mantener cautela — frenando',color:'#ffd100',bg:'rgba(255,209,0,.08)',border:'rgba(255,209,0,.4)',reason:`Momentum debilitándose · señales mixtas`+tkCtx+tkMov};
+  } else if(puedeExtenderTP && entryTT === 'ruptura'){
+    rec = {action:'🟢 Dejar correr — Ruptura',color:'#00aaff',bg:'rgba(0,170,255,.1)',border:'rgba(0,170,255,.4)',reason:`Ruptura fuerte · TP1 -${tp1s}% · TP2 -${tp2s}% · runner -${runS}%${tp2hint}`+tkCtx};
+  } else if(nearTP && momStrong && pct > 0){
+    rec = {action:'🟢 Dejar correr — En TP',color:'#00c853',bg:'rgba(0,200,83,.08)',border:'rgba(0,200,83,.4)',reason:`TP hist (+${effectiveTP.toFixed(1)}%) con momentum fuerte — dejar correr${tp2hint}`+(bestSalida?` · ${bestSalida}`:'')+tkCtx+tkMov};
+  } else if(isExtended && pct > 2){
+    rec = {action:'🟡 Cierre parcial — trade extendido',color:'#ffd100',bg:'rgba(255,209,0,.08)',border:'rgba(255,209,0,.4)',reason:`Extendido (${Math.round(extRatio*100)}% del típico) con ganancia — asegurar 50%`+(bestSalida?` · ${bestSalida}`:'')+tkCtx};
+  } else if(calidad === 'fuerte'){
+    rec = {action:'🟢 Mantener — setup fuerte',color:'#00c853',bg:'rgba(0,200,83,.08)',border:'rgba(0,200,83,.4)',reason:`Momentum fuerte a favor · trade funcionando (${pct>=0?'+':''}${pct.toFixed(1)}%) · score ${rawScore.toFixed(0)}/10`+tkCtx};
+  } else if(!has){
+    rec = {action:'⚪ Actualizá precios',color:'var(--text2)',bg:'var(--surface2)',border:'var(--border)',reason:'Sin datos live — tocá "Actualizar precios" para análisis completo'+tkCtx};
+  } else if(momFavor && pct >= 0){
+    rec = {action:'🟢 Mantener',color:'#00c853',bg:'rgba(0,200,83,.08)',border:'rgba(0,200,83,.4)',reason:`${t.ticker} con momentum a favor · trade ${pct>=0?'+':''}${pct.toFixed(1)}%`+tkCtx+tkMov};
+  } else {
+    rec = {action:'⚪ Sin señal clara',color:'var(--text2)',bg:'var(--surface2)',border:'var(--border)',reason:`Señales mixtas — score ${rawScore.toFixed(0)}/10`+tkCtx+tkMov};
+  }
+
+  return {
+    rawScore, calidad, validez, factors, confEff, cappedMomentumLevel,
+    puedeExtenderTP, nearTP, nearSL, effectiveTP, effectiveSL,
+    momStrong, momFavor, momAgainst, momStrongAg, isExtended, extRatio,
+    earlyPhase, tkCtx, tkMov, bestSalida, has, c1h, c4h,
+    rec  // recomendación ya construida
+  };
+}
+
 function renderOpenTrades(){
   const open=D.trades.filter(t=>t.open).sort((a,b)=>b.fecha.localeCompare(a.fecha));
   // Fetch ticker-specific price changes in background
@@ -3078,7 +3278,8 @@ function renderOpenTrades(){
     const mins=totalMins%60;
     const timeStr=days>0?`${days}d ${hrs}h`:hrs>0?`${hrs}h ${mins}m`:`${mins}m`;
     const timingClass=t.timing?'timing-'+t.timing.toLowerCase().replace(' ',''):'';
-    const rec = getTradeRecommendation(t,livePct,totalMins,tickerChangeCache[t.ticker]||null);
+    const _consensus = calcTradeConsensus(t, livePct, totalMins, tickerChangeCache[t.ticker]||null);
+    const rec = _consensus.rec;
     const cev = getCompositeEV(t);
     const isExpanded = !!openCardExpanded[t.id];
     const showPrice = pnlToggleState[t.id] === 'price';
@@ -6167,231 +6368,8 @@ function updateOpenCount(){
 
 // ══ TRADE RECOMMENDATION ENGINE ══
 function getTradeRecommendation(t, livePct, totalMins, tc){
-  const closed = D.trades.filter(x => !x.open && x.resultado !== undefined);
-  const isLong = t.pos === 'Long';
-  const pct = livePct || 0;
-  const snap = t.anSnapshot || {};
-
-  // ── Inputs básicos ────────────────────────────────────────────────────────
-  const entryTT  = t.tradeType || snap.tradeType || 'continuacion';
-  const alExh    = snap.agotamiento || 0;
-  const alConf   = snap.confianza   || 0;
-  const al       = loadAutoLearning();
-
-  // ── Precio del ticker ─────────────────────────────────────────────────────
-  const has  = tc !== null && tc !== undefined;
-  const c1h  = has ? tc.change1h  : null;
-  const c4h  = has ? tc.change4h  : null;
-  const c24  = has ? tc.change24h : null;
-  const tkMov = has
-    ? ` · ${t.ticker} 1h:${c1h>=0?'+':''}${c1h.toFixed(1)}% 4h:${c4h>=0?'+':''}${c4h.toFixed(1)}%`
-    : '';
-
-  // Momentum  (positivo = ticker subiendo)
-  const mom =
-    (c1h > 1  && c4h > 2)  ? 'strong_up'   :
-    (c1h < -1 && c4h < -2) ? 'strong_down'  :
-    c1h > 0.5               ? 'weak_up'      :
-    c1h < -0.5              ? 'weak_down'    : 'neutral';
-
-  // ¿Momentum a favor del trade?
-  const momFavor =
-    isLong  ? (mom === 'strong_up'  || mom === 'weak_up')   :
-              (mom === 'strong_down' || mom === 'weak_down');
-  const momStrong =
-    isLong  ? mom === 'strong_up'   : mom === 'strong_down';
-  const momAgainst =
-    isLong  ? (mom === 'strong_down' || mom === 'weak_down') :
-              (mom === 'strong_up'   || mom === 'weak_up');
-  const momStrongAgainst =
-    isLong  ? mom === 'strong_down'  : mom === 'strong_up';
-
-  // ── Estadísticas históricas ───────────────────────────────────────────────
-  const similar  = closed.filter(x => x.estrategia === t.estrategia && x.pos === t.pos);
-  const tkTrades = closed.filter(x => x.ticker === t.ticker);
-  const tkPos    = tkTrades.filter(x => x.pos === t.pos);
-  const tkPosWR  = tkPos.length ? tkPos.filter(x => x.resultado > 0).length / tkPos.length : null;
-  const tkEV     = tkTrades.length ? tkTrades.reduce((s,x) => s+x.resultado, 0) / tkTrades.length : null;
-  const tkWins   = tkTrades.filter(x => x.resultado > 0);
-  const tkLosses = tkTrades.filter(x => x.resultado < 0);
-  const simWins  = similar.filter(x => x.resultado > 0);
-  const simLosses= similar.filter(x => x.resultado < 0);
-  const tkAvgTP  = tkWins.length  >= 3 ? tkWins.reduce((s,x)  => s+x.resultado,  0) / tkWins.length  : null;
-  const tkAvgSL  = tkLosses.length>= 3 ? Math.abs(tkLosses.reduce((s,x) => s+x.resultado, 0) / tkLosses.length) : null;
-  const simAvgTP = simWins.length  ? simWins.reduce((s,x)  => s+x.resultado,  0) / simWins.length  : null;
-  const simAvgSL = simLosses.length? Math.abs(simLosses.reduce((s,x) => s+x.resultado, 0) / simLosses.length) : null;
-  const effectiveTP = tkAvgTP  || simAvgTP;
-  const effectiveSL = tkAvgSL  || simAvgSL;
-  const durData = closed.filter(x => x.estrategia === t.estrategia && x.fechahora && x.closedHora);
-  const avgDurMins = durData.length
-    ? durData.reduce((s,x) => s + Math.max(0,(new Date(x.closedHora)-new Date(x.fechahora))/60000), 0) / durData.length
-    : null;
-
-  const durCtxRec = classifyTradeDuration(t, totalMins);
-  const sessCtx   = getMarketSessionContext();
-  const tkCtx     = tkTrades.length >= 3
-    ? ` | ${t.ticker} ${t.pos}: WR ${(tkPosWR!==null?(tkPosWR*100).toFixed(0):'-')}% EV ${tkEV!==null?(tkEV>=0?'+':'')+tkEV.toFixed(1):'?'}%`
-    : '';
-
-  const bySal = {};
-  tkPos.forEach(x => { if(x.salida && x.salida !== 'SL'){ if(!bySal[x.salida]) bySal[x.salida]=[]; bySal[x.salida].push(x.resultado); }});
-  const bestSalida = Object.entries(bySal).filter(e => e[1].length >= 2).sort((a,b) => (b[1].reduce((s,x)=>s+x,0)/b[1].length)-(a[1].reduce((s,x)=>s+x,0)/a[1].length))[0]?.[0] || null;
-
-  // ── Flags de situación ────────────────────────────────────────────────────
-  const inProfit   = pct >  2;
-  const inLoss     = pct < -2;
-  const nearTP     = effectiveTP && pct >= effectiveTP * 0.80;
-  const nearSL     = effectiveSL && pct <= -(effectiveSL * 0.75);
-  const overtime   = avgDurMins && totalMins > avgDurMins * 1.4;
-  const earlyPhase = durCtxRec.stage === 'temprano';
-  const isExtended = durCtxRec.stage === 'extendido';
-  const extRatio   = durCtxRec.ratio || 1;
-
-  // ══════════════════════════════════════════════════════════════════════════
-  // CAPA 1 — VALIDEZ del trade
-  // ══════════════════════════════════════════════════════════════════════════
-  // Un trade se INVALIDA si:
-  //   - momentum fuertemente en contra + en pérdida
-  //   - extendido en pérdida significativa (>1.5x duración, pct < -3%)
-  //   - agotamiento alto
-  //   - cerca del SL histórico
-  const invalidado =
-    nearSL ||
-    (momStrongAgainst && inLoss) ||
-    (isExtended && extRatio > 2.0 && pct < -3) ||
-    alExh >= 70;
-
-  const validez = invalidado ? 'invalidado' : momFavor ? 'valido' : 'neutral';
-
-  // ══════════════════════════════════════════════════════════════════════════
-  // CAPA 2 — CALIDAD del trade
-  // ══════════════════════════════════════════════════════════════════════════
-  // Confianza efectiva: se degrada dinámicamente
-  let confEff = alConf;
-  if(inLoss)            confEff -= 20;
-  if(isExtended)        confEff -= (extRatio - 1.4) * 15;
-  if(momAgainst)        confEff -= 15;
-  if(momStrongAgainst)  confEff -= 10;  // extra penalización
-  if(alExh >= 50)       confEff -= 15;
-  if(overtime && inLoss)confEff -= 20;
-  confEff = Math.max(0, Math.min(100, confEff));
-
-  // Calidad
-  let calidad;
-  if(invalidado || alExh >= 70){
-    calidad = 'agotado';
-  } else if(inProfit && momStrong && !isExtended && confEff >= 60){
-    calidad = 'fuerte';
-  } else if(!inLoss && (momFavor || !has) && confEff >= 50){
-    calidad = 'saludable';
-  } else if(inProfit && momAgainst){
-    calidad = 'desacelerando';
-  } else if(isExtended && (inLoss || momAgainst)){
-    calidad = 'deteriorandose';
-  } else if(inLoss && momAgainst){
-    calidad = 'deteriorandose';
-  } else {
-    calidad = 'saludable';
-  }
-
-  // ══════════════════════════════════════════════════════════════════════════
-  // CAPA 3 — GESTIÓN
-  // ══════════════════════════════════════════════════════════════════════════
-
-  // "Extendé TP" requiere TODAS estas condiciones:
-  const puedeExtenderTP =
-    inProfit &&
-    momStrong &&
-    alExh < 40 &&
-    confEff >= 60 &&
-    !isExtended &&
-    (entryTT === 'ruptura' || (effectiveTP && pct >= effectiveTP * 0.80));
-
-  const al_rup = al?.groupStats?.ruptura;
-  const tp1 = effectiveTP ? effectiveTP.toFixed(1) : '5.0';
-  const tp2 = effectiveTP ? (effectiveTP * 1.5).toFixed(1) : '7.5';
-  const runner = effectiveTP ? (effectiveTP * 2.4).toFixed(1) : '12.0';
-  const tp2hint = al_rup && !al_rup.insuf && al_rup.p75MFE ? ` TP2 histórico: +${al_rup.p75MFE.toFixed(1)}%` : '';
-
-  // ── INVALIDADO / AGOTADO → CERRAR ────────────────────────────────────────
-  if(calidad === 'agotado' || invalidado){
-    if(nearSL)
-      return{action:'🔴 Cerrar',color:'#ff3d57',bg:'rgba(255,61,87,.1)',border:'rgba(255,61,87,.4)',
-        reason:`Cerca del SL histórico (${effectiveSL?(-effectiveSL).toFixed(1)+'%':'—'}) — limitá pérdida`+tkCtx+tkMov};
-    if(alExh >= 70)
-      return{action:'🔴 Cerrar · Extendido',color:'#ff3d57',bg:'rgba(255,61,87,.1)',border:'rgba(255,61,87,.4)',
-        reason:`Agotamiento alto (${alExh}/100) — probabilidad de continuación baja`+tkCtx};
-    if(momStrongAgainst && inLoss)
-      return{action:'🔴 Invalidado — cerrar',color:'#ff3d57',bg:'rgba(255,61,87,.1)',border:'rgba(255,61,87,.4)',
-        reason:`Momentum fuertemente en contra + en pérdida (${pct>=0?'+':''}${pct.toFixed(1)}%) — estructura rota`+tkCtx+tkMov};
-    if(isExtended && inLoss)
-      return{action:'🔴 Cerrar · Trade deteriorado',color:'#ff3d57',bg:'rgba(255,61,87,.1)',border:'rgba(255,61,87,.4)',
-        reason:`Extendido (${Math.round(extRatio*100)}% del tiempo típico) y en pérdida — deterioro confirmado`+tkCtx};
-    return{action:'🔴 Cerrar',color:'#ff3d57',bg:'rgba(255,61,87,.1)',border:'rgba(255,61,87,.4)',
-        reason:`Trade invalidado — estructura comprometida`+tkCtx+tkMov};
-  }
-
-  // ── DETERIORÁNDOSE ────────────────────────────────────────────────────────
-  if(calidad === 'deteriorandose'){
-    if(inProfit)
-      return{action:'🟠 Cerrar parcial — deteriorándose',color:'#ff9100',bg:'rgba(255,145,0,.09)',border:'rgba(255,145,0,.4)',
-        reason:`Trade extendido con momentum debilitándose — asegurar parte de la ganancia (${pct>=0?'+':''}${pct.toFixed(1)}%)`+tkCtx+tkMov};
-    return{action:'🟡 Mantener cautela — deteriorándose',color:'#ffd100',bg:'rgba(255,209,0,.08)',border:'rgba(255,209,0,.4)',
-        reason:`En pérdida (${pct>=0?'+':''}${pct.toFixed(1)}%) con momentum en contra — evaluar salida`+tkCtx+tkMov};
-  }
-
-  // ── DESACELERANDO ─────────────────────────────────────────────────────────
-  if(calidad === 'desacelerando'){
-    if(isExtended && inProfit)
-      return{action:'🟠 Trailing activo — desacelerando',color:'#ff9100',bg:'rgba(255,145,0,.09)',border:'rgba(255,145,0,.4)',
-        reason:`Extendido (${Math.round(extRatio*100)}% del típico) con momentum frenando — mové SL cerca`+tkCtx+tkMov};
-    if(nearTP)
-      return{action:'🟡 Proteger BE — en TP',color:'#ffd100',bg:'rgba(255,209,0,.08)',border:'rgba(255,209,0,.4)',
-        reason:`TP histórico alcanzado (+${effectiveTP.toFixed(1)}%) con momentum debilitándose — asegurar entrada`+(bestSalida?` · Mejor salida: ${bestSalida}`:'')+tkCtx};
-    return{action:'🟡 Mantener cautela — frenando',color:'#ffd100',bg:'rgba(255,209,0,.08)',border:'rgba(255,209,0,.4)',
-        reason:`Momentum debilitándose (1h:${c1h!==null?c1h.toFixed(1):'?'}%) — seguir con precaución`+tkCtx+tkMov};
-  }
-
-  // ── FUERTE / SALUDABLE ────────────────────────────────────────────────────
-
-  // Dejar correr: ruptura fuerte, ganando, momentum alineado, no extendido
-  if(puedeExtenderTP && entryTT === 'ruptura')
-    return{action:'🟢 Dejar correr — Ruptura',color:'#00aaff',bg:'rgba(0,170,255,.1)',border:'rgba(0,170,255,.4)',
-      reason:`Ruptura en curso — dejar correr · TP1 -${tp1}% · TP2 -${tp2}% · runner -${runner}%${tp2hint}`+tkCtx};
-
-  // Dejar correr: en TP + momentum fuerte
-  if(nearTP && momStrong && inProfit)
-    return{action:'🟢 Dejar correr — En TP',color:'#00c853',bg:'rgba(0,200,83,.08)',border:'rgba(0,200,83,.4)',
-      reason:`TP histórico (+${effectiveTP.toFixed(1)}%) alcanzado con momentum fuerte — dejar correr${tp2hint}`+(bestSalida?` · ${bestSalida}`:'')+tkCtx+tkMov};
-
-  // Cerrar parcial: en overtime + ganando
-  if(isExtended && inProfit)
-    return{action:'🟡 Cierre parcial — trade extendido',color:'#ffd100',bg:'rgba(255,209,0,.08)',border:'rgba(255,209,0,.4)',
-      reason:`Trade extendido (${Math.round(extRatio*100)}% del típico) con ganancia — asegurar 50%`+(bestSalida?` · ${bestSalida}`:'')+tkCtx};
-
-  // Mantener fuerte
-  if(calidad === 'fuerte')
-    return{action:'🟢 Mantener — setup fuerte',color:'#00c853',bg:'rgba(0,200,83,.08)',border:'rgba(0,200,83,.4)',
-      reason:`Momentum alineado (1h:${c1h!==null?c1h.toFixed(1):'?'}% 4h:${c4h!==null?c4h.toFixed(1):'?'}%) · trade funcionando (${pct>=0?'+':''}${pct.toFixed(1)}%)`+tkCtx};
-
-  // Sin precios aún
-  if(!has)
-    return{action:'⚪ Actualizá precios',color:'var(--text2)',bg:'var(--surface2)',border:'var(--border)',
-      reason:'Sin datos de precio live — tocá "Actualizar precios" para análisis completo'+tkCtx};
-
-  // Mantener saludable con momentum a favor
-  if(momFavor && !inLoss)
-    return{action:'🟢 Mantener',color:'#00c853',bg:'rgba(0,200,83,.08)',border:'rgba(0,200,83,.4)',
-      reason:`${t.ticker} con momentum a favor (1h:${c1h!==null?c1h.toFixed(1):'?'}%) — trade saludable`+tkCtx+tkMov};
-
-  // Mantener neutral sin señal clara
-  if(!inLoss && validez !== 'invalidado')
-    return{action:'🟡 Mantener cautela',color:'#ffd100',bg:'rgba(255,209,0,.08)',border:'rgba(255,209,0,.4)',
-      reason:`Sin señal clara — momentum mixto · trade ${pct>=0?'+':''}${pct.toFixed(1)}%`+tkCtx+tkMov};
-
-  // Default
-  return{action:'⚪ Sin señal',color:'var(--text2)',bg:'var(--surface2)',border:'var(--border)',
-    reason:`Sin confluencia suficiente para recomendar acción`+tkCtx+tkMov};
+  const c = calcTradeConsensus(t, livePct, totalMins, tc);
+  return c.rec;
 }
 
 
