@@ -261,7 +261,7 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
 /* ── Info Tooltip Modal ─────────────────────────────────────────── */
 #info-modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:9999;display:none;align-items:flex-end;justify-content:center;padding:0}
 #info-modal-overlay.open{display:flex}
-#info-modal{background:var(--card);border:1px solid var(--border);border-radius:16px 16px 0 0;width:100%;max-width:520px;max-height:80vh;overflow-y:auto;padding:20px 18px 32px;box-shadow:0 -4px 24px rgba(0,0,0,.4)}
+#info-modal{background:var(--card);border:1px solid var(--border);border-radius:16px 16px 0 0;width:100%;max-width:520px;max-height:80vh;overflow-y:auto;padding:20px 18px 32px;box-shadow:0 -4px 24px rgba(0,0,0,.4);cursor:default}
 #info-modal-title{font-family:'Nunito',sans-serif;font-size:16px;font-weight:900;color:var(--text);margin-bottom:4px;line-height:1.2}
 #info-modal-subtitle{font-size:11px;font-weight:700;color:var(--text2);margin-bottom:14px}
 #info-modal-body{font-size:13px;color:var(--text);line-height:1.7;font-weight:600}
@@ -2656,8 +2656,9 @@ async function runTickerAnalysis(){
   try {
     document.getElementById('an-result').innerHTML = buildAnalysisHTML(ticker, pos, tf, tc, isManual);
   } catch(buildErr) {
+    var errDetail = buildErr.message + (buildErr.stack ? ' | ' + buildErr.stack.split('\n').slice(0,3).join(' | ') : '');
     document.getElementById('an-result').innerHTML = 
-      '<div style="font-size:12px;color:#ff3d57;padding:12px;background:rgba(255,61,87,.1);border-radius:8px">⚠️ Error interno: ' + buildErr.message + '</div>';
+      '<div style="font-size:11px;color:#ff3d57;padding:12px;background:rgba(255,61,87,.1);border-radius:8px;word-break:break-all">⚠️ ' + errDetail + '</div>';
     console.error('buildAnalysisHTML error:', buildErr);
     return;
   }
@@ -2920,15 +2921,15 @@ function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
   // ── DIRECTION comparison (only in auto mode) ──────────────────────────────
   const dirCompare = !isManual ? `
     <div style="display:flex;gap:6px;margin-bottom:10px">
-      <div class="info-tap" data-info="score-long" data-score="${auto.sLong}" data-side="long" data-adj="${scoreAdj[tradeType]||0}" data-tt="${tradeType}" onclick="handleInfoTap(this)" style="flex:1;background:${auto.sLong>=auto.sShort?'rgba(0,200,83,.1)':'var(--card)'};border:1.5px solid ${auto.sLong>=auto.sShort?'rgba(0,200,83,.4)':'var(--border)'};border-radius:8px;padding:8px;text-align:center">
+      <div class="info-tap" data-info="score-long" data-score="${auto.sLong}" data-side="long" data-adj="${scoreAdj[tradeType]||0}" data-tt="${tradeType}" onclick="event.stopPropagation();handleInfoTap(this)" style="flex:1;background:${auto.sLong>=auto.sShort?'rgba(0,200,83,.1)':'var(--card)'};border:1.5px solid ${auto.sLong>=auto.sShort?'rgba(0,200,83,.4)':'var(--border)'};border-radius:8px;padding:8px;text-align:center">
         <div style="font-size:9px;color:var(--text2);font-weight:700;margin-bottom:3px">LONG score <span style="opacity:.4;font-size:9px">ⓘ</span></div>
         <div style="font-size:18px;font-weight:900;color:${auto.sLong>=5?'#00c853':auto.sLong>=3?'#ffd100':'#9999b8'}">${auto.sLong}/7</div>
       </div>
-      <div class="info-tap" data-info="score-short" data-score="${auto.sShort}" data-side="short" data-adj="${scoreAdj[tradeType]||0}" data-tt="${tradeType}" onclick="handleInfoTap(this)" style="flex:1;background:${auto.sShort>auto.sLong?'rgba(255,61,87,.1)':'var(--card)'};border:1.5px solid ${auto.sShort>auto.sLong?'rgba(255,61,87,.4)':'var(--border)'};border-radius:8px;padding:8px;text-align:center">
+      <div class="info-tap" data-info="score-short" data-score="${auto.sShort}" data-side="short" data-adj="${scoreAdj[tradeType]||0}" data-tt="${tradeType}" onclick="event.stopPropagation();handleInfoTap(this)" style="flex:1;background:${auto.sShort>auto.sLong?'rgba(255,61,87,.1)':'var(--card)'};border:1.5px solid ${auto.sShort>auto.sLong?'rgba(255,61,87,.4)':'var(--border)'};border-radius:8px;padding:8px;text-align:center">
         <div style="font-size:9px;color:var(--text2);font-weight:700;margin-bottom:3px">SHORT score <span style="opacity:.4;font-size:9px">ⓘ</span></div>
         <div style="font-size:18px;font-weight:900;color:${auto.sShort>=5?'#ff3d57':auto.sShort>=3?'#ffd100':'#9999b8'}">${auto.sShort}/7</div>
       </div>
-      <div class="info-tap" data-info="tf" data-tf="${tf}" onclick="handleInfoTap(this)" style="flex:1;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:8px;text-align:center">
+      <div class="info-tap" data-info="tf" data-tf="${tf}" onclick="event.stopPropagation();handleInfoTap(this)" style="flex:1;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:8px;text-align:center">
         <div style="font-size:9px;color:var(--text2);font-weight:700;margin-bottom:3px">TF sugerido <span style="opacity:.4;font-size:9px">ⓘ</span></div>
         <div style="font-size:18px;font-weight:900;color:#ff6b00">${tf}</div>
       </div>
@@ -2975,15 +2976,15 @@ function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
 
   return `
   <div class="an-rec" style="background:${recBg};border:2px solid ${recBorder};margin-bottom:10px">
-    <div class="an-action info-tap" style="color:${recColor};cursor:pointer" data-info="riesgo" data-conf="${conf}" data-tt="${tradeType}" data-ct="${contraTendencia}" data-timing="${timing}" onclick="handleInfoTap(this)">${recEmoji} ${recAction}</div>
-    <div class="an-conf info-tap" style="color:${recColor};cursor:pointer" data-info="confianza" data-conf="${conf}" data-conflabel="${confLabel}" data-tt="${tradeType}" data-timing="${timing}" data-ct="${contraTendencia}" onclick="handleInfoTap(this)">Confianza: <strong>${confLabel}</strong> (${conf}/100) <span style="opacity:.5;font-size:11px">ⓘ</span></div>
+    <div class="an-action info-tap" style="color:${recColor};cursor:pointer" data-info="riesgo" data-conf="${conf}" data-tt="${tradeType}" data-ct="${contraTendencia}" data-timing="${timing}" onclick="event.stopPropagation();handleInfoTap(this)">${recEmoji} ${recAction}</div>
+    <div class="an-conf info-tap" style="color:${recColor};cursor:pointer" data-info="confianza" data-conf="${conf}" data-conflabel="${confLabel}" data-tt="${tradeType}" data-timing="${timing}" data-ct="${contraTendencia}" onclick="event.stopPropagation();handleInfoTap(this)">Confianza: <strong>${confLabel}</strong> (${conf}/100) <span style="opacity:.5;font-size:11px">ⓘ</span></div>
     <div style="font-size:10px;color:var(--text2);margin-top:4px">${ticker} · ${pos} · ${tf} · ${ts}${isManual?' · <span style="color:#ffd100">manual</span>':' · <span style="color:#00aaff">auto</span>'}</div>
     <div style="display:flex;gap:6px;margin-top:7px;flex-wrap:wrap">
       <div style="background:${ttMeta.color}22;border:1px solid ${ttMeta.color}88;border-radius:6px;padding:4px 9px;font-size:11px;font-weight:800;color:${ttMeta.color}">
         ${ttMeta.emoji} ${ttMeta.label} — ${ttMeta.sub}
       </div>
       ${contraTendencia ? `<div style="background:rgba(255,209,0,.15);border:1px solid rgba(255,209,0,.5);border-radius:6px;padding:4px 9px;font-size:11px;font-weight:800;color:#ffd100">⚠️ Contra tendencia</div>` : ''}
-      ${timing !== 'optimal' ? `<div id="an-timing-badge" class="info-tap" data-info="riesgo" onclick="handleInfoTap(this)" style="cursor:pointer;background:${timingInfo.color}22;border:1px solid ${timingInfo.color}88;border-radius:6px;padding:4px 9px;font-size:11px;font-weight:800;color:${timingInfo.color}">
+      ${timing !== 'optimal' ? `<div id="an-timing-badge" class="info-tap" data-info="riesgo" onclick="event.stopPropagation();handleInfoTap(this)" style="cursor:pointer;background:${timingInfo.color}22;border:1px solid ${timingInfo.color}88;border-radius:6px;padding:4px 9px;font-size:11px;font-weight:800;color:${timingInfo.color}">
         ${timingInfo.emoji} ${timingInfo.label} <span style="opacity:.4;font-size:9px">ⓘ</span>
       </div>` : `<div id="an-timing-badge"></div>`}
     </div>
@@ -2992,19 +2993,19 @@ function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
   ${dirCompare}
 
   <div class="an-grid">
-    <div class="an-cell info-tap" data-info="sesgo" data-bias="${trendBias}" data-biaslabel="${trendBiasLabel}" onclick="handleInfoTap(this)">
+    <div class="an-cell info-tap" data-info="sesgo" data-bias="${trendBias}" data-biaslabel="${trendBiasLabel}" onclick="event.stopPropagation();handleInfoTap(this)">
       <div class="an-cell-lbl">Sesgo mercado <span style="opacity:.4;font-size:9px">ⓘ</span></div>
       <div class="an-cell-val" style="color:${biasColor}">${biasLabel}</div>
     </div>
-    <div class="an-cell info-tap" data-info="estado" onclick="handleInfoTap(this)">
+    <div class="an-cell info-tap" data-info="estado" onclick="event.stopPropagation();handleInfoTap(this)">
       <div class="an-cell-lbl">Estado movimiento <span style="opacity:.4;font-size:9px">ⓘ</span></div>
       <div class="an-cell-val" style="color:#00c853">P0 — temprano</div>
     </div>
-    <div class="an-cell info-tap" data-info="score-mkt" data-score="${scoreRaw}" data-adj="${scoreAdj[tradeType]||0}" data-tt="${tradeType}" onclick="handleInfoTap(this)">
+    <div class="an-cell info-tap" data-info="score-mkt" data-score="${scoreRaw}" data-adj="${scoreAdj[tradeType]||0}" data-tt="${tradeType}" onclick="event.stopPropagation();handleInfoTap(this)">
       <div class="an-cell-lbl">Score mkt <span style="opacity:.4;font-size:9px">ⓘ</span></div>
       <div class="an-cell-val" style="color:${tierAdjusted==='fuerte'?'#00c853':tierAdjusted==='medio'?'#ffd100':'#ff6b00'}">${scoreRaw}/7${scoreAdj[tradeType]!==0?` <span style="font-size:10px;color:${scoreAdj[tradeType]>0?'#00c853':'#ff3d57'}">(${scoreAdj[tradeType]>0?'+':''}${scoreAdj[tradeType]})</span>`:''} · ${tierAdjusted}</div>
     </div>
-    <div class="an-cell info-tap" data-info="agotamiento" data-exh="${exhEntry}" data-col="${exhL.col}" onclick="handleInfoTap(this)">
+    <div class="an-cell info-tap" data-info="agotamiento" data-exh="${exhEntry}" data-col="${exhL.col}" onclick="event.stopPropagation();handleInfoTap(this)">
       <div class="an-cell-lbl">Agotamiento <span style="opacity:.4;font-size:9px">ⓘ</span></div>
       <div class="an-cell-val" style="color:${exhL.col}">${exhEntry}/100 · ${exhL.label.replace(/[🟢🟡🟠🔴] /,'')}</div>
     </div>
@@ -8933,22 +8934,22 @@ async function fetchAndInterpretChart(ticker, tf) {
     el.innerHTML = `<div style="border-top:1px solid var(--border);margin-top:8px;padding-top:10px">
       <div style="font-size:10px;font-weight:800;color:#00aaff;text-transform:uppercase;letter-spacing:.5px;margin-bottom:7px">📊 Análisis técnico · ${symbol} ${interval}</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:8px">
-        <div class="info-tap" onclick="infoRSI(${interp.rsi})" style="background:var(--surface2);border-radius:7px;padding:7px 9px;font-size:10px">
+        <div class="info-tap" onclick="event.stopPropagation();infoRSI(${interp.rsi})" style="background:var(--surface2);border-radius:7px;padding:7px 9px;font-size:10px">
           <div style="color:var(--text2);font-weight:700;margin-bottom:2px">RSI 7 <span style="opacity:.5">ⓘ</span></div>
           <div style="font-size:14px;font-weight:900;color:${interp.rsi>70?'#ff3d57':interp.rsi<30?'#00c853':'#ffd100'}">${interp.rsi.toFixed(0)}</div>
           <div style="color:var(--text2);font-size:9px">${interp.rsi>70?'Sobrecomprado':interp.rsi<30?'Sobrevendido':'Neutral'}</div>
         </div>
-        <div class="info-tap" onclick="infoMACD(${interp.macd},'${interp.macdSignal}')" style="background:var(--surface2);border-radius:7px;padding:7px 9px;font-size:10px">
+        <div class="info-tap" onclick="event.stopPropagation();infoMACD(${interp.macd},'${interp.macdSignal}')" style="background:var(--surface2);border-radius:7px;padding:7px 9px;font-size:10px">
           <div style="color:var(--text2);font-weight:700;margin-bottom:2px">MACD <span style="opacity:.5">ⓘ</span></div>
           <div style="font-size:14px;font-weight:900;color:${interp.macd>0?'#00c853':'#ff3d57'}">${interp.macd>=0?'+':''}${interp.macd.toFixed(4)}</div>
           <div style="color:var(--text2);font-size:9px">${interp.macdSignal}</div>
         </div>
-        <div class="info-tap" onclick="infoTendencia('${interp.trend}','${interp.vsSMA}')" style="background:var(--surface2);border-radius:7px;padding:7px 9px;font-size:10px">
+        <div class="info-tap" onclick="event.stopPropagation();infoTendencia('${interp.trend}','${interp.vsSMA}')" style="background:var(--surface2);border-radius:7px;padding:7px 9px;font-size:10px">
           <div style="color:var(--text2);font-weight:700;margin-bottom:2px">Tendencia <span style="opacity:.5">ⓘ</span></div>
           <div style="font-size:13px;font-weight:900;color:${interp.trend==='alcista'?'#00c853':interp.trend==='bajista'?'#ff3d57':'#ffd100'}">${interp.trend.toUpperCase()}</div>
           <div style="color:var(--text2);font-size:9px">vs SMA20 · ${interp.vsSMA}</div>
         </div>
-        <div class="info-tap" onclick="infoVolumen('${interp.volSignal}')" style="background:var(--surface2);border-radius:7px;padding:7px 9px;font-size:10px">
+        <div class="info-tap" onclick="event.stopPropagation();infoVolumen('${interp.volSignal}')" style="background:var(--surface2);border-radius:7px;padding:7px 9px;font-size:10px">
           <div style="color:var(--text2);font-weight:700;margin-bottom:2px">Volumen <span style="opacity:.5">ⓘ</span></div>
           <div style="font-size:13px;font-weight:900;color:${interp.volSignal==='alto'?'#ff6b00':'var(--text2)'}">${interp.volSignal.toUpperCase()}</div>
           <div style="color:var(--text2);font-size:9px">vs media 20 velas</div>
@@ -9599,8 +9600,9 @@ async function runTDAnalysis(){
 }
 
 
-// ── Info modal handler — called directly via onclick="handleInfoTap(this)" ──
+// ── Info modal handler — called directly via onclick="event.stopPropagation();handleInfoTap(this)" ──
 function handleInfoTap(el){
+  if(event) try{event.stopPropagation();}catch(e){}
   while(el && !el.dataset.info) el = el.parentElement;
   if(!el) return;
   var d = el.dataset;
