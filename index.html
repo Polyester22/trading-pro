@@ -412,26 +412,35 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
         </button>
       </div>
 
-      <!-- Toggle modo manual -->
+      <!-- Toggle elegir timeframe (nuevo modo objetivo: TF manual, dirección auto) -->
       <div style="margin-bottom:10px">
         <button onclick="toggleAnManual()" id="an-manual-toggle"
           style="background:none;border:none;font-family:'Nunito',sans-serif;font-size:11px;font-weight:700;color:var(--text2);cursor:pointer;padding:0;display:flex;align-items:center;gap:5px">
-          <span id="an-manual-arrow">▶</span> Modo manual (forzar dirección y timeframe)
+          <span id="an-manual-arrow">▶</span> Elegir timeframe
         </button>
-        <div id="an-manual-fields" style="display:none;margin-top:8px;padding:10px 12px;background:rgba(255,209,0,.06);border:1px solid rgba(255,209,0,.2);border-radius:8px">
-          <div style="font-size:9px;font-weight:800;color:#ffd100;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">⚠️ Modo manual — el análisis valida tu hipótesis, no es neutral</div>
-          <div style="display:flex;gap:8px">
-            <select id="an-pos" style="flex:1;background:var(--input-bg);border:1.5px solid var(--border);border-radius:8px;color:var(--text);font-family:'Nunito',sans-serif;font-size:13px;font-weight:700;padding:9px 10px;outline:none;-webkit-appearance:none">
-              <option value="Long">Long</option>
-              <option value="Short">Short</option>
-            </select>
-            <select id="an-tf" style="flex:1;background:var(--input-bg);border:1.5px solid var(--border);border-radius:8px;color:var(--text);font-family:'Nunito',sans-serif;font-size:13px;font-weight:700;padding:9px 10px;outline:none;-webkit-appearance:none">
-              <option value="1m">1m</option>
-              <option value="5m">5m</option>
-              <option value="15m" selected>15m</option>
-              <option value="1h">1h</option>
-              <option value="4h">4h</option>
-            </select>
+        <div id="an-manual-fields" style="display:none;margin-top:8px;padding:10px 12px;background:rgba(0,170,255,.05);border:1px solid rgba(0,170,255,.2);border-radius:8px">
+          <div style="font-size:9px;font-weight:800;color:#00aaff;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px">🕐 TF elegido — el sistema determina dirección de forma objetiva</div>
+          <select id="an-tf" style="width:100%;background:var(--input-bg);border:1.5px solid var(--border);border-radius:8px;color:var(--text);font-family:'Nunito',sans-serif;font-size:13px;font-weight:700;padding:9px 10px;outline:none;-webkit-appearance:none">
+            <option value="1m">1m</option>
+            <option value="5m">5m</option>
+            <option value="15m" selected>15m</option>
+            <option value="1h">1h</option>
+            <option value="4h">4h</option>
+          </select>
+
+          <!-- Sub-toggle: Modo hipótesis (avanzado) -->
+          <div style="margin-top:8px">
+            <button onclick="toggleAnHypothesis()" id="an-hypo-toggle"
+              style="background:none;border:none;font-family:'Nunito',sans-serif;font-size:10px;font-weight:700;color:var(--text2);cursor:pointer;padding:0;display:flex;align-items:center;gap:4px">
+              <span id="an-hypo-arrow">▶</span> Modo hipótesis (avanzado — validar una idea previa)
+            </button>
+            <div id="an-hypo-fields" style="display:none;margin-top:8px;padding:8px 10px;background:rgba(255,209,0,.06);border:1px solid rgba(255,209,0,.2);border-radius:8px">
+              <div style="font-size:9px;font-weight:800;color:#ffd100;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">⚠️ El análisis valida tu hipótesis — no es neutral</div>
+              <select id="an-hypo-dir" style="width:100%;background:var(--input-bg);border:1.5px solid var(--border);border-radius:8px;color:var(--text);font-family:'Nunito',sans-serif;font-size:13px;font-weight:700;padding:9px 10px;outline:none;-webkit-appearance:none">
+                <option value="Long">Long</option>
+                <option value="Short">Short</option>
+              </select>
+            </div>
           </div>
         </div>
       </div>
@@ -2505,7 +2514,8 @@ function togglePnlView(id, event){
 // ══ TICKER ANALYZER ══════════════════════════════════════════════════════════
 
 let analyzerOpen  = false;
-let analyzerManual = false;
+let analyzerManual = false;     // true: user picked TF (TF-only mode)
+let analyzerHypothesis = false; // true: user also picked direction (hypothesis mode)
 let _lastAnalysisState = { tradeType: null, pos: null };  // para badge RSI contextual
 let analyzerLog   = JSON.parse(localStorage.getItem('tpro_an_log') || '[]');
 
@@ -2519,6 +2529,18 @@ function toggleAnManual(){
   analyzerManual = !analyzerManual;
   document.getElementById('an-manual-fields').style.display = analyzerManual ? 'block' : 'none';
   document.getElementById('an-manual-arrow').textContent    = analyzerManual ? '▼' : '▶';
+  // Colapsar hipótesis si se cierra el TF picker
+  if(!analyzerManual && analyzerHypothesis){
+    analyzerHypothesis = false;
+    document.getElementById('an-hypo-fields').style.display = 'none';
+    document.getElementById('an-hypo-arrow').textContent = '▶';
+  }
+}
+
+function toggleAnHypothesis(){
+  analyzerHypothesis = !analyzerHypothesis;
+  document.getElementById('an-hypo-fields').style.display = analyzerHypothesis ? 'block' : 'none';
+  document.getElementById('an-hypo-arrow').textContent    = analyzerHypothesis ? '▼' : '▶';
 }
 
 function onAnTickerInput(){
@@ -2579,6 +2601,10 @@ function autoDetectDirection(tc){
     score = Math.max(sLong, sShort);
   }
 
+  // NO TRADE: señales ambiguas o demasiado débiles
+  // Si el delta entre Long/Short < 2 Y el mejor score < 4 → mercado sin dirección clara
+  const noTrade = (Math.abs(sLong - sShort) < 2) && (Math.max(sLong, sShort) < 4);
+
   // Suggest timeframe based on acceleration / volatility
   const absAccel = Math.abs(accel);
   const abs1h    = Math.abs(c1h);
@@ -2604,7 +2630,7 @@ function autoDetectDirection(tc){
     {label:`24H ${c24.toFixed(2)}% (tendencia diaria)`,    ok: c24 < 0},
     {label:`4H ${c4h.toFixed(2)}% (estructura bajista)`,   ok: c4h < 0},
   ];
-  return { pos, score, sLong, sShort, tf, c1h, c4h, c24, rs, accel, amp, btc1h, conditionsLong, conditionsShort };
+  return { pos, score, sLong, sShort, tf, c1h, c4h, c24, rs, accel, amp, btc1h, noTrade, conditionsLong, conditionsShort };
 }
 
 async function runTickerAnalysis(){
@@ -2639,20 +2665,46 @@ async function runTickerAnalysis(){
 
   btn.disabled=false; btn.innerHTML='🔍 Analizar';
 
-  // Auto or manual mode
-  const isManual = analyzerManual;
-  let pos, tf;
-  if(isManual){
-    pos = document.getElementById('an-pos').value;
-    tf  = document.getElementById('an-tf').value;
-  } else {
-    const auto = autoDetectDirection(tc);
-    pos = auto.pos;
-    tf  = auto.tf;
-  }
+  // ── Determinar modo ──────────────────────────────────────────────────────
+  // 1. Auto:       dirección + TF auto detectados
+  // 2. TF-only:    TF elegido por usuario, dirección auto detectada (NUEVO)
+  // 3. Hipótesis:  dirección + TF elegidos por usuario (modo avanzado)
+  const isHypothesis = analyzerManual && analyzerHypothesis;
+  const isTFforced   = analyzerManual && !analyzerHypothesis;
+  const isManual     = isHypothesis; // backward compat para buildAnalysisHTML
 
-  const _autoForModal = !analyzerManual ? autoDetectDirection(tc) : null;
-  window._lastAuto = _autoForModal;
+  let pos, tf;
+  const autoResult = autoDetectDirection(tc);
+  window._lastAuto = autoResult;
+  window._isTFforced = isTFforced;
+
+  if(isHypothesis){
+    // Modo hipótesis: usuario forzó dirección Y TF
+    pos = document.getElementById('an-hypo-dir').value;
+    tf  = document.getElementById('an-tf').value;
+  } else if(isTFforced){
+    // Modo TF-only: usuario eligió TF, sistema determina dirección objetivamente
+    tf = document.getElementById('an-tf').value;
+    if(autoResult.noTrade){
+      document.getElementById('an-result').innerHTML = buildNoTradeHTML(ticker, autoResult, tf, tc);
+      _lastAnalysisState.pos = null;
+      renderAnLog();
+      fetchAndInterpretChart(ticker, tf);
+      return;
+    }
+    pos = autoResult.pos;
+  } else {
+    // Modo auto completo
+    if(autoResult.noTrade){
+      document.getElementById('an-result').innerHTML = buildNoTradeHTML(ticker, autoResult, autoResult.tf, tc);
+      _lastAnalysisState.pos = null;
+      renderAnLog();
+      fetchAndInterpretChart(ticker, autoResult.tf);
+      return;
+    }
+    pos = autoResult.pos;
+    tf  = autoResult.tf;
+  }
   try {
     document.getElementById('an-result').innerHTML = buildAnalysisHTML(ticker, pos, tf, tc, isManual);
   } catch(buildErr) {
@@ -2667,6 +2719,49 @@ async function runTickerAnalysis(){
   renderAnLog();
   // Automatic chart fetch + Claude interpretation (async, non-blocking)
   fetchAndInterpretChart(ticker, tf);
+}
+
+// ── NO TRADE / NEUTRAL result ─────────────────────────────────────────────────
+function buildNoTradeHTML(ticker, auto, tf, tc){
+  const { sLong, sShort, c1h, c4h, c24, rs, amp, btc1h } = auto;
+  const now = new Date();
+  const ts  = `${now.getHours().toString().padStart(2,'0')}:${now.getMinutes().toString().padStart(2,'0')}`;
+  const price = tc.price ? tc.price : null;
+  const priceStr = price ? (price < 0.01 ? price.toFixed(6) : price < 1 ? price.toFixed(4) : price < 100 ? price.toFixed(3) : price.toFixed(2)) : '';
+
+  const bullets = [];
+  bullets.push(`Long ${sLong}/7 · Short ${sShort}/7 — diferencia insuficiente para una señal clara`);
+  bullets.push(`Momentum 1H ${c1h>=0?'+':''}${c1h.toFixed(1)}% · 4H ${c4h>=0?'+':''}${c4h.toFixed(1)}% · 24H ${c24>=0?'+':''}${c24.toFixed(1)}%`);
+  if(Math.abs(rs) < 0.5) bullets.push(`RS vs BTC neutro (${rs>=0?'+':''}${rs.toFixed(1)}%) — sin divergencia de fuerza relativa`);
+  bullets.push(`${amp}% altcoins positivas — mercado sin tendencia dominante clara`);
+  bullets.push(`Esperá ruptura de rango o aceleración de momentum antes de operar`);
+
+  return `
+  <div style="background:rgba(153,153,184,.08);border:2px solid rgba(153,153,184,.3);border-radius:10px;padding:14px;margin-bottom:10px;text-align:center">
+    <div style="font-size:28px;font-weight:900;color:var(--text2);line-height:1;margin-bottom:6px">↔ NO TRADE</div>
+    <div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:4px">Señales ambiguas — sin dirección clara</div>
+    <div style="font-size:10px;color:var(--text2)">${ticker} · ${tf} · ${ts} · auto</div>
+  </div>
+  <div style="display:flex;gap:6px;margin-bottom:10px">
+    <div style="flex:1;background:var(--card);border:1.5px solid rgba(0,200,83,.2);border-radius:8px;padding:8px;text-align:center">
+      <div style="font-size:9px;color:var(--text2);font-weight:700;margin-bottom:3px">LONG score</div>
+      <div style="font-size:18px;font-weight:900;color:${sLong>=3?'#ffd100':'#9999b8'}">${sLong}/7</div>
+    </div>
+    <div style="flex:1;background:var(--card);border:1.5px solid rgba(255,61,87,.2);border-radius:8px;padding:8px;text-align:center">
+      <div style="font-size:9px;color:var(--text2);font-weight:700;margin-bottom:3px">SHORT score</div>
+      <div style="font-size:18px;font-weight:900;color:${sShort>=3?'#ffd100':'#9999b8'}">${sShort}/7</div>
+    </div>
+    <div style="flex:1;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:8px;text-align:center">
+      <div style="font-size:9px;color:var(--text2);font-weight:700;margin-bottom:3px">TF</div>
+      <div style="font-size:18px;font-weight:900;color:#ff6b00">${tf}</div>
+    </div>
+  </div>
+  <div style="background:var(--card);border-radius:8px;padding:10px 12px;margin-bottom:10px">
+    ${bullets.map(b=>`<div class="an-bullet">${b}</div>`).join('')}
+  </div>
+  <div style="font-size:10px;font-weight:700;color:var(--text2);background:rgba(153,153,184,.06);border-radius:8px;padding:8px 12px;text-align:center">
+    💡 Usá <strong>Modo hipótesis</strong> si querés validar una dirección específica · o esperá señal clara
+  </div>`;
 }
 
 function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
@@ -2897,7 +2992,7 @@ function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
     bullets.push(`⚠️ Desaceleración — 1H por debajo del promedio horario de 24H`);
   if(rs > 0.5)       bullets.push(`RS vs BTC: ${rs>=0?'+':''}${rs.toFixed(1)}% — supera al mercado`);
   else if(rs < -0.5) bullets.push(`⚠️ RS vs BTC: ${rs.toFixed(1)}% — debilidad relativa`);
-  if(!isManual)      bullets.push(`TF sugerido: ${tf} — ${tfReason}`);
+  if(!isManual)      bullets.push(window._isTFforced ? `TF elegido: ${tf} — ${tfReason}` : `TF sugerido: ${tf} — ${tfReason}`);
   if(tkN >= 2)       bullets.push(`Historial ${ticker} ${pos}: ${tkN} trades · WR ${tkWR.toFixed(0)}% · EV ${tkEV>=0?'+':''}${tkEV.toFixed(1)}%`);
   if(!dtp.hasData)   bullets.push(`Sin historial MFE propio — usando priors calibrados para TP/SL`);
   // Trade type specific advice — differentiated for contra-tendencia
@@ -2930,10 +3025,10 @@ function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
         <div style="font-size:18px;font-weight:900;color:${auto.sShort>=5?'#ff3d57':auto.sShort>=3?'#ffd100':'#9999b8'}">${auto.sShort}/7</div>
       </div>
       <div class="info-tap" data-info="tf" data-tf="${tf}" onclick="event.stopPropagation();handleInfoTap(this)" style="flex:1;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:8px;text-align:center">
-        <div style="font-size:9px;color:var(--text2);font-weight:700;margin-bottom:3px">TF sugerido <span style="opacity:.4;font-size:9px">ⓘ</span></div>
+        <div style="font-size:9px;color:var(--text2);font-weight:700;margin-bottom:3px">${window._isTFforced?'TF elegido':'TF sugerido'} <span style="opacity:.4;font-size:9px">ⓘ</span></div>
         <div style="font-size:18px;font-weight:900;color:#ff6b00">${tf}</div>
       </div>
-    </div>` : `<div style="font-size:9px;color:#ffd100;background:rgba(255,209,0,.07);border:1px solid rgba(255,209,0,.25);border-radius:6px;padding:5px 10px;margin-bottom:10px">⚠️ Modo manual — analizando hipótesis ${pos} · ${tf}</div>`;
+    </div>` : `<div style="font-size:9px;color:#ffd100;background:rgba(255,209,0,.07);border:1px solid rgba(255,209,0,.25);border-radius:6px;padding:5px 10px;margin-bottom:10px">⚠️ Modo hipótesis — analizando ${pos} · ${tf}</div>`;
 
   // ── HISTORY block ─────────────────────────────────────────────────────────
   const histHTML = tkN >= 2
@@ -2978,7 +3073,7 @@ function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
   <div class="an-rec" style="background:${recBg};border:2px solid ${recBorder};margin-bottom:10px">
     <div class="an-action info-tap" style="color:${recColor};cursor:pointer" data-info="riesgo" data-conf="${conf}" data-tt="${tradeType}" data-ct="${contraTendencia}" data-timing="${timing}" onclick="event.stopPropagation();handleInfoTap(this)">${recEmoji} ${recAction}</div>
     <div class="an-conf info-tap" style="color:${recColor};cursor:pointer" data-info="confianza" data-conf="${conf}" data-conflabel="${confLabel}" data-tt="${tradeType}" data-timing="${timing}" data-ct="${contraTendencia}" onclick="event.stopPropagation();handleInfoTap(this)">Confianza: <strong>${confLabel}</strong> (${conf}/100) <span style="opacity:.5;font-size:11px">ⓘ</span></div>
-    <div style="font-size:10px;color:var(--text2);margin-top:4px">${ticker} · ${pos} · ${tf} · ${ts}${isManual?' · <span style="color:#ffd100">manual</span>':' · <span style="color:#00aaff">auto</span>'}</div>
+    <div style="font-size:10px;color:var(--text2);margin-top:4px">${ticker} · ${pos} · ${tf} · ${ts}${isManual?' · <span style="color:#ffd100">hipótesis</span>':window._isTFforced?' · <span style="color:#00aaff">tf elegido</span>':' · <span style="color:#00aaff">auto</span>'}</div>
     <div style="display:flex;gap:6px;margin-top:7px;flex-wrap:wrap">
       <div style="background:${ttMeta.color}22;border:1px solid ${ttMeta.color}88;border-radius:6px;padding:4px 9px;font-size:11px;font-weight:800;color:${ttMeta.color}">
         ${ttMeta.emoji} ${ttMeta.label} — ${ttMeta.sub}
