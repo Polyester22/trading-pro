@@ -2505,7 +2505,30 @@ const pnlToggleState = new Proxy({}, {
   set: () => true
 });
 const openCardExpanded = {};
-function toggleOpenCard(id, ev){ ev.stopPropagation(); openCardExpanded[id]=!openCardExpanded[id]; renderOpenTrades(); }
+window._openTradeATR = {}; // cache: 'TICKER:tf' → { atr, lastClose }
+
+async function fetchOpenTradeATR(ticker, tf){
+  const key = ticker + ':' + tf;
+  if(window._openTradeATR[key]) return;
+  try {
+    const sym = ticker.endsWith('USDT') ? ticker : ticker + 'USDT';
+    const klines = await tdFetchKlines(sym, tf);
+    const atr = tdCalcATR(klines, 14);
+    const lastClose = klines[klines.length - 1].close;
+    window._openTradeATR[key] = { atr, lastClose };
+    renderOpenTrades();
+  } catch(e) { /* silent — la sección no aparece si falla */ }
+}
+
+function toggleOpenCard(id, ev){
+  ev.stopPropagation();
+  openCardExpanded[id] = !openCardExpanded[id];
+  if(openCardExpanded[id] && location.protocol === 'https:'){
+    const t = D.trades.find(x => x.id === id);
+    if(t && t.ticker && t.temp) fetchOpenTradeATR(t.ticker, t.temp);
+  }
+  renderOpenTrades();
+}
 function togglePnlView(id, event){
   event.stopPropagation();
   pnlGlobalMode = pnlGlobalMode === 'price' ? 'lev' : 'price';
@@ -2706,6 +2729,20 @@ async function runTickerAnalysis(){
     pos = autoResult.pos;
     tf  = autoResult.tf;
   }
+
+  // ── Fetch ATR del TF analizado (base para niveles de precio) ─────────────
+  window._analyzerATR = null;
+  try {
+    const sym = ticker.endsWith('USDT') ? ticker : ticker + 'USDT';
+    const klines = await tdFetchKlines(sym, tf);
+    const atr = tdCalcATR(klines, 14);
+    const entryPx = klines[klines.length - 1].close;
+    const atrPct  = entryPx > 0 ? (atr / entryPx) * 100 : null;
+    window._analyzerATR = { atr, atrPct, tf, entryPx };
+    // Sincronizar precio con lo que el ATR ve (más preciso que lastPrice)
+    if(entryPx && tc) tc.price = entryPx;
+  } catch(e) { /* fail silently — price section usa fallback */ }
+
   try {
     document.getElementById('an-result').innerHTML = buildAnalysisHTML(ticker, pos, tf, tc, isManual);
   } catch(buildErr) {
@@ -3144,17 +3181,45 @@ function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
       return '$'+p.toFixed(6);
     };
     const dir = isLong ? 1 : -1;
-    const tp1Px   = entryPx * (1 + dir * dtpDisplay.tp1 / 100);
-    const tp2Px   = entryPx * (1 + dir * dtpDisplay.tp2 / 100);
-    const runnerPx = (!contraTendencia) ? entryPx * (1 + dir * dtp.runner / 100) : null;
-    const slPx    = entryPx * (1 - dir * slPct / 100);
-    const rrRaw   = dtpDisplay.tp1 / slPct;
-    const rrStr   = rrRaw >= 1 ? '1:'+rrRaw.toFixed(1) : (1/rrRaw).toFixed(1)+':1';
-    const rrGood  = rrRaw >= 1.5;
+
+    // ── ATR-based levels (preferido) ────────────────────────────────────────
+    const atrData = window._analyzerATR;
+    let sl_pct, tp1_pct, tp2_pct, runner_pct, levelSource;
+    if(atrData && atrData.atrPct && atrData.atrPct > 0){
+      const ap = atrData.atrPct;
+      sl_pct     = ap * 1.0;
+      tp1_pct    = ap * 1.5;   // R/R 1:1.5
+      tp2_pct    = ap * 2.5;   // R/R 1:2.5
+      runner_pct = ap * 4.0;
+      levelSource = `ATR(14) · ${tf} · ${atrData.atr.toFixed(atrData.atr<1?4:2)}`;
+    } else {
+      // Fallback: porcentajes del dtp (priors o MFE)
+      sl_pct     = slPct;
+      tp1_pct    = dtpDisplay.tp1;
+      tp2_pct    = dtpDisplay.tp2;
+      runner_pct = contraTendencia ? null : dtp.runner;
+      levelSource = dtp.hasData ? 'MFE histórico propio' : 'Priors estimados';
+    }
+
+    const slPx_abs     = entryPx * (1 - dir * sl_pct / 100);
+    const tp1Px_abs    = entryPx * (1 + dir * tp1_pct / 100);
+    const tp2Px_abs    = entryPx * (1 + dir * tp2_pct / 100);
+    const runnerPx_abs = (!contraTendencia && runner_pct) ? entryPx * (1 + dir * runner_pct / 100) : null;
+    const rrRaw        = tp1_pct / sl_pct;
+    const rrStr        = rrRaw >= 1 ? '1:'+rrRaw.toFixed(1) : (1/rrRaw).toFixed(1)+':1';
+    const rrGood       = rrRaw >= 1.5;
+
+    // ── MFE histórico como referencia (si existe) ───────────────────────────
+    const mfeRefNote = (atrData && atrData.atrPct && dtp.hasData && dtp.avg)
+      ? `<div style="font-size:9px;font-weight:700;color:#00aaff;background:rgba(0,170,255,.07);border-radius:6px;padding:5px 10px;margin-top:8px">
+           📊 Tus trades ${ticker} ${pos}: avg MFE ${sign}${dtp.avg.toFixed(1)}% · ${dtp.n} trades
+         </div>`
+      : '';
+
     return `
     <div style="background:var(--card);border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:10px">
       <div style="display:flex;align-items:center;justify-content:space-between;padding:7px 12px;background:var(--surface2);border-bottom:1px solid var(--border)">
-        <div style="font-size:9px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.8px">Precios absolutos (entrada al mercado)</div>
+        <div style="font-size:9px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.8px">Precios absolutos · ${levelSource}</div>
         <div style="font-size:10px;font-weight:900;color:${rrGood?'#00c853':'#ffd100'}">R/R ${rrStr}</div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--border)">
@@ -3165,26 +3230,27 @@ function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
         </div>
         <div style="background:var(--card);padding:9px 12px">
           <div style="font-size:8px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">Stop Loss</div>
-          <div style="font-size:15px;font-weight:900;color:#ff3d57">${fmtP(slPx)}</div>
-          <div style="font-size:9px;color:var(--text2);margin-top:1px">${isLong?'-':'+'}${slPct.toFixed(1)}% desde entrada</div>
+          <div style="font-size:15px;font-weight:900;color:#ff3d57">${fmtP(slPx_abs)}</div>
+          <div style="font-size:9px;color:var(--text2);margin-top:1px">${isLong?'-':'+'}${sl_pct.toFixed(1)}% · ATR×1</div>
         </div>
         <div style="background:var(--card);padding:9px 12px;border-top:1px solid var(--border)">
           <div style="font-size:8px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">TP1 — cerrar 50%</div>
-          <div style="font-size:15px;font-weight:900;color:#00c853">${fmtP(tp1Px)}</div>
-          <div style="font-size:9px;color:var(--text2);margin-top:1px">${sign}${dtpDisplay.tp1.toFixed(1)}% desde entrada</div>
+          <div style="font-size:15px;font-weight:900;color:#00c853">${fmtP(tp1Px_abs)}</div>
+          <div style="font-size:9px;color:var(--text2);margin-top:1px">${sign}${tp1_pct.toFixed(1)}% · ATR×1.5</div>
         </div>
         <div style="background:var(--card);padding:9px 12px;border-top:1px solid var(--border)">
-          <div style="font-size:8px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">TP2 / avg MFE</div>
-          <div style="font-size:15px;font-weight:900;color:#ff6b00">${fmtP(tp2Px)}</div>
-          <div style="font-size:9px;color:var(--text2);margin-top:1px">${sign}${dtpDisplay.tp2.toFixed(1)}% desde entrada</div>
+          <div style="font-size:8px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">TP2</div>
+          <div style="font-size:15px;font-weight:900;color:#ff6b00">${fmtP(tp2Px_abs)}</div>
+          <div style="font-size:9px;color:var(--text2);margin-top:1px">${sign}${tp2_pct.toFixed(1)}% · ATR×2.5</div>
         </div>
-        ${runnerPx ? `
+        ${runnerPx_abs ? `
         <div style="background:var(--card);padding:9px 12px;border-top:1px solid var(--border);grid-column:1/-1">
-          <div style="font-size:8px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">Runner p90 — dejar correr</div>
-          <div style="font-size:15px;font-weight:900;color:#ff3d57">${fmtP(runnerPx)}</div>
-          <div style="font-size:9px;color:var(--text2);margin-top:1px">${sign}${dtp.runner.toFixed(1)}% desde entrada</div>
+          <div style="font-size:8px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">Runner — dejar correr</div>
+          <div style="font-size:15px;font-weight:900;color:#ff3d57">${fmtP(runnerPx_abs)}</div>
+          <div style="font-size:9px;color:var(--text2);margin-top:1px">${sign}${runner_pct.toFixed(1)}% · ATR×4</div>
         </div>` : ''}
       </div>
+      ${mfeRefNote}
     </div>`;
   })()}
 
@@ -3249,6 +3315,99 @@ function renderAnLog(){
 
 renderAnLog();
 
+function buildATRLevelsHTML(t, currentPrice){
+  if(!t.entrada) return '';
+  const key = t.ticker + ':' + t.temp;
+  const atrD = (window._openTradeATR || {})[key];
+
+  // Mientras carga
+  if(!atrD){
+    return '<div style="font-size:10px;color:var(--text2);background:var(--surface2);border-radius:8px;padding:7px 12px;margin-bottom:8px;display:flex;align-items:center;gap:6px">'
+      +'<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#ff6b00;animation:pulse-dot 1.5s infinite"></span>'
+      +'Calculando niveles ATR '+t.temp+'…</div>';
+  }
+
+  const fmtP = p => {
+    if(!p&&p!==0)return'—';
+    if(p>=10000)return'$'+p.toLocaleString('en-US',{maximumFractionDigits:0});
+    if(p>=1000) return'$'+p.toFixed(1);
+    if(p>=100)  return'$'+p.toFixed(2);
+    if(p>=1)    return'$'+p.toFixed(3);
+    if(p>=0.01) return'$'+p.toFixed(4);
+    return'$'+p.toFixed(6);
+  };
+
+  const isLong = t.pos === 'Long';
+  const dir    = isLong ? 1 : -1;
+  const entry  = t.entrada;
+  const atr    = atrD.atr;
+  const atrPct = (atr / entry) * 100;
+
+  const slPx     = entry * (1 - dir * atrPct * 1.0 / 100);
+  const tp1Px    = entry * (1 + dir * atrPct * 1.5 / 100);
+  const tp2Px    = entry * (1 + dir * atrPct * 2.5 / 100);
+  const runnerPx = entry * (1 + dir * atrPct * 4.0 / 100);
+  const slPct_   = atrPct * 1.0;
+  const tp1Pct_  = atrPct * 1.5;
+  const tp2Pct_  = atrPct * 2.5;
+  const runPct_  = atrPct * 4.0;
+
+  // Indicadores de posición actual
+  const cur = currentPrice;
+  const hitSL  = cur && (isLong ? cur <= slPx  : cur >= slPx);
+  const hitTP1 = cur && (isLong ? cur >= tp1Px : cur <= tp1Px);
+  const hitTP2 = cur && (isLong ? cur >= tp2Px : cur <= tp2Px);
+  const hitRun = cur && (isLong ? cur >= runnerPx : cur <= runnerPx);
+
+  const ind = (hit, label) => hit
+    ? '<span style="font-size:9px;font-weight:800;color:#00c853;margin-left:4px">✅ alcanzado</span>'
+    : '';
+  const slInd = hitSL
+    ? '<span style="font-size:9px;font-weight:800;color:#ff3d57;margin-left:4px">🔴 tocado</span>'
+    : '';
+
+  const sign = isLong ? '+' : '-';
+  const slSign = isLong ? '-' : '+';
+
+  return '<div style="background:var(--card);border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:8px">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 12px;background:var(--surface2);border-bottom:1px solid var(--border)">'
+    +'<div style="font-size:9px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.8px">Niveles ATR · '+t.temp+' · ATR '+(atr<1?atr.toFixed(4):atr.toFixed(2))+'</div>'
+    +'<div style="font-size:9px;font-weight:800;color:#ff6b00">R/R 1:1.5</div>'
+    +'</div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--border)">'
+    // Entrada
+    +'<div style="background:var(--card);padding:8px 12px">'
+    +'<div style="font-size:8px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px">Entrada</div>'
+    +'<div style="font-size:14px;font-weight:900;color:#ff6b00">'+fmtP(entry)+'</div>'
+    +'<div style="font-size:9px;color:var(--text2)">precio de apertura</div>'
+    +'</div>'
+    // SL
+    +'<div style="background:var(--card);padding:8px 12px">'
+    +'<div style="font-size:8px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px">Stop Loss'+slInd+'</div>'
+    +'<div style="font-size:14px;font-weight:900;color:#ff3d57">'+fmtP(slPx)+'</div>'
+    +'<div style="font-size:9px;color:var(--text2)">'+slSign+slPct_.toFixed(1)+'% · ATR×1</div>'
+    +'</div>'
+    // TP1
+    +'<div style="background:var(--card);padding:8px 12px;border-top:1px solid var(--border)">'
+    +'<div style="font-size:8px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px">TP1 — cerrar 50%'+ind(hitTP1)+'</div>'
+    +'<div style="font-size:14px;font-weight:900;color:#00c853">'+fmtP(tp1Px)+'</div>'
+    +'<div style="font-size:9px;color:var(--text2)">'+sign+tp1Pct_.toFixed(1)+'% · ATR×1.5</div>'
+    +'</div>'
+    // TP2
+    +'<div style="background:var(--card);padding:8px 12px;border-top:1px solid var(--border)">'
+    +'<div style="font-size:8px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px">TP2'+ind(hitTP2)+'</div>'
+    +'<div style="font-size:14px;font-weight:900;color:#ff6b00">'+fmtP(tp2Px)+'</div>'
+    +'<div style="font-size:9px;color:var(--text2)">'+sign+tp2Pct_.toFixed(1)+'% · ATR×2.5</div>'
+    +'</div>'
+    // Runner - full width
+    +'<div style="background:var(--card);padding:8px 12px;border-top:1px solid var(--border);grid-column:1/-1">'
+    +'<div style="font-size:8px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px">Runner — dejar correr'+ind(hitRun)+'</div>'
+    +'<div style="font-size:14px;font-weight:900;color:#ff3d57">'+fmtP(runnerPx)+'</div>'
+    +'<div style="font-size:9px;color:var(--text2)">'+sign+runPct_.toFixed(1)+'% · ATR×4</div>'
+    +'</div>'
+    +'</div></div>';
+}
+
 function buildDetailHTML(t, livePrice, priceForCalc, pctColor, livePct, timeStr, rec, cev){
   // ── Compute consensus once — all blocks read from here ──
   const _openFrom = t.fechahora ? new Date(t.fechahora) : t.fecha ? new Date(t.fecha+'T12:00:00') : null;
@@ -3279,6 +3438,7 @@ function buildDetailHTML(t, livePrice, priceForCalc, pctColor, livePct, timeStr,
     +'<div class="open-price-box"><div class="open-price-lbl">&#9201; Abierto</div>'
     +'<div class="open-price-val" style="font-size:12px;color:var(--text2)">'+timeStr+'</div></div>'
     +'</div>'
+    + buildATRLevelsHTML(t, priceForCalc)
     +(t.obs?'<div style="margin-bottom:8px;font-size:11px;color:var(--text2);font-style:italic;padding:0 2px">'+t.obs+'</div>':'')
     +tickerSemaphoreHTML(t, tickerChangeCache[t.ticker]||null)
     +trailingAlertHTML(t, livePct)
