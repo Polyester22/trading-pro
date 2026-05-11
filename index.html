@@ -2209,12 +2209,13 @@ async function fetchTickerChanges(tickers){
         fetch('https://api.binance.com/api/v3/klines?symbol='+sym+'&interval=4h&limit=2').then(r=>r.json())
       ]);
       const c24=parseFloat(stats.priceChangePercent)||0;
+      const price=parseFloat(stats.lastPrice)||null;
       const c1h=k1h&&k1h.length>=1?(parseFloat(k1h[k1h.length-1][4])-parseFloat(k1h[0][1]))/parseFloat(k1h[0][1])*100:0;
       const c4h=k4h&&k4h.length>=1?(parseFloat(k4h[k4h.length-1][4])-parseFloat(k4h[0][1]))/parseFloat(k4h[0][1])*100:0;
       // Preserve previous 1H value before overwriting (for trailing detection)
       const prev=tickerChangeCache[tk];
       const prev1h=prev?prev.change1h:null;
-      tickerChangeCache[tk]={change1h:c1h,change4h:c4h,change24h:c24,fetchedAt:now,prev1h};
+      tickerChangeCache[tk]={change1h:c1h,change4h:c4h,change24h:c24,fetchedAt:now,prev1h,price};
     }catch(e){ /* ignore per-ticker errors */ }
   }));
 }
@@ -3129,6 +3130,63 @@ function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
       <div class="an-tp-val" style="color:#9999b8">${isLong?'-':'+'}${slPct.toFixed(1)}%</div>
     </div>
   </div>
+
+  ${(()=>{
+    const entryPx = tc.price || null;
+    if(!entryPx) return '';
+    const fmtP = p => {
+      if(!p && p!==0) return '—';
+      if(p >= 10000) return '$'+p.toLocaleString('en-US',{maximumFractionDigits:0});
+      if(p >= 1000)  return '$'+p.toFixed(1);
+      if(p >= 100)   return '$'+p.toFixed(2);
+      if(p >= 1)     return '$'+p.toFixed(3);
+      if(p >= 0.01)  return '$'+p.toFixed(4);
+      return '$'+p.toFixed(6);
+    };
+    const dir = isLong ? 1 : -1;
+    const tp1Px   = entryPx * (1 + dir * dtpDisplay.tp1 / 100);
+    const tp2Px   = entryPx * (1 + dir * dtpDisplay.tp2 / 100);
+    const runnerPx = (!contraTendencia) ? entryPx * (1 + dir * dtp.runner / 100) : null;
+    const slPx    = entryPx * (1 - dir * slPct / 100);
+    const rrRaw   = dtpDisplay.tp1 / slPct;
+    const rrStr   = rrRaw >= 1 ? '1:'+rrRaw.toFixed(1) : (1/rrRaw).toFixed(1)+':1';
+    const rrGood  = rrRaw >= 1.5;
+    return `
+    <div style="background:var(--card);border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:10px">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:7px 12px;background:var(--surface2);border-bottom:1px solid var(--border)">
+        <div style="font-size:9px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.8px">Precios absolutos (entrada al mercado)</div>
+        <div style="font-size:10px;font-weight:900;color:${rrGood?'#00c853':'#ffd100'}">R/R ${rrStr}</div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--border)">
+        <div style="background:var(--card);padding:9px 12px">
+          <div style="font-size:8px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">Entrada</div>
+          <div style="font-size:15px;font-weight:900;color:#ff6b00">${fmtP(entryPx)}</div>
+          <div style="font-size:9px;color:var(--text2);margin-top:1px">precio actual</div>
+        </div>
+        <div style="background:var(--card);padding:9px 12px">
+          <div style="font-size:8px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">Stop Loss</div>
+          <div style="font-size:15px;font-weight:900;color:#ff3d57">${fmtP(slPx)}</div>
+          <div style="font-size:9px;color:var(--text2);margin-top:1px">${isLong?'-':'+'}${slPct.toFixed(1)}% desde entrada</div>
+        </div>
+        <div style="background:var(--card);padding:9px 12px;border-top:1px solid var(--border)">
+          <div style="font-size:8px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">TP1 — cerrar 50%</div>
+          <div style="font-size:15px;font-weight:900;color:#00c853">${fmtP(tp1Px)}</div>
+          <div style="font-size:9px;color:var(--text2);margin-top:1px">${sign}${dtpDisplay.tp1.toFixed(1)}% desde entrada</div>
+        </div>
+        <div style="background:var(--card);padding:9px 12px;border-top:1px solid var(--border)">
+          <div style="font-size:8px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">TP2 / avg MFE</div>
+          <div style="font-size:15px;font-weight:900;color:#ff6b00">${fmtP(tp2Px)}</div>
+          <div style="font-size:9px;color:var(--text2);margin-top:1px">${sign}${dtpDisplay.tp2.toFixed(1)}% desde entrada</div>
+        </div>
+        ${runnerPx ? `
+        <div style="background:var(--card);padding:9px 12px;border-top:1px solid var(--border);grid-column:1/-1">
+          <div style="font-size:8px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">Runner p90 — dejar correr</div>
+          <div style="font-size:15px;font-weight:900;color:#ff3d57">${fmtP(runnerPx)}</div>
+          <div style="font-size:9px;color:var(--text2);margin-top:1px">${sign}${dtp.runner.toFixed(1)}% desde entrada</div>
+        </div>` : ''}
+      </div>
+    </div>`;
+  })()}
 
   <div class="an-bullets">${bulletsHTML}</div>
   ${histHTML}
