@@ -426,6 +426,8 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
             <option value="15m" selected>15m</option>
             <option value="1h">1h</option>
             <option value="4h">4h</option>
+            <option value="1d">1d</option>
+            <option value="1w">1w</option>
           </select>
 
           <!-- Sub-toggle: Modo hipótesis (avanzado) -->
@@ -2632,11 +2634,13 @@ function autoDetectDirection(tc){
   // Suggest timeframe based on acceleration / volatility
   const absAccel = Math.abs(accel);
   const abs1h    = Math.abs(c1h);
+  const abs4h    = Math.abs(c4h);
   let tf;
-  if(absAccel > 0.3 || abs1h > 2)      tf = '5m';   // fast move → scalp
-  else if(absAccel > 0.1 || abs1h > 1) tf = '15m';
-  else if(abs1h > 0.5)                  tf = '1h';
-  else                                   tf = '4h';   // slow/flat → higher TF
+  if(absAccel > 0.3 || abs1h > 2)       tf = '5m';   // movimiento rápido → scalp
+  else if(absAccel > 0.1 || abs1h > 1)  tf = '15m';
+  else if(abs1h > 0.5)                   tf = '1h';
+  else if(abs4h > 1.5)                   tf = '4h';
+  else                                   tf = '1d';   // mercado muy lento/lateral → diario
 
   // ── Expose conditions for infoScore modal ──────────────────────────────
   const conditionsLong = [
@@ -3012,10 +3016,13 @@ function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
   // ── TF rationale ─────────────────────────────────────────────────────────
   const absAccel = Math.abs(accel);
   const abs1h    = Math.abs(c1h);
+  const abs4h_r  = Math.abs(c4h);
   const tfReason = absAccel > 0.3 || abs1h > 2 ? 'Movimiento rápido → scalp'
     : absAccel > 0.1 || abs1h > 1 ? 'Momentum activo → intradía medio'
     : abs1h > 0.5                  ? 'Momentum lento → intradía largo'
-    :                                 'Mercado lateral → temporalidad alta';
+    : abs4h_r > 1.5                ? 'Volatilidad baja → swing 4H'
+    : tf === '1w'                  ? 'Mercado muy lento → tendencia semanal'
+    :                                'Mercado lateral → tendencia diaria';
 
   // ── BULLETS ───────────────────────────────────────────────────────────────
   const bullets = [];
