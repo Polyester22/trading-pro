@@ -10158,13 +10158,13 @@ async function runGustavoAnalysis() {
       const stC=r.stoch!==null?(r.stoch<50?'#00c853':'#ff3d57'):'var(--text2)';
       const rowBg=r.tf==='4h'?'background:rgba(255,107,0,.04)':'';
       return '<tr style="border-top:1px solid var(--border);'+rowBg+'">'
-        +'<td style="font-size:11px;font-weight:800;padding:6px 4px;color:var(--text)">'+r.label+(r.tf==='4h'?' ★':'')+'</td>'
-        +'<td style="padding:5px 3px"><span style="font-size:9px;font-weight:800;color:'+cxCol+'">'+(r.bullCtx?'▲ BULL':'▼ BEAR')+'</span></td>'
-        +'<td style="color:'+pdiC+';font-size:11px;font-weight:800;text-align:center;padding:5px 2px">'+r.pdi.toFixed(0)+'</td>'
-        +'<td style="color:'+mdiC+';font-size:11px;font-weight:800;text-align:center;padding:5px 2px">'+r.mdi.toFixed(0)+'</td>'
-        +'<td style="color:'+adxC+';font-size:11px;font-weight:800;text-align:center;padding:5px 2px">'+r.adxVal.toFixed(0)+'</td>'
-        +'<td style="color:'+stC+';font-size:11px;font-weight:800;text-align:center;padding:5px 2px">'+stStr+'</td>'
-        +'<td style="padding:5px 4px"><span style="font-size:9px;font-weight:800;color:'+sCol+';background:'+sigBg[r.signal]+';border-radius:4px;padding:2px 4px;white-space:nowrap">'+(sigTxt[r.signal]||'—')+'</span>'+cross+'</td>'
+        +'<td style="font-size:12px;font-weight:800;padding:8px 6px;color:var(--text)">'+r.label+(r.tf==='4h'?' ★':'')+'</td>'
+        +'<td style="padding:7px 4px"><span style="font-size:10px;font-weight:800;color:'+cxCol+'">'+(r.bullCtx?'▲ BULL':'▼ BEAR')+'</span></td>'
+        +'<td style="color:'+pdiC+';font-size:12px;font-weight:800;text-align:center;padding:7px 4px">'+r.pdi.toFixed(0)+'</td>'
+        +'<td style="color:'+mdiC+';font-size:12px;font-weight:800;text-align:center;padding:7px 4px">'+r.mdi.toFixed(0)+'</td>'
+        +'<td style="color:'+adxC+';font-size:12px;font-weight:800;text-align:center;padding:7px 4px">'+r.adxVal.toFixed(0)+'</td>'
+        +'<td style="color:'+stC+';font-size:12px;font-weight:800;text-align:center;padding:7px 4px">'+stStr+'</td>'
+        +'<td style="padding:7px 6px"><span style="font-size:10px;font-weight:800;color:'+sCol+';background:'+sigBg[r.signal]+';border-radius:4px;padding:2px 6px;white-space:nowrap">'+(sigTxt[r.signal]||'—')+'</span>'+cross+'</td>'
         +'</tr>';
     }).join('');
 
@@ -10183,15 +10183,15 @@ async function runGustavoAnalysis() {
       +entryCard
       // Tabla de TFs
       +'<div style="overflow-x:auto;-webkit-overflow-scrolling:touch">'
-      +'<table style="width:100%;border-collapse:collapse;font-size:11px;table-layout:fixed">'
+      +'<table style="width:100%;border-collapse:collapse;font-size:12px">'
       +'<thead style="background:var(--surface2)"><tr>'
-      +'<th style="font-size:8px;font-weight:800;color:var(--text2);padding:6px 4px;text-align:left;letter-spacing:.5px;text-transform:uppercase;border-bottom:1px solid var(--border);width:28px">TF</th>'
-      +'<th style="font-size:8px;font-weight:800;color:var(--text2);padding:6px 3px;text-align:left;letter-spacing:.5px;text-transform:uppercase;border-bottom:1px solid var(--border);width:44px">Ctx</th>'
-      +'<th style="font-size:8px;font-weight:800;color:var(--text2);padding:6px 2px;text-align:center;text-transform:uppercase;border-bottom:1px solid var(--border);width:24px">+DI</th>'
-      +'<th style="font-size:8px;font-weight:800;color:var(--text2);padding:6px 2px;text-align:center;text-transform:uppercase;border-bottom:1px solid var(--border);width:24px">-DI</th>'
-      +'<th style="font-size:8px;font-weight:800;color:var(--text2);padding:6px 2px;text-align:center;text-transform:uppercase;border-bottom:1px solid var(--border);width:28px">ADX</th>'
-      +'<th style="font-size:8px;font-weight:800;color:var(--text2);padding:6px 2px;text-align:center;text-transform:uppercase;border-bottom:1px solid var(--border);width:30px">Stoch</th>'
-      +'<th style="font-size:8px;font-weight:800;color:var(--text2);padding:6px 4px;text-align:left;text-transform:uppercase;border-bottom:1px solid var(--border)">Señal</th>'
+      +'<th style="font-size:9px;font-weight:800;color:var(--text2);padding:7px 6px;text-align:left;letter-spacing:.5px;text-transform:uppercase;border-bottom:1px solid var(--border);width:12%">TF</th>'
+      +'<th style="font-size:9px;font-weight:800;color:var(--text2);padding:7px 4px;text-align:left;letter-spacing:.5px;text-transform:uppercase;border-bottom:1px solid var(--border);width:16%">Ctx</th>'
+      +'<th style="font-size:9px;font-weight:800;color:var(--text2);padding:7px 4px;text-align:center;text-transform:uppercase;border-bottom:1px solid var(--border);width:10%">+DI</th>'
+      +'<th style="font-size:9px;font-weight:800;color:var(--text2);padding:7px 4px;text-align:center;text-transform:uppercase;border-bottom:1px solid var(--border);width:10%">-DI</th>'
+      +'<th style="font-size:9px;font-weight:800;color:var(--text2);padding:7px 4px;text-align:center;text-transform:uppercase;border-bottom:1px solid var(--border);width:12%">ADX</th>'
+      +'<th style="font-size:9px;font-weight:800;color:var(--text2);padding:7px 4px;text-align:center;text-transform:uppercase;border-bottom:1px solid var(--border);width:12%">Stoch</th>'
+      +'<th style="font-size:9px;font-weight:800;color:var(--text2);padding:7px 6px;text-align:left;text-transform:uppercase;border-bottom:1px solid var(--border);width:28%">Señal</th>'
       +'</tr></thead>'
       +'<tbody>'+rowsHtml+'</tbody></table></div>'
       +'<div style="font-size:10px;font-weight:700;color:var(--text2);padding:8px 14px">'
