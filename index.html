@@ -3967,7 +3967,12 @@ function getFilteredTrades(){
 function renderHistorial(){
   let list=getFilteredTrades();
   // sort
-  list.sort((a,b)=>{let av=a[sortCol]??'',bv=b[sortCol]??'';if(typeof av==='number')return(av-bv)*sortDir;return av.localeCompare(bv)*sortDir;});
+  list.sort((a,b)=>{
+    let av = a[sortCol] ?? '';
+    let bv = b[sortCol] ?? '';
+    if(typeof av==='number') return (av-bv)*sortDir;
+    return av.localeCompare(bv)*sortDir;
+  });
   // update sort icons
   ['fecha','ticker','pos','resultado','maxMovePct','temp','margen','lev','estrategia','salida','timing','durMins'].forEach(c=>{const el=document.getElementById('sort-'+c);if(el){el.textContent=c===sortCol?(sortDir===1?'↑':'↓'):'↕';el.parentElement.classList.toggle('sorted',c===sortCol);}});
   // summary bar — only closed trades for accurate stats
@@ -4034,7 +4039,7 @@ function renderHistorial(){
         : resultado / lev;                          // fallback
     const precioPctStr = (precioPct >= 0 ? '+' : '') + precioPct.toFixed(2) + '%';
     const rc = precioPct > 0 ? 'pos' : precioPct < 0 ? 'neg' : 'neutral';
-    const f=(t.fechaCierre||t.fecha)?((t.fechaCierre||t.fecha).slice(5).replace('-','/')):''
+    const f = t.fecha ? t.fecha.slice(5).replace('-','/') : ''
     const p10flag=t.p10?'<span class="badge-10">★</span>':'';
     const timingClass=t.timing?'timing-'+t.timing.toLowerCase().replace(' ',''):'';
     // duration for this trade
