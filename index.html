@@ -10015,28 +10015,34 @@ function gCalcATR(ohlcv, period=14) {
 
 function gAnalyzeTF(ohlcv) {
   if (ohlcv.length < 220) return null;
-  const closes = ohlcv.map(c => c.close);
-  const sma200 = gCalcSMA(closes, 200);
+  const closes  = ohlcv.map(c => c.close);
+  const sma21   = gCalcSMA(closes, 21);
+  const sma100  = gCalcSMA(closes, 100);
+  const sma200  = gCalcSMA(closes, 200);
   const { plusDI, minusDI, adx } = gCalcADX(ohlcv);
   const stochK  = gCalcStoch(ohlcv);
   const atrArr  = gCalcATR(ohlcv);
   const i = ohlcv.length - 2;
   const p = i - 1;
   if (isNaN(sma200[i]) || isNaN(plusDI[i]) || isNaN(minusDI[i]) || isNaN(adx[i])) return null;
-  const price   = closes[i];
-  const bullCtx = price > sma200[i];
-  const adxVal  = adx[i], adxOk = adxVal >= 20;
+  const price    = closes[i];
+  const bullCtx  = price > sma200[i];
+  const adxVal   = adx[i], adxOk = adxVal >= 20;
   const pdi = plusDI[i], mdi = minusDI[i];
-  const stoch   = isNaN(stochK[i]) ? null : stochK[i];
-  const atr     = isNaN(atrArr[i]) ? null : atrArr[i];
-  const pCross  = !isNaN(plusDI[p])  && pdi>mdi && plusDI[p]<=minusDI[p];
-  const mCross  = !isNaN(minusDI[p]) && mdi>pdi && minusDI[p]<=plusDI[p];
+  const stoch    = isNaN(stochK[i]) ? null : stochK[i];
+  const atr      = isNaN(atrArr[i]) ? null : atrArr[i];
+  const pCross   = !isNaN(plusDI[p])  && pdi>mdi && plusDI[p]<=minusDI[p];
+  const mCross   = !isNaN(minusDI[p]) && mdi>pdi && minusDI[p]<=plusDI[p];
+  const s21 = sma21[i], s100 = sma100[i], s200 = sma200[i];
+  const smaOrderBull = s21 > s100 && s100 > s200;
+  const smaOrderBear = s21 < s100 && s100 < s200;
   let signal = 'flat', crossed = false;
   if      (bullCtx && pdi>mdi && adxOk)  { signal='long';        crossed=pCross; }
   else if (!bullCtx && mdi>pdi && adxOk)  { signal='short';       crossed=mCross; }
   else if (bullCtx && pdi>mdi && !adxOk)  { signal='watch-long';  }
   else if (!bullCtx && mdi>pdi && !adxOk) { signal='watch-short'; }
-  return { price, bullCtx, adxVal, adxOk, pdi, mdi, stoch, atr, signal, crossed, sma200: sma200[i] };
+  return { price, bullCtx, adxVal, adxOk, pdi, mdi, stoch, atr, signal, crossed,
+           sma21: s21, sma100: s100, sma200: s200, smaOrderBull, smaOrderBear };
 }
 
 async function runGustavoAnalysis() {
@@ -10143,8 +10149,22 @@ async function runGustavoAnalysis() {
       recSub='Sin confluencia clara en 4H';
     }
 
+    // SMA order badge
+    const smaOrd = main.smaOrderBull ? '✅ 21>100>200 Alcista' : main.smaOrderBear ? '🔴 21<100<200 Bajista' : '⚠️ Medias mixtas';
+    const smaOrdClr = main.smaOrderBull ? '#00c853' : main.smaOrderBear ? '#ff3d57' : '#ffd740';
+
+    // Explicación contextual
+    const explanations = {
+      long:          '✅ El precio está sobre la SMA 200 y el +DI supera al -DI con ADX > 20. La tendencia es alcista y tiene fuerza. '+(main.crossed?'🔔 Cruce del DMI en la última vela — señal fresca.':'El cruce ya ocurrió. Seguís dentro de la tendencia.')+' Salida: cuando -DI cruce sobre +DI.',
+      short:         '🔴 El precio está bajo la SMA 200 y el -DI supera al +DI con ADX > 20. La tendencia es bajista y tiene fuerza. '+(main.crossed?'🔔 Cruce del DMI en la última vela — señal fresca.':'El cruce ya ocurrió. Seguís dentro de la tendencia.')+' Salida: cuando +DI cruce sobre -DI.',
+      'watch-long':  '⏳ El contexto es alcista (precio > SMA 200) y el +DI domina, pero el ADX está en '+main.adxVal.toFixed(0)+' (necesita superar 20). La tendencia no tiene fuerza suficiente todavía. Esperá que el ADX supere 20 antes de entrar.',
+      'watch-short': '⏳ El contexto es bajista (precio < SMA 200) y el -DI domina, pero el ADX está en '+main.adxVal.toFixed(0)+' (necesita superar 20). El mercado está en tendencia sin fuerza. Esperá confirmación.',
+      flat:          '❌ Sin confluencia clara. El precio puede estar cruzando la SMA 200, o el +DI y -DI están equilibrados. No hay señal según la estrategia — esperá definición.'
+    };
+    const explanation = explanations[main.signal] || '';
+
     const sigClr={long:'#00c853',short:'#ff3d57','watch-long':'#ffd740','watch-short':'#ffd740',flat:'var(--text2)'};
-    const sigTxt={long:'▲ LONG',short:'▼ SHORT','watch-long':'⏳ L?','watch-short':'⏳ S?',flat:'— FLAT'};
+    const sigTxt={long:'▲ L',short:'▼ S','watch-long':'⏳ L','watch-short':'⏳ S',flat:'—'};
     const sigBg={long:'rgba(0,200,83,.12)',short:'rgba(255,61,87,.12)','watch-long':'rgba(255,215,64,.1)','watch-short':'rgba(255,215,64,.1)',flat:'transparent'};
 
     const rowsHtml=results.map(r=>{
@@ -10181,6 +10201,25 @@ async function runGustavoAnalysis() {
       +'</div>'
       // Tarjeta de entrada (solo si hay señal activa)
       +entryCard
+      // Bloque SMAs + explicación
+      +'<div style="padding:10px 14px;border-bottom:1px solid var(--border);background:var(--surface)">'
+      +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">'
+      +'<div style="font-size:9px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.8px">Medias móviles 4H</div>'
+      +'<div style="font-size:10px;font-weight:800;color:'+smaOrdClr+'">'+smaOrd+'</div>'
+      +'</div>'
+      +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:8px">'
+      +'<div style="background:var(--input-bg);border-radius:6px;padding:6px 8px;text-align:center">'
+      +'<div style="font-size:8px;font-weight:700;color:var(--text2);margin-bottom:2px">SMA 21</div>'
+      +'<div style="font-size:11px;font-weight:800;color:'+(main.price>main.sma21?'#00c853':'#ff3d57')+'">'+fP(main.sma21)+'</div></div>'
+      +'<div style="background:var(--input-bg);border-radius:6px;padding:6px 8px;text-align:center">'
+      +'<div style="font-size:8px;font-weight:700;color:var(--text2);margin-bottom:2px">SMA 100</div>'
+      +'<div style="font-size:11px;font-weight:800;color:'+(main.price>main.sma100?'#00c853':'#ff3d57')+'">'+fP(main.sma100)+'</div></div>'
+      +'<div style="background:var(--input-bg);border-radius:6px;padding:6px 8px;text-align:center">'
+      +'<div style="font-size:8px;font-weight:700;color:var(--text2);margin-bottom:2px">SMA 200</div>'
+      +'<div style="font-size:11px;font-weight:800;color:'+(main.bullCtx?'#00c853':'#ff3d57')+'">'+fP(main.sma200)+'</div></div>'
+      +'</div>'
+      +'<div style="font-size:11px;font-weight:700;color:var(--text2);line-height:1.5">'+explanation+'</div>'
+      +'</div>'
       // Tabla de TFs
       +'<div style="overflow-x:auto;-webkit-overflow-scrolling:touch">'
       +'<table style="width:100%;border-collapse:collapse;font-size:12px">'
