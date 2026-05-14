@@ -10000,28 +10000,43 @@ function gCalcStoch(ohlcv, kPer=14, smooth=3) {
   return stochK;
 }
 
+function gCalcATR(ohlcv, period=14) {
+  const n = ohlcv.length;
+  const tr = new Array(n).fill(0);
+  for (let i=1; i<n; i++) {
+    tr[i] = Math.max(ohlcv[i].high-ohlcv[i].low, Math.abs(ohlcv[i].high-ohlcv[i-1].close), Math.abs(ohlcv[i].low-ohlcv[i-1].close));
+  }
+  let atr = tr.slice(1, period+1).reduce((a,b)=>a+b,0)/period;
+  const atrs = new Array(n).fill(NaN);
+  if (period < n) atrs[period] = atr;
+  for (let i=period+1; i<n; i++) { atr=(atr*(period-1)+tr[i])/period; atrs[i]=atr; }
+  return atrs;
+}
+
 function gAnalyzeTF(ohlcv) {
   if (ohlcv.length < 220) return null;
   const closes = ohlcv.map(c => c.close);
   const sma200 = gCalcSMA(closes, 200);
   const { plusDI, minusDI, adx } = gCalcADX(ohlcv);
-  const stochK = gCalcStoch(ohlcv);
+  const stochK  = gCalcStoch(ohlcv);
+  const atrArr  = gCalcATR(ohlcv);
   const i = ohlcv.length - 2;
   const p = i - 1;
   if (isNaN(sma200[i]) || isNaN(plusDI[i]) || isNaN(minusDI[i]) || isNaN(adx[i])) return null;
-  const price = closes[i];
+  const price   = closes[i];
   const bullCtx = price > sma200[i];
-  const adxVal = adx[i], adxOk = adxVal >= 20;
+  const adxVal  = adx[i], adxOk = adxVal >= 20;
   const pdi = plusDI[i], mdi = minusDI[i];
-  const stoch = isNaN(stochK[i]) ? null : stochK[i];
-  const pCross = !isNaN(plusDI[p]) && pdi>mdi && plusDI[p]<=minusDI[p];
-  const mCross = !isNaN(minusDI[p]) && mdi>pdi && minusDI[p]<=plusDI[p];
+  const stoch   = isNaN(stochK[i]) ? null : stochK[i];
+  const atr     = isNaN(atrArr[i]) ? null : atrArr[i];
+  const pCross  = !isNaN(plusDI[p])  && pdi>mdi && plusDI[p]<=minusDI[p];
+  const mCross  = !isNaN(minusDI[p]) && mdi>pdi && minusDI[p]<=plusDI[p];
   let signal = 'flat', crossed = false;
   if      (bullCtx && pdi>mdi && adxOk)  { signal='long';        crossed=pCross; }
   else if (!bullCtx && mdi>pdi && adxOk)  { signal='short';       crossed=mCross; }
   else if (bullCtx && pdi>mdi && !adxOk)  { signal='watch-long';  }
   else if (!bullCtx && mdi>pdi && !adxOk) { signal='watch-short'; }
-  return { price, bullCtx, adxVal, adxOk, pdi, mdi, stoch, signal, crossed, sma200: sma200[i] };
+  return { price, bullCtx, adxVal, adxOk, pdi, mdi, stoch, atr, signal, crossed, sma200: sma200[i] };
 }
 
 async function runGustavoAnalysis() {
@@ -10036,7 +10051,7 @@ async function runGustavoAnalysis() {
   res.innerHTML='<style>@keyframes gSpin{to{transform:rotate(360deg)}}</style>'
     +'<div style="font-size:11px;color:var(--text2);padding:10px 0;display:flex;align-items:center;gap:8px">'
     +'<span style="display:inline-block;width:12px;height:12px;border:2px solid var(--border);border-top-color:#ff6b00;border-radius:50%;animation:gSpin .7s linear infinite"></span>'
-    +'Analizando estrategia Gustavo…</div>';
+    +'Analizando estrategia INVRTT…</div>';
   try{
     const TFS=[{tf:'1h',label:'1H'},{tf:'4h',label:'4H'},{tf:'1d',label:'1D'}];
     const results=[];
@@ -10047,16 +10062,76 @@ async function runGustavoAnalysis() {
     }
     if(!results.length)throw new Error('Sin datos suficientes');
     const main=results.find(r=>r.tf==='4h')||results[0];
-    const fP=p=>{if(!p&&p!==0)return'—';if(p>=1000)return'$'+p.toLocaleString('en-US',{maximumFractionDigits:0});if(p>=1)return'$'+p.toFixed(4);return'$'+p.toFixed(6);};
+    const fP=p=>{if(!p&&p!==0)return'—';if(p>=1000)return'$'+p.toLocaleString('en-US',{maximumFractionDigits:2});if(p>=1)return'$'+p.toFixed(4);return'$'+p.toFixed(6);};
+    const fPct=p=>(p>=0?'+':'')+p.toFixed(2)+'%';
     const longC=results.filter(r=>r.signal==='long').length;
     const shortC=results.filter(r=>r.signal==='short').length;
-    let recText,recSub,recClr,recBg,recBorder;
+    const isActive = main.signal==='long'||main.signal==='short';
+    const isCross  = main.crossed;
+
+    // ── Calcular SL / TP basados en ATR 4H ──
+    let entryCard='';
+    if(isActive && main.atr){
+      const entry = main.price;
+      const atr   = main.atr;
+      const isL   = main.signal==='long';
+      // SL: precio - 1×ATR (long) / precio + 1×ATR (short)
+      const sl    = isL ? entry - atr     : entry + atr;
+      const tp1   = isL ? entry + atr*1.5 : entry - atr*1.5;
+      const tp2   = isL ? entry + atr*2.5 : entry - atr*2.5;
+      const slPct = Math.abs(sl-entry)/entry*100;
+      const tp1Pct= Math.abs(tp1-entry)/entry*100;
+      const tp2Pct= Math.abs(tp2-entry)/entry*100;
+      const rr1   = (tp1Pct/slPct).toFixed(1);
+      const rr2   = (tp2Pct/slPct).toFixed(1);
+      const eClr  = isL?'#00c853':'#ff3d57';
+      const eBg   = isL?'rgba(0,200,83,.08)':'rgba(255,61,87,.08)';
+      const eBd   = isL?'rgba(0,200,83,.3)':'rgba(255,61,87,.3)';
+      const pulseAnim = isCross
+        ? '<style>@keyframes gPulse{0%,100%{box-shadow:0 0 0 0 '+(isL?'rgba(0,200,83,.5)':'rgba(255,61,87,.5)')+'}50%{box-shadow:0 0 0 8px transparent}}</style>'
+        : '';
+      const pulseStyle = isCross ? 'animation:gPulse 1.5s infinite;' : '';
+      entryCard = pulseAnim
+        +'<div style="margin:0;padding:12px 14px;background:'+eBg+';border-bottom:1px solid '+eBd+';'+pulseStyle+'">'
+        +(isCross?'<div style="font-size:9px;font-weight:900;color:'+eClr+';letter-spacing:2px;text-transform:uppercase;margin-bottom:8px">🔔 CRUCE DMI — ENTRADA AHORA</div>':'')
+        +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:6px">'
+        // Entrada
+        +'<div style="background:var(--input-bg);border:1px solid var(--border);border-radius:8px;padding:8px 6px;text-align:center">'
+        +'<div style="font-size:8px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">Entrada</div>'
+        +'<div style="font-size:12px;font-weight:900;color:#ff6b00">'+fP(entry)+'</div></div>'
+        // SL
+        +'<div style="background:var(--input-bg);border:1px solid rgba(255,61,87,.3);border-radius:8px;padding:8px 6px;text-align:center">'
+        +'<div style="font-size:8px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">Stop Loss</div>'
+        +'<div style="font-size:12px;font-weight:900;color:#ff3d57">'+fP(sl)+'</div>'
+        +'<div style="font-size:9px;font-weight:700;color:#ff3d57">-'+slPct.toFixed(1)+'%</div></div>'
+        // TP1
+        +'<div style="background:var(--input-bg);border:1px solid rgba(0,200,83,.3);border-radius:8px;padding:8px 6px;text-align:center">'
+        +'<div style="font-size:8px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">TP1 · R'+rr1+'</div>'
+        +'<div style="font-size:12px;font-weight:900;color:#00c853">'+fP(tp1)+'</div>'
+        +'<div style="font-size:9px;font-weight:700;color:#00c853">+'+tp1Pct.toFixed(1)+'%</div></div>'
+        // TP2
+        +'<div style="background:var(--input-bg);border:1px solid rgba(0,200,83,.2);border-radius:8px;padding:8px 6px;text-align:center">'
+        +'<div style="font-size:8px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">TP2 · R'+rr2+'</div>'
+        +'<div style="font-size:12px;font-weight:900;color:#00c853">'+fP(tp2)+'</div>'
+        +'<div style="font-size:9px;font-weight:700;color:#00c853">+'+tp2Pct.toFixed(1)+'%</div></div>'
+        +'</div>'
+        +'<div style="font-size:9px;font-weight:700;color:var(--text2);margin-top:6px">ATR '+fP(atr)+' · Salida estrategia: cruce DMI contrario</div>'
+        +'</div>';
+    }
+
+    let recText,recSub,recClr,recBg,recBorder,recSize='22px';
     if(main.signal==='long'){
-      recText='▲ LONG';recClr='#00c853';recBg='rgba(0,200,83,.07)';recBorder='rgba(0,200,83,.4)';
+      const conf=longC>=2?'FUERTE':'';
+      recText='▲ LONG'+(conf?' — '+conf:'');
+      recClr='#00c853';recBg='rgba(0,200,83,.07)';recBorder='rgba(0,200,83,.4)';
       recSub=(main.crossed?'🔔 Cruce DMI · ':'')+longC+' TF'+(longC>1?'s confirman':' confirma')+' · ADX '+main.adxVal.toFixed(0);
+      if(longC>=2)recSize='24px';
     }else if(main.signal==='short'){
-      recText='▼ SHORT';recClr='#ff3d57';recBg='rgba(255,61,87,.07)';recBorder='rgba(255,61,87,.4)';
+      const conf=shortC>=2?'FUERTE':'';
+      recText='▼ SHORT'+(conf?' — '+conf:'');
+      recClr='#ff3d57';recBg='rgba(255,61,87,.07)';recBorder='rgba(255,61,87,.4)';
       recSub=(main.crossed?'🔔 Cruce DMI · ':'')+shortC+' TF'+(shortC>1?'s confirman':' confirma')+' · ADX '+main.adxVal.toFixed(0);
+      if(shortC>=2)recSize='24px';
     }else if(main.signal==='watch-long'){
       recText='⏳ ESPERAR LONG';recClr='#ffd740';recBg='rgba(255,215,64,.05)';recBorder='rgba(255,215,64,.3)';
       recSub='Contexto alcista · ADX '+main.adxVal.toFixed(0)+' < 20 (sin fuerza suficiente)';
@@ -10067,20 +10142,23 @@ async function runGustavoAnalysis() {
       recText='— FLAT —';recClr='var(--text2)';recBg='var(--surface)';recBorder='var(--border)';
       recSub='Sin confluencia clara en 4H';
     }
+
     const sigClr={long:'#00c853',short:'#ff3d57','watch-long':'#ffd740','watch-short':'#ffd740',flat:'var(--text2)'};
     const sigTxt={long:'▲ LONG',short:'▼ SHORT','watch-long':'⏳ L?','watch-short':'⏳ S?',flat:'— FLAT'};
     const sigBg={long:'rgba(0,200,83,.12)',short:'rgba(255,61,87,.12)','watch-long':'rgba(255,215,64,.1)','watch-short':'rgba(255,215,64,.1)',flat:'transparent'};
+
     const rowsHtml=results.map(r=>{
       const sCol=sigClr[r.signal]||'var(--text2)';
       const cxCol=r.bullCtx?'#00c853':'#ff3d57';
       const adxC=r.adxOk?'#00c853':'#ffd740';
-      const pdiC=r.pdi>r.mdi?'#00c853':'#ff3d57';
+      const pdiC=r.pdi>r.mdi?'#00c853':'var(--text2)';
       const mdiC=r.mdi>r.pdi?'#ff3d57':'var(--text2)';
       const cross=r.crossed?'<span style="font-size:8px;background:rgba(255,107,0,.2);color:#ff6b00;border-radius:3px;padding:1px 4px;margin-left:3px;font-weight:800">CRUCE</span>':'';
       const stStr=r.stoch!==null?r.stoch.toFixed(0):'—';
       const stC=r.stoch!==null?(r.stoch<50?'#00c853':'#ff3d57'):'var(--text2)';
-      return '<tr style="border-top:1px solid var(--border)">'
-        +'<td style="font-family:\'Nunito\',sans-serif;font-size:11px;font-weight:800;padding:7px 4px;color:var(--text)">'+r.label+'</td>'
+      const rowBg=r.tf==='4h'?'background:rgba(255,107,0,.04)':'';
+      return '<tr style="border-top:1px solid var(--border);'+rowBg+'">'
+        +'<td style="font-size:11px;font-weight:800;padding:7px 4px;color:var(--text)">'+r.label+(r.tf==='4h'?' ★':'')+'</td>'
         +'<td style="padding:6px 2px"><span style="font-size:10px;font-weight:800;color:'+cxCol+'">'+(r.bullCtx?'▲ BULL':'▼ BEAR')+'</span></td>'
         +'<td style="color:'+pdiC+';font-size:11px;font-weight:800;text-align:center;padding:6px 2px">'+r.pdi.toFixed(0)+'</td>'
         +'<td style="color:'+mdiC+';font-size:11px;font-weight:800;text-align:center;padding:6px 2px">'+r.mdi.toFixed(0)+'</td>'
@@ -10089,20 +10167,25 @@ async function runGustavoAnalysis() {
         +'<td style="padding:6px 4px"><span style="font-size:10px;font-weight:800;color:'+sCol+';background:'+sigBg[r.signal]+';border-radius:4px;padding:2px 5px">'+(sigTxt[r.signal]||'—')+'</span>'+cross+'</td>'
         +'</tr>';
     }).join('');
+
     res.innerHTML='<style>@keyframes gSpin{to{transform:rotate(360deg)}}</style>'
       +'<div style="background:var(--card);border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-top:6px;box-shadow:0 2px 8px var(--shadow)">'
+      // Header principal
       +'<div style="display:flex;align-items:center;justify-content:space-between;background:'+recBg+';border-bottom:2px solid '+recBorder+';padding:12px 14px">'
-      +'<div><div style="font-family:\'Nunito\',sans-serif;font-size:22px;font-weight:900;color:'+recClr+';line-height:1.1;letter-spacing:-.5px">'+recText+'</div>'
-      +'<div style="font-family:\'Nunito\',sans-serif;font-size:10px;font-weight:700;color:var(--text2);margin-top:3px">'+recSub+'</div></div>'
+      +'<div><div style="font-size:'+recSize+';font-weight:900;color:'+recClr+';line-height:1.1;letter-spacing:-.5px">'+recText+'</div>'
+      +'<div style="font-size:10px;font-weight:700;color:var(--text2);margin-top:3px">'+recSub+'</div></div>'
       +'<div style="text-align:right">'
-      +'<div style="font-family:\'Nunito\',sans-serif;font-size:10px;font-weight:700;color:var(--text2);margin-bottom:2px">'+symbol.replace('USDT','')+'/USDT</div>'
-      +'<div style="font-family:\'Nunito\',sans-serif;font-size:18px;font-weight:900;color:var(--text)">'+fP(main.price)+'</div>'
-      +'<div style="font-family:\'Nunito\',sans-serif;font-size:10px;font-weight:700;color:var(--text2)">SMA200 '+fP(main.sma200)+'</div></div>'
+      +'<div style="font-size:10px;font-weight:700;color:var(--text2);margin-bottom:2px">'+symbol.replace('USDT','')+'/USDT</div>'
+      +'<div style="font-size:18px;font-weight:900;color:var(--text)">'+fP(main.price)+'</div>'
+      +'<div style="font-size:10px;font-weight:700;color:var(--text2)">SMA200 '+fP(main.sma200)+'</div></div>'
       +'</div>'
+      // Tarjeta de entrada (solo si hay señal activa)
+      +entryCard
+      // Tabla de TFs
       +'<div style="overflow-x:auto;-webkit-overflow-scrolling:touch">'
       +'<table style="width:100%;border-collapse:collapse;font-size:11px">'
       +'<thead style="background:var(--surface2)"><tr>'
-      +'<th style="font-size:9px;font-weight:800;color:var(--text2);padding:7px 4px;text-align:left;letter-spacing:.8px;text-transform:uppercase;border-bottom:1px solid var(--border)">TF</th>'
+      +'<th style="font-size:9px;font-weight:800;color:var(--text2);padding:7px 4px;text-align:left;letter-spacing:.8px;text-transform:uppercase;border-bottom:1px solid var(--border)">TF ★4H</th>'
       +'<th style="font-size:9px;font-weight:800;color:var(--text2);padding:7px 2px;text-align:left;letter-spacing:.8px;text-transform:uppercase;border-bottom:1px solid var(--border)">Ctx</th>'
       +'<th style="font-size:9px;font-weight:800;color:var(--text2);padding:7px 2px;text-align:center;text-transform:uppercase;border-bottom:1px solid var(--border)">+DI</th>'
       +'<th style="font-size:9px;font-weight:800;color:var(--text2);padding:7px 2px;text-align:center;text-transform:uppercase;border-bottom:1px solid var(--border)">-DI</th>'
@@ -10111,9 +10194,10 @@ async function runGustavoAnalysis() {
       +'<th style="font-size:9px;font-weight:800;color:var(--text2);padding:7px 4px;text-align:left;text-transform:uppercase;border-bottom:1px solid var(--border)">Señal</th>'
       +'</tr></thead>'
       +'<tbody>'+rowsHtml+'</tbody></table></div>'
-      +'<div style="font-family:\'Nunito\',sans-serif;font-size:10px;font-weight:700;color:var(--text2);padding:8px 14px">'
-      +'SMA 200 · ADX/DMI · Stoch 14,3 · señal basada en 4H · '+new Date().toLocaleTimeString('es-AR')+'</div>'
+      +'<div style="font-size:10px;font-weight:700;color:var(--text2);padding:8px 14px">'
+      +'SMA 200 · ADX/DMI · Stoch 14,3 · ATR 14 · Señal principal: 4H ★ · '+new Date().toLocaleTimeString('es-AR')+'</div>'
       +'</div>';
+
   }catch(e){
     res.innerHTML='<div style="font-size:12px;color:#ff3d57;padding:10px;background:rgba(255,61,87,.06);border:1px solid rgba(255,61,87,.3);border-radius:8px;font-weight:700">⚠ '+e.message+'</div>';
   }finally{
