@@ -3887,7 +3887,12 @@ function computeStats(T){
   const pf=grossLosses>0?grossWins/grossLosses:grossWins>0?999:0;
   const rr=losses.length&&avgLoss!==0?Math.abs(avgWin/avgLoss):0;
   const totalPnl=T.reduce((s,t)=>s+(t.margen*t.resultado/100),0);
-  const sorted=[...T].sort((a,b)=>a.fecha.localeCompare(b.fecha));
+  // Ordenar por fecha de CIERRE (no apertura) para racha y curva de equity correctas
+  const sorted=[...T].sort((a,b)=>{
+    const da = a.fechaCierre || a.closedHora || a.fechahora || a.fecha || '';
+    const db = b.fechaCierre || b.closedHora || b.fechahora || b.fecha || '';
+    return da.localeCompare(db);
+  });
   let peakEq=0,maxDDeq=0,runEq=0;
   sorted.forEach(t=>{runEq+=t.resultado;if(runEq>peakEq)peakEq=runEq;const dd=peakEq-runEq;if(dd>maxDDeq)maxDDeq=dd;});
   const streak=calcStreak(sorted);
