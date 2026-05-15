@@ -10271,7 +10271,10 @@ document.getElementById('an-result').innerHTML='';
       // Header principal
       +'<div style="display:flex;align-items:center;justify-content:space-between;background:'+recBg+';border-bottom:2px solid '+recBorder+';padding:12px 14px">'
       +'<div><div style="font-size:'+recSize+';font-weight:900;color:'+recClr+';line-height:1.1;letter-spacing:-.5px">'+recText+'</div>'
-      +'<div style="font-size:10px;font-weight:700;color:var(--text2);margin-top:3px">'+recSub+'</div></div>'
+      +'<div style="font-size:10px;font-weight:700;color:var(--text2);margin-top:3px">'+recSub+'</div>'
+      +'<button onclick="(function(btn){var d=document.getElementById(\'td-expl-main\');var open=d.style.display===\'block\';d.style.display=open?\'none\':\'block\';btn.innerHTML=open?\'💬 ¿Por qué esta señal?\':\'▲ Cerrar explicación\';})(this)" style="margin-top:8px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.15);border-radius:8px;color:var(--text2);font-family:\'Nunito\',sans-serif;font-size:11px;font-weight:800;padding:7px 14px;cursor:pointer;width:100%;text-align:left">💬 ¿Por qué esta señal?</button>'
+      +'<div id="td-expl-main" style="display:none;margin-top:8px;font-size:11px;font-weight:700;color:var(--text2);line-height:1.6;text-align:justify">'+explanation+'</div>'
+      +'</div>'
       +'<div style="text-align:right">'
       +'<div style="font-size:10px;font-weight:700;color:var(--text2);margin-bottom:2px">'+symbol.replace('USDT','')+'/USDT</div>'
       +'<div style="font-size:18px;font-weight:900;color:var(--text)">'+fP(main.price)+'</div>'
@@ -10307,8 +10310,6 @@ document.getElementById('an-result').innerHTML='';
         }).join('');
       })()
       +'</div>'
-      +'<button onclick="(function(btn){var d=document.getElementById(\'td-expl\');var open=d.style.display===\'block\';d.style.display=open?\'none\':\'block\';btn.innerHTML=open?\'💬 ¿Por qué esta señal?\':\'▲ Cerrar explicación\';})(this)" style="margin-top:8px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.15);border-radius:8px;color:var(--text2);font-family:\'Nunito\',sans-serif;font-size:11px;font-weight:800;padding:7px 14px;cursor:pointer;width:100%;text-align:left">💬 ¿Por qué esta señal?</button>'
-      +'<div id="td-expl" style="display:none;margin-top:8px;font-size:11px;font-weight:700;color:var(--text2);line-height:1.6;text-align:justify">'+explanation+'</div>'
       +'</div>'
       // Tabla de TFs
       +'<div style="overflow-x:auto;-webkit-overflow-scrolling:touch">'
