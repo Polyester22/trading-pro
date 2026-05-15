@@ -2813,6 +2813,74 @@ function buildNoTradeHTML(ticker, auto, tf, tc){
   </div>`;
 }
 
+// ── EXPLICACIONES DETALLADAS de recomendaciones ───────────────────────────────
+function getRecExplanation(recAction, ctx){
+  const { isLong, scoreRaw, c1h, c4h, c24, tf, tradeType, contraTendencia, trendBias,
+          timing, rs, amp, accel, conf, sLong, sShort, rsiExhaustion } = ctx;
+  const dir    = isLong ? 'Long' : 'Short';
+  const dirOp  = isLong ? 'Short' : 'Long';
+  const tend   = isLong ? 'alcista' : 'bajista';
+  const tendOp = isLong ? 'bajista' : 'alcista';
+  const sign1h = c1h >= 0 ? '+' : '';
+  const sign4h = c4h >= 0 ? '+' : '';
+  const absAcc = Math.abs(accel).toFixed(2);
+
+  if(recAction.includes('ESPERAR ACELERACIÓN')){
+    return `El análisis detecta señales claras en dirección <strong>${dir}</strong> (score <strong>${scoreRaw}/7</strong>), pero el momentum actual todavía no tiene la fuerza suficiente para entrar ahora.
+    <br><br>El precio está en tendencia ${tend} pero no está acelerando todavía — el momentum 1H es solo <strong>${sign1h}${c1h.toFixed(1)}%</strong>, muy débil para el TF ${tf}.
+    <br><br>Si entrás ahora el trade puede quedar lateral un rato o no llegar al TP1 con velocidad. <strong>Esperá que el precio empiece a moverse más rápido</strong> — cuando la vela de 1H sea más agresiva en dirección ${tend} que el promedio reciente, es la señal de aceleración que buscás.`;
+  }
+  if(recAction === (isLong ? 'LONG' : 'SHORT')){
+    return `Setup limpio. Señales alineadas con momentum activo — score <strong>${scoreRaw}/7</strong>, tendencia ${tend} confirmada, aceleración presente (<strong>${absAcc}%</strong> sobre promedio horario).
+    <br><br>Momentum: 1H <strong>${sign1h}${c1h.toFixed(1)}%</strong> · 4H <strong>${sign4h}${c4h.toFixed(1)}%</strong>. Es uno de los mejores momentos para entrar según la lógica del sistema.
+    <br><br>Seguí el plan de gestión: cerrar 50% en TP1, mover SL a entrada, dejar runner si el contexto sigue alineado.`;
+  }
+  if(recAction.includes('CAUTELOSO')){
+    return `Hay señales en dirección ${dir} pero no están completamente alineadas — score <strong>${scoreRaw}/7</strong>, por debajo del umbral ideal (5+).
+    <br><br>El setup existe pero le falta convicción. Puede funcionar, pero la probabilidad estadística es menor que en un setup limpio.
+    <br><br><strong>Si operás</strong>: usá posición reducida (50% de tu tamaño normal) y cerrá <strong>todo</strong> en TP1 — sin dejar runner, sin promediar.`;
+  }
+  if(recAction.includes('AGOTAMIENTO CONFIRMADO')){
+    return `El RSI está en zona extrema y el precio muestra señales claras de agotamiento del movimiento actual. Esto puede ser un punto de giro.
+    <br><br>El momentum en la dirección contraria (${dirOp}) se está frenando — el precio corrió demasiado sin corrección y el RSI confirma sobreextensión.
+    <br><br>Es un setup de <strong>reversión potencial</strong>. Gestión ajustada: cerrar <strong>70%+ en TP1</strong>, SL ajustado. No es un trade de runner.`;
+  }
+  if(recAction.includes('NO ENTRAR — AGOTADO')){
+    return `El movimiento ${tendOp} actual ya recorrió demasiado sin corrección. El precio está sobreextendido y el sistema detecta agotamiento.
+    <br><br>Entrar ahora en dirección ${dir} es ir a favor de un movimiento que ya se quedó sin combustible. El riesgo de reversión brusca es alto.
+    <br><br><strong>Esperá</strong> que el precio consolide, corrija al menos parcialmente, y el RSI regrese a zona neutral antes de buscar una entrada.`;
+  }
+  if(recAction.includes('SIN SEÑAL') || recAction.includes('RANGO')){
+    return `El mercado está lateral — no hay tendencia definida ni en Long ni en Short. El precio rebota entre rangos sin dirección clara.
+    <br><br>Momentum 1H <strong>${sign1h}${c1h.toFixed(1)}%</strong> · 4H <strong>${sign4h}${c4h.toFixed(1)}%</strong>. Las señales Long y Short se cancelan mutuamente (${sLong}/${sShort} de 7).
+    <br><br>No hay setup operable ahora. <strong>Esperá una ruptura definida</strong> de los extremos del rango con volumen, antes de entrar en cualquier dirección.`;
+  }
+  if(recAction.includes('CONTRA TENDENCIA')){
+    return `El setup ${dir} existe, pero la tendencia estructural más grande es <strong>${trendBias}</strong> — o sea, vas contra la corriente principal.
+    <br><br>El trade puede funcionar como un rebote de corto plazo, pero tiene menor probabilidad y <strong>menor recorrido</strong> que un trade a favor de la tendencia.
+    <br><br>Gestión obligatoria: cerrar <strong>70%+ en TP1</strong>, SL ajustado, absolutamente sin runner. Si no llegó al TP1 rápido, salir.`;
+  }
+  if(recAction.includes('ESPERAR RETROCESO') || recAction.includes('ESPERAR REBOTE')){
+    return `El setup ${dir} es válido, pero el precio ya se movió demasiado en esa dirección — llegaste tarde al movimiento.
+    <br><br>Entrar ahora implica un R/R malo: el precio necesita seguir corriendo mucho para llegar al TP1, y el SL queda proporcionalmente grande.
+    <br><br><strong>Esperá</strong> que el precio corrija un poco (${isLong ? 'retroceso bajista' : 'rebote alcista'} de corto plazo) para tener una entrada con mejor R/R.`;
+  }
+  if(recAction.includes('RUPTURA')){
+    return `El precio acaba de romper un nivel técnico importante alineado con la tendencia ${tend}. Los setups de ruptura son de ejecución rápida.
+    <br><br>Score <strong>${scoreRaw}/7</strong> con estructura confirmada. Si la ruptura es real, el precio suele moverse rápido hacia el TP1 sin mucho retroceso.
+    <br><br><strong>Importante</strong>: si tardás demasiado en entrar, el precio ya se fue. Y si hay falsa ruptura (precio vuelve al rango), salir rápido.`;
+  }
+  if(recAction.includes('RIESGO ALTO')){
+    return `Setup en dirección ${dir} con score <strong>${scoreRaw}/7</strong>, pero el precio lleva demasiado tiempo moviéndose sin corrección — está sobreextendido.
+    <br><br>El momentum es fuerte (1H ${sign1h}${c1h.toFixed(1)}%), pero la probabilidad de una corrección brusca que te saque por el SL antes de llegar al TP es más alta que en un setup normal.
+    <br><br>Solo para traders con experiencia en gestión de posición activa. SL más ajustado que lo usual.`;
+  }
+  // Default NO ENTRAR
+  return `Las señales no están suficientemente alineadas para justificar un trade en este momento — score <strong>${scoreRaw}/7</strong>.
+  <br><br>Puede ser por momentum débil (1H ${sign1h}${c1h.toFixed(1)}%), sesgo del mercado en contra, o señales mixtas entre Long y Short (${sLong} vs ${sShort} de 7).
+  <br><br>Mejor esperá o buscá otro activo con señales más claras.`;
+}
+
 function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
   const isLong = pos === 'Long';
   const c1h  = tc.change1h  || 0;
@@ -3134,6 +3202,10 @@ function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
       ${timing !== 'optimal' ? `<div id="an-timing-badge" class="info-tap" data-info="riesgo" onclick="event.stopPropagation();handleInfoTap(this)" style="cursor:pointer;background:${timingInfo.color}22;border:1px solid ${timingInfo.color}88;border-radius:6px;padding:4px 9px;font-size:11px;font-weight:800;color:${timingInfo.color}">
         ${timingInfo.emoji} ${timingInfo.label} <span style="opacity:.4;font-size:9px">ⓘ</span>
       </div>` : `<div id="an-timing-badge"></div>`}
+    </div>
+    <button onclick="(function(btn){var d=document.getElementById('an-expl');var open=d.style.display==='block';d.style.display=open?'none':'block';btn.innerHTML=open?'💬 ¿Por qué esta recomendación?':'▲ Cerrar explicación';})(this)" style="margin-top:10px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.15);border-radius:8px;color:var(--text2);font-family:'Nunito',sans-serif;font-size:11px;font-weight:800;padding:7px 14px;cursor:pointer;width:100%;text-align:left">💬 ¿Por qué esta recomendación?</button>
+    <div id="an-expl" style="display:none;margin-top:8px;padding:10px 12px;background:rgba(0,0,0,.25);border-radius:8px;font-size:12px;line-height:1.6;color:var(--text)">
+      ${getRecExplanation(recAction, { isLong, scoreRaw, c1h, c4h, c24, tf, tradeType, contraTendencia, trendBias, timing, rs, amp, accel, conf, sLong: auto.sLong, sShort: auto.sShort, rsiExhaustion })}
     </div>
   </div>
 
