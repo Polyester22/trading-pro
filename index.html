@@ -3234,26 +3234,6 @@ function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
     </div>
   </div>
 
-  <div style="font-size:9px;font-weight:800;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px">Niveles sugeridos (% precio sin apalancamiento)${contraTendencia?' <span style="color:#ffd100">— reducidos (contra tendencia)</span>':''}</div>
-  <div class="an-tp-row">
-    <div class="an-tp-box" style="border:1px solid rgba(0,200,83,.3)">
-      <div class="an-tp-lbl">TP1</div>
-      <div class="an-tp-val" style="color:#00c853">${sign}${dtpDisplay.tp1.toFixed(1)}%</div>
-    </div>
-    <div class="an-tp-box" style="border:1px solid rgba(255,107,0,.3)">
-      <div class="an-tp-lbl">TP2 / avg</div>
-      <div class="an-tp-val" style="color:#ff6b00">${sign}${dtpDisplay.tp2.toFixed(1)}%</div>
-    </div>
-    <div class="an-tp-box" style="border:1px solid rgba(255,61,87,.25)${contraTendencia?';opacity:.45':''}">
-      <div class="an-tp-lbl">${contraTendencia?'Runner ⛔':'Runner p90'}</div>
-      <div class="an-tp-val" style="color:${contraTendencia?'#9999b8':'#ff3d57'}">${contraTendencia?'—':sign+dtp.runner.toFixed(1)+'%'}</div>
-    </div>
-    <div class="an-tp-box" style="border:1px solid rgba(153,153,184,.25)">
-      <div class="an-tp-lbl">SL</div>
-      <div class="an-tp-val" style="color:#9999b8">${isLong?'-':'+'}${slPct.toFixed(1)}%</div>
-    </div>
-  </div>
-
   ${(()=>{
     const entryPx = tc.price || null;
     if(!entryPx) return '';
