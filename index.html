@@ -2669,6 +2669,7 @@ async function runTickerAnalysis(){
 document.getElementById('an-result').innerHTML='';
   document.getElementById('td-result').innerHTML='';
   document.getElementById('gustavo-result').innerHTML='';
+  document.getElementById('an-chart-result').innerHTML='';
   const ticker = (document.getElementById('an-ticker').value || '').trim().toUpperCase();
   if(!ticker){ alert('Ingresá un ticker'); return; }
   if(!location.protocol.startsWith('https')){
@@ -9816,6 +9817,7 @@ async function runTDAnalysis(){
 document.getElementById('an-result').innerHTML='';
   document.getElementById('td-result').innerHTML='';
   document.getElementById('gustavo-result').innerHTML='';
+  document.getElementById('an-chart-result').innerHTML='';
   const raw=(document.getElementById('an-ticker').value||'').trim().toUpperCase();
   if(!raw){alert('Ingres\u00e1 un ticker primero');return;}
   const symbol=raw.endsWith('USDT')?raw:raw+'USDT';
@@ -10053,6 +10055,7 @@ async function runGustavoAnalysis() {
 document.getElementById('an-result').innerHTML='';
   document.getElementById('td-result').innerHTML='';
   document.getElementById('gustavo-result').innerHTML='';
+  document.getElementById('an-chart-result').innerHTML='';
   const raw=(document.getElementById('an-ticker').value||'').trim().toUpperCase();
   if(!raw){alert('Ingresá un ticker primero');return;}
   const symbol=raw.endsWith('USDT')?raw:raw+'USDT';
