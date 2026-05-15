@@ -10215,11 +10215,29 @@ document.getElementById('an-result').innerHTML='';
 
     // Explicación contextual
     const explanations = {
-      long:          '✅ El precio está sobre la SMA 200 y el +DI supera al -DI con ADX > 20. La tendencia es alcista y tiene fuerza. '+(main.crossed?'🔔 Cruce del DMI en la última vela — señal fresca.':'El cruce ya ocurrió. Seguís dentro de la tendencia.')+' Salida: cuando -DI cruce sobre +DI.',
-      short:         '🔴 El precio está bajo la SMA 200 y el -DI supera al +DI con ADX > 20. La tendencia es bajista y tiene fuerza. '+(main.crossed?'🔔 Cruce del DMI en la última vela — señal fresca.':'El cruce ya ocurrió. Seguís dentro de la tendencia.')+' Salida: cuando +DI cruce sobre -DI.',
-      'watch-long':  '⏳ El contexto es alcista (precio > SMA 200) y el +DI domina, pero el ADX está en '+main.adxVal.toFixed(0)+' (necesita superar 20). La tendencia no tiene fuerza suficiente todavía. Esperá que el ADX supere 20 antes de entrar.',
-      'watch-short': '⏳ El contexto es bajista (precio < SMA 200) y el -DI domina, pero el ADX está en '+main.adxVal.toFixed(0)+' (necesita superar 20). El mercado está en tendencia sin fuerza. Esperá confirmación.',
-      flat:          '❌ Sin confluencia clara. El precio puede estar cruzando la SMA 200, o el +DI y -DI están equilibrados. No hay señal según la estrategia — esperá definición.'
+      long:
+        (main.crossed ? '🔔 <strong>Cruce del DMI en la última vela</strong> — señal fresca. ' : '')
+        +'El precio está <strong>sobre la SMA 200</strong> (contexto alcista confirmado) y el +DI supera al -DI con ADX '+main.adxVal.toFixed(0)+' > 20, lo que indica que la tendencia alcista tiene fuerza real, no es ruido. '
+        +(longC>=2 ? longC+' temporalidades confirman la señal — mayor probabilidad de continuación. ' : '')
+        +'<strong>Gestión</strong>: TP en ATR×2 desde entrada, SL en ATR×1. Salida anticipada si el -DI cruza sobre el +DI.',
+
+      short:
+        (main.crossed ? '🔔 <strong>Cruce del DMI en la última vela</strong> — señal fresca. ' : '')
+        +'El precio está <strong>bajo la SMA 200</strong> (contexto bajista confirmado) y el -DI supera al +DI con ADX '+main.adxVal.toFixed(0)+' > 20, lo que indica que la tendencia bajista tiene fuerza real. '
+        +(shortC>=2 ? shortC+' temporalidades confirman la señal — mayor probabilidad de continuación. ' : '')
+        +'<strong>Gestión</strong>: TP en ATR×2 desde entrada, SL en ATR×1. Salida anticipada si el +DI cruza sobre el -DI.',
+
+      'watch-long':
+        'El contexto es <strong>alcista</strong> (precio > SMA 200) y el +DI domina sobre el -DI — la dirección es correcta. El problema es el ADX: está en <strong>'+main.adxVal.toFixed(0)+'</strong>, necesita superar 20 para confirmar que la tendencia tiene fuerza suficiente. '
+        +'Un ADX bajo significa que el mercado está en tendencia débil o lateral — entrar ahora tiene mayor riesgo de que el precio no llegue al TP. <strong>Esperá que el ADX supere 20</strong> con el +DI todavía dominante antes de entrar.',
+
+      'watch-short':
+        'El contexto es <strong>bajista</strong> (precio < SMA 200) y el -DI domina sobre el +DI — la dirección es correcta. El problema es el ADX: está en <strong>'+main.adxVal.toFixed(0)+'</strong>, necesita superar 20 para confirmar fuerza en la tendencia. '
+        +'Con ADX bajo el mercado está en tendencia sin convicción — el precio puede moverse hacia el TP pero con mucha lentitud o falsos movimientos. <strong>Esperá que el ADX supere 20</strong> antes de entrar.',
+
+      flat:
+        'No hay señal porque los indicadores no están alineados en 4H. Puede ser que el precio esté cruzando la SMA 200 (zona de indefinición), o que el +DI y -DI estén muy parejos sin que ninguno domine claramente. '
+        +'Forzar un trade en esta condición es adivinar, no operar con ventaja. <strong>Esperá que el precio defina su posición</strong> respecto a la SMA 200 y que el DMI muestre un ganador claro con ADX > 20.'
     };
     const explanation = explanations[main.signal] || '';
 
@@ -10289,7 +10307,8 @@ document.getElementById('an-result').innerHTML='';
         }).join('');
       })()
       +'</div>'
-      +'<div style="font-size:11px;font-weight:700;color:var(--text2);line-height:1.5;text-align:justify;margin-top:8px">'+explanation+'</div>'
+      +'<button onclick="(function(btn){var d=document.getElementById(\'td-expl\');var open=d.style.display===\'block\';d.style.display=open?\'none\':\'block\';btn.innerHTML=open?\'💬 ¿Por qué esta señal?\':\'▲ Cerrar explicación\';})(this)" style="margin-top:8px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.15);border-radius:8px;color:var(--text2);font-family:\'Nunito\',sans-serif;font-size:11px;font-weight:800;padding:7px 14px;cursor:pointer;width:100%;text-align:left">💬 ¿Por qué esta señal?</button>'
+      +'<div id="td-expl" style="display:none;margin-top:8px;font-size:11px;font-weight:700;color:var(--text2);line-height:1.6;text-align:justify">'+explanation+'</div>'
       +'</div>'
       // Tabla de TFs
       +'<div style="overflow-x:auto;-webkit-overflow-scrolling:touch">'
