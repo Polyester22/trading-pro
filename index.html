@@ -10268,16 +10268,26 @@ document.getElementById('an-result').innerHTML='';
       +'<div style="font-size:10px;font-weight:800;color:'+smaOrdClr+'">'+smaOrd+'</div>'
       +'</div>'
       +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:8px">'
-      +'<div style="background:var(--input-bg);border-radius:6px;padding:6px 8px;text-align:center">'
-      +'<div style="font-size:8px;font-weight:700;color:var(--text2);margin-bottom:2px">SMA 21</div>'
-      +'<div style="font-size:11px;font-weight:800;color:'+(main.price>main.sma21?'#00c853':'#ff3d57')+'">'+fP(main.sma21)+'</div></div>'
-      +'<div style="background:var(--input-bg);border-radius:6px;padding:6px 8px;text-align:center">'
-      +'<div style="font-size:8px;font-weight:700;color:var(--text2);margin-bottom:2px">SMA 100</div>'
-      +'<div style="font-size:11px;font-weight:800;color:'+(main.price>main.sma100?'#00c853':'#ff3d57')+'">'+fP(main.sma100)+'</div></div>'
-      +'<div style="background:var(--input-bg);border-radius:6px;padding:6px 8px;text-align:center">'
-      +'<div style="font-size:8px;font-weight:700;color:var(--text2);margin-bottom:2px">SMA 200</div>'
-      +'<div style="font-size:11px;font-weight:800;color:'+(main.bullCtx?'#00c853':'#ff3d57')+'">'+fP(main.sma200)+'</div></div>'
-      +'</div>'
+      +(()=>{
+        const smas = [
+          { label:'SMA 21',  val:main.sma21,  abovePrice: main.price>main.sma21,  ctx: true },
+          { label:'SMA 100', val:main.sma100, abovePrice: main.price>main.sma100, ctx: true },
+          { label:'SMA 200', val:main.sma200, abovePrice: main.bullCtx,           ctx: true }
+        ];
+        // Rank por valor descendente (1 = más alta)
+        const sorted = [...smas].sort((a,b)=>b.val-a.val);
+        const rankMap = {}; sorted.forEach((s,i)=>{ rankMap[s.label]=i+1; });
+        const rankColors = ['#ffd100','#9999b8','#666699'];
+        return smas.map(s=>{
+          const rank = rankMap[s.label];
+          const col  = s.abovePrice ? '#00c853' : '#ff3d57';
+          return '<div style="background:var(--input-bg);border-radius:6px;padding:6px 8px;text-align:center;position:relative">'
+            +'<div style="position:absolute;top:4px;right:5px;width:14px;height:14px;border-radius:50%;background:'+rankColors[rank-1]+';display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:900;color:#000;line-height:1">'+rank+'</div>'
+            +'<div style="font-size:8px;font-weight:700;color:var(--text2);margin-bottom:2px">'+s.label+'</div>'
+            +'<div style="font-size:11px;font-weight:800;color:'+col+'">'+fP(s.val)+'</div>'
+            +'</div>';
+        }).join('');
+      })()
       +'<div style="font-size:11px;font-weight:700;color:var(--text2);line-height:1.5">'+explanation+'</div>'
       +'</div>'
       // Tabla de TFs
