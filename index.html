@@ -9976,12 +9976,12 @@ document.getElementById('an-result').innerHTML='';
         };
         const mainSig = results.length ? (results.find(r=>r.label==='1h/4h')||results[0]).signal : 'neutral';
         const tdExpl  = tdExpls[mainSig] || tdExpls.neutral;
-        return '<div style="padding:0 14px 10px;background:'+recBg+'">'
+        return '<div style="padding:8px 14px 10px;background:'+recBg+'">'
           +'<button onclick="(function(btn){var d=document.getElementById(\'td-expl-tl\');var open=d.style.display===\'block\';d.style.display=open?\'none\':\'block\';btn.innerHTML=open?\'💬 ¿Por qué esta señal?\':\'▲ Cerrar explicación\';})(this)" style="background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.15);border-radius:8px;color:var(--text2);font-family:\'Nunito\',sans-serif;font-size:11px;font-weight:800;padding:7px 14px;cursor:pointer;width:100%;text-align:left">💬 ¿Por qué esta señal?</button>'
           +'<div id="td-expl-tl" style="display:none;margin-top:8px;font-size:12px;font-weight:700;color:var(--text2);line-height:1.6;text-align:justify">'+tdExpl+'</div>'
           +'</div>';
       })()
-      +'<div style="display:flex;flex-wrap:wrap;gap:5px;padding:10px 14px 4px">'+chipsHtml+'</div>'
+      +'<div style="display:flex;flex-wrap:wrap;gap:5px;padding:10px 14px 10px">'+chipsHtml+'</div>'
       +'<div style="overflow-x:auto;-webkit-overflow-scrolling:touch">'
       +'<table style="width:100%;border-collapse:collapse;font-size:11px">'
       +'<thead style="background:var(--surface2)"><tr>'
