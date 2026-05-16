@@ -213,9 +213,9 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
 .analyzer-header{padding:10px 14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;gap:10px}
 .analyzer-body{padding:12px 14px;border-top:1px solid var(--border);display:none}
 .analyzer-body.open{display:block}
-.an-rec{border-radius:10px;padding:14px;margin-bottom:10px;text-align:center}
-.an-action{font-size:28px;font-weight:900;line-height:1;margin-bottom:4px}
-.an-conf{font-size:12px;font-weight:700;opacity:.8}
+.an-rec{border-radius:10px;padding:14px;margin-bottom:10px}
+.an-action{font-size:28px;font-weight:900;line-height:1;margin-bottom:4px;text-align:center}
+.an-conf{font-size:12px;font-weight:700;opacity:.8;text-align:center}
 .an-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:10px}
 .an-cell{background:var(--card);border-radius:8px;padding:8px 10px;text-align:center}
 .an-cell-lbl{font-size:8px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px}
@@ -3204,7 +3204,7 @@ function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
       </div>` : `<div id="an-timing-badge"></div>`}
     </div>
     <button onclick="(function(btn){var d=document.getElementById('an-expl');var open=d.style.display==='block';d.style.display=open?'none':'block';btn.innerHTML=open?'💬 ¿Por qué esta recomendación?':'▲ Cerrar explicación';})(this)" style="margin-top:10px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.15);border-radius:8px;color:var(--text2);font-family:'Nunito',sans-serif;font-size:11px;font-weight:800;padding:7px 14px;cursor:pointer;width:100%;text-align:left">💬 ¿Por qué esta recomendación?</button>
-    <div id="an-expl" style="display:none;margin-top:8px;padding:10px 12px;background:rgba(0,0,0,.25);border-radius:8px;font-size:12px;line-height:1.6;color:var(--text)">
+    <div id="an-expl" style="display:none;margin-top:8px;padding:10px 12px;background:rgba(0,0,0,.25);border-radius:8px;font-size:12px;line-height:1.6;color:var(--text);text-align:justify">
       ${getRecExplanation(recAction, { isLong, scoreRaw, c1h, c4h, c24, tf, tradeType, contraTendencia, trendBias, timing, rs, amp, accel, conf, sLong: auto.sLong, sShort: auto.sShort, rsiExhaustion })}
     </div>
   </div>
@@ -10277,6 +10277,10 @@ document.getElementById('an-result').innerHTML='';
       +'<div style="font-size:18px;font-weight:900;color:var(--text)">'+fP(main.price)+'</div>'
       +'<div style="font-size:10px;font-weight:700;color:var(--text2)">SMA200 '+fP(main.sma200)+'</div></div>'
       +'</div>'
+      +'<div style="padding:0 14px 10px;background:'+recBg+'">'
+      +'<button onclick="(function(btn){var d=document.getElementById(\'td-expl\');var open=d.style.display===\'block\';d.style.display=open?\'none\':\'block\';btn.innerHTML=open?\'💬 ¿Por qué esta señal?\':\'▲ Cerrar explicación\';})(this)" style="background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.15);border-radius:8px;color:var(--text2);font-family:\'Nunito\',sans-serif;font-size:11px;font-weight:800;padding:7px 14px;cursor:pointer;width:100%;text-align:left">💬 ¿Por qué esta señal?</button>'
+      +'<div id="td-expl" style="display:none;margin-top:8px;font-size:12px;font-weight:700;color:var(--text2);line-height:1.6;text-align:justify">'+explanation+'</div>'
+      +'</div>'
       // Tarjeta de entrada (solo si hay señal activa)
       +entryCard
       // Bloque SMAs + explicación
@@ -10307,8 +10311,6 @@ document.getElementById('an-result').innerHTML='';
         }).join('');
       })()
       +'</div>'
-      +'<button onclick="(function(btn){var d=document.getElementById(\'td-expl\');var open=d.style.display===\'block\';d.style.display=open?\'none\':\'block\';btn.innerHTML=open?\'💬 ¿Por qué esta señal?\':\'▲ Cerrar explicación\';})(this)" style="margin-top:8px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.15);border-radius:8px;color:var(--text2);font-family:\'Nunito\',sans-serif;font-size:11px;font-weight:800;padding:7px 14px;cursor:pointer;width:100%;text-align:left">💬 ¿Por qué esta señal?</button>'
-      +'<div id="td-expl" style="display:none;margin-top:8px;font-size:11px;font-weight:700;color:var(--text2);line-height:1.6;text-align:justify">'+explanation+'</div>'
       +'</div>'
       // Tabla de TFs
       +'<div style="overflow-x:auto;-webkit-overflow-scrolling:touch">'
