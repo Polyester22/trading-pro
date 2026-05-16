@@ -414,6 +414,11 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
           📊 INVRTT
         </button>
       </div>
+      <div id="signals-row" style="display:none;gap:6px;margin-bottom:8px">
+        <div id="an-badge"      style="flex:1;text-align:center;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:5px 4px;font-size:10px;font-weight:900">—</div>
+        <div id="td-badge"      style="flex:1;text-align:center;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:5px 4px;font-size:10px;font-weight:900">—</div>
+        <div id="inv-badge"     style="flex:1;text-align:center;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:5px 4px;font-size:10px;font-weight:900">—</div>
+      </div>
 
       <!-- Toggle elegir timeframe (nuevo modo objetivo: TF manual, dirección auto) -->
       <div style="margin-bottom:10px">
@@ -2665,6 +2670,75 @@ function autoDetectDirection(tc){
   return { pos, score, sLong, sShort, tf, c1h, c4h, c24, rs, accel, amp, btc1h, noTrade, conditionsLong, conditionsShort };
 }
 
+// ── SEÑALES RÁPIDAS (badges debajo de botones) ────────────────────────────────
+function updateSignalBadge(id, text, color){
+  const el = document.getElementById(id);
+  if(!el) return;
+  el.style.color = color;
+  el.style.borderColor = color+'55';
+  el.textContent = text;
+}
+
+function showSignalsRow(){
+  const row = document.getElementById('signals-row');
+  if(row) row.style.display = 'flex';
+}
+
+async function quickSignalTD(ticker){
+  try{
+    updateSignalBadge('td-badge','⏳','var(--text2)');
+    const symbol = ticker.endsWith('USDT')?ticker:ticker+'USDT';
+    const tfsNeeded = [...new Set(TD_COMBOS.flatMap(c=>[c.entry,c.trend]))];
+    const tfData = {};
+    for(const tf of tfsNeeded) tfData[tf] = await tdFetchKlines(symbol,tf);
+    const results = TD_COMBOS.map(c=>{const r=tdAnalyzeCombo(tfData[c.entry],tfData[c.trend]);return r?{...c,...r}:null;}).filter(Boolean);
+    const lC=results.filter(r=>r.signal==='long').length;
+    const sC=results.filter(r=>r.signal==='short').length;
+    const wL=results.filter(r=>r.signal==='wait-long').length;
+    const wS=results.filter(r=>r.signal==='wait-short').length;
+    if(lC>=2)      updateSignalBadge('td-badge','▲ LONG','#00c853');
+    else if(sC>=2) updateSignalBadge('td-badge','▼ SHORT','#ff3d57');
+    else if(lC===1)updateSignalBadge('td-badge','▲ L débil','#00c853');
+    else if(sC===1)updateSignalBadge('td-badge','▼ S débil','#ff3d57');
+    else if(wL>wS) updateSignalBadge('td-badge','⏳ ESPERAR L','#ffd740');
+    else if(wS>wL) updateSignalBadge('td-badge','⏳ ESPERAR S','#ffd740');
+    else           updateSignalBadge('td-badge','— NEUTRAL','var(--text2)');
+  }catch(e){ updateSignalBadge('td-badge','— error','var(--text2)'); }
+}
+
+async function quickSignalINVRTT(ticker){
+  try{
+    updateSignalBadge('inv-badge','⏳','var(--text2)');
+    const symbol = ticker.endsWith('USDT')?ticker:ticker+'USDT';
+    const klines4h = await tdFetchKlines(symbol,'4h');
+    const atr4h    = tdCalcATR(klines4h,14);
+    const closes   = klines4h.map(k=>k.close);
+    const sma200   = closes.slice(-200).reduce((a,b)=>a+b,0)/Math.min(200,closes.length);
+    const price    = closes[closes.length-1];
+    // Quick DMI
+    const hi=klines4h.map(k=>k.high), lo=klines4h.map(k=>k.low), cl=klines4h.map(k=>k.close);
+    let smPDI=0,smMDI=0,smATR=0;
+    for(let i=1;i<klines4h.length;i++){
+      const upMove=hi[i]-hi[i-1], downMove=lo[i-1]-lo[i];
+      const pdm=upMove>downMove&&upMove>0?upMove:0;
+      const mdm=downMove>upMove&&downMove>0?downMove:0;
+      const tr=Math.max(hi[i]-lo[i],Math.abs(hi[i]-cl[i-1]),Math.abs(lo[i]-cl[i-1]));
+      smPDI=smPDI===0?tr:smPDI-smPDI/14+pdm;
+      smMDI=smMDI===0?tr:smMDI-smMDI/14+mdm;
+      smATR=smATR===0?tr:smATR-smATR/14+tr;
+    }
+    const pdi=smATR>0?100*smPDI/smATR:0;
+    const mdi=smATR>0?100*smMDI/smATR:0;
+    const adx=Math.abs(pdi-mdi)/(pdi+mdi||1)*100;
+    const bullCtx = price > sma200;
+    if(bullCtx && pdi>mdi && adx>20)      updateSignalBadge('inv-badge','▲ LONG','#00c853');
+    else if(!bullCtx && mdi>pdi && adx>20) updateSignalBadge('inv-badge','▼ SHORT','#ff3d57');
+    else if(bullCtx && pdi>mdi)            updateSignalBadge('inv-badge','⏳ ESPERAR L','#ffd740');
+    else if(!bullCtx && mdi>pdi)           updateSignalBadge('inv-badge','⏳ ESPERAR S','#ffd740');
+    else                                    updateSignalBadge('inv-badge','— FLAT','var(--text2)');
+  }catch(e){ updateSignalBadge('inv-badge','— error','var(--text2)'); }
+}
+
 async function runTickerAnalysis(){
 document.getElementById('an-result').innerHTML='';
   document.getElementById('td-result').innerHTML='';
@@ -2756,6 +2830,13 @@ document.getElementById('an-result').innerHTML='';
 
   try {
     document.getElementById('an-result').innerHTML = buildAnalysisHTML(ticker, pos, tf, tc, isManual);
+    // Actualizar badge y disparar señales rápidas en paralelo
+    showSignalsRow();
+    const rec = window._lastRec || {};
+    const badgeText = (rec.action||pos).replace('— ','').replace(' —','');
+    updateSignalBadge('an-badge', badgeText, rec.color||'var(--text2)');
+    quickSignalTD(ticker);
+    quickSignalINVRTT(ticker);
   } catch(buildErr) {
     var errDetail = buildErr.message + (buildErr.stack ? ' | ' + buildErr.stack.split('\n').slice(0,3).join(' | ') : '');
     document.getElementById('an-result').innerHTML = 
@@ -3189,6 +3270,7 @@ function buildAnalysisHTML(ticker, pos, tf, tc, isManual){
     };
   } catch(_e) { window._lastAnalysis = null; }
 
+  window._lastRec = { action: recAction, color: recColor };
   return `
   <div class="an-rec" style="background:${recBg};border:2px solid ${recBorder};margin-bottom:10px">
     <div class="an-action info-tap" style="color:${recColor};cursor:pointer" data-info="riesgo" data-conf="${conf}" data-tt="${tradeType}" data-ct="${contraTendencia}" data-timing="${timing}" onclick="event.stopPropagation();handleInfoTap(this)">${recEmoji} ${recAction}</div>
@@ -9905,6 +9987,9 @@ document.getElementById('an-result').innerHTML='';
     else if(wL>wS){recText='\u23f3 ESPERAR LONG';recSub=wL+' TFs alcistas, sin trigger';recClr='#ffd740';recBg='rgba(255,215,64,.05)';recBorder='rgba(255,215,64,.3)';}
     else if(wS>wL){recText='\u23f3 ESPERAR SHORT';recSub=wS+' TFs bajistas, sin trigger';recClr='#ffd740';recBg='rgba(255,215,64,.05)';recBorder='rgba(255,215,64,.3)';}
     else{recText='\u2014 NEUTRAL \u2014';recSub='Sin confluencia';recClr='var(--text2)';recBg='var(--surface)';recBorder='var(--border)';}
+    showSignalsRow();
+    updateSignalBadge('td-badge', recText.replace('— ','').replace(' —',''), recClr);
+    // Solo actualiza su propio badge
 
     const fP=p=>{if(!p&&p!==0)return'\u2014';if(p>=1000)return'$'+p.toLocaleString('en-US',{maximumFractionDigits:0});if(p>=1)return'$'+p.toFixed(4);return'$'+p.toFixed(6);};
     const cClr={long:'#00c853',short:'#ff3d57','wait-long':'#ffd740','wait-short':'#ffd740',neutral:'var(--text2)'};
@@ -10222,6 +10307,9 @@ document.getElementById('an-result').innerHTML='';
       recText='— FLAT —';recClr='var(--text2)';recBg='var(--surface)';recBorder='var(--border)';
       recSub='Sin confluencia clara en 4H';
     }
+    showSignalsRow();
+    updateSignalBadge('inv-badge', recText.replace('— ','').replace(' —',''), recClr);
+    // Solo actualiza su propio badge
 
     // SMA order badge
     const smaOrd = main.smaOrderBull ? '✅ 21>100>200 Alcista' : main.smaOrderBear ? '🔴 21<100<200 Bajista' : '⚠️ Medias mixtas';
