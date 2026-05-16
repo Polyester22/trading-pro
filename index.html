@@ -9966,7 +9966,21 @@ document.getElementById('an-result').innerHTML='';
       +'<div style="text-align:right"><div style="font-family:\'Nunito\',sans-serif;font-size:18px;font-weight:900;color:var(--text)">'+fP(price)+'</div>'
       +'<div style="font-family:\'Nunito\',sans-serif;font-size:12px;font-weight:800;color:'+(priceChange>=0?'#00c853':'#ff3d57')+';margin-top:2px">'+(priceChange>=0?'+':'')+priceChange.toFixed(2)+'%</div></div>'
       +'</div>'
-      +bestCard
+      +(()=>{
+        const tdExpls = {
+          long:        'El precio disparó al alza con EMA 10 cruzando sobre EMA 55 (tendencia alcista), el Squeeze se liberó (expansión de volatilidad), el histograma del momentum es positivo y creciente, y el ADX confirma fuerza. Todos los ingredientes están alineados para un LONG. Gestión: TP en ATR×2, SL en ATR×1 — R/R 1:2.',
+          short:       'El precio disparó a la baja con EMA 10 cruzando bajo EMA 55 (tendencia bajista), el Squeeze se liberó, el histograma del momentum es negativo y cayendo, y el ADX confirma fuerza. Todos los ingredientes están alineados para un SHORT. Gestión: TP en ATR×2, SL en ATR×1 — R/R 1:2.',
+          'wait-long': 'La tendencia apunta para arriba (EMA 10 sobre EMA 55) y el momentum está en verde, pero todavía falta el trigger de entrada — o el Squeeze no disparó todavía, o el histograma no giró lo suficiente. Esperá que el histograma confirme dirección alcista antes de entrar.',
+          'wait-short':'La tendencia apunta para abajo (EMA 10 bajo EMA 55) y el momentum está en rojo, pero todavía falta el trigger de entrada — o el Squeeze no disparó todavía, o el histograma no terminó de girar. Esperá que el histograma confirme dirección bajista antes de entrar.',
+          neutral:     'Las señales están mezcladas entre los distintos timeframes — algunos apuntan para arriba, otros para abajo, otros no tienen señal. Sin confluencia clara no hay ventaja estadística. Esperá que al menos 2 TFs se alineen en la misma dirección antes de considerar una entrada.'
+        };
+        const mainSig = results.length ? (results.find(r=>r.label==='1h/4h')||results[0]).signal : 'neutral';
+        const tdExpl  = tdExpls[mainSig] || tdExpls.neutral;
+        return '<div style="padding:0 14px 10px;background:'+recBg+'">'
+          +'<button onclick="(function(btn){var d=document.getElementById(\'td-expl-tl\');var open=d.style.display===\'block\';d.style.display=open?\'none\':\'block\';btn.innerHTML=open?\'💬 ¿Por qué esta señal?\':\'▲ Cerrar explicación\';})(this)" style="background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.15);border-radius:8px;color:var(--text2);font-family:\'Nunito\',sans-serif;font-size:11px;font-weight:800;padding:7px 14px;cursor:pointer;width:100%;text-align:left">💬 ¿Por qué esta señal?</button>'
+          +'<div id="td-expl-tl" style="display:none;margin-top:8px;font-size:12px;font-weight:700;color:var(--text2);line-height:1.6;text-align:justify">'+tdExpl+'</div>'
+          +'</div>';
+      })()
       +'<div style="display:flex;flex-wrap:wrap;gap:5px;padding:10px 14px 4px">'+chipsHtml+'</div>'
       +'<div style="overflow-x:auto;-webkit-overflow-scrolling:touch">'
       +'<table style="width:100%;border-collapse:collapse;font-size:11px">'
