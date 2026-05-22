@@ -2204,6 +2204,40 @@ function getCompositeEV(t){
 
   return{ev:weightedEV,n:totalN,dims:usedDims,sources:dims.length};
 }
+// ── HYPERLIQUID FALLBACK ──────────────────────────────────────────────────────
+const HL_API = 'https://api.hyperliquid.xyz/info';
+
+async function hlFetchAllMids(){
+  const r = await fetch(HL_API, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({type:'allMids'})});
+  if(!r.ok) throw new Error('HL allMids failed');
+  return r.json(); // {HYPE:"25.5", BTC:"67000", ...}
+}
+
+async function hlFetchKlines(coin, interval, limit=300){
+  const tfMap = {'1m':'1m','5m':'5m','15m':'15m','1h':'1h','4h':'4h','1d':'1d','1w':'1w'};
+  const hlInterval = tfMap[interval] || interval;
+  const endTime   = Date.now();
+  const msMap     = {'1m':60e3,'5m':300e3,'15m':900e3,'1h':3600e3,'4h':14400e3,'1d':86400e3,'1w':604800e3};
+  const startTime = endTime - (msMap[interval]||3600e3) * limit;
+  const r = await fetch(HL_API, {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({type:'candleSnapshot', req:{coin, interval:hlInterval, startTime, endTime}})
+  });
+  if(!r.ok) throw new Error('HL klines failed');
+  const data = await r.json();
+  return data.map(k=>({
+    time:  k.t,
+    open:  parseFloat(k.o),
+    high:  parseFloat(k.h),
+    low:   parseFloat(k.l),
+    close: parseFloat(k.c)
+  }));
+}
+
+// Detecta si un ticker existe en Hyperliquid (no en Binance)
+function isHLTicker(ticker){ return !ticker.endsWith('USDT') && ticker.length <= 8; }
+
 async function fetchTickerChanges(tickers){
   const now=Date.now();
   const toFetch=tickers.filter(tk=>{
@@ -2219,15 +2253,32 @@ async function fetchTickerChanges(tickers){
         fetch('https://api.binance.com/api/v3/klines?symbol='+sym+'&interval=1h&limit=2').then(r=>r.json()),
         fetch('https://api.binance.com/api/v3/klines?symbol='+sym+'&interval=4h&limit=2').then(r=>r.json())
       ]);
+      if(stats.code) throw new Error('Binance: '+stats.msg); // ticker not found
       const c24=parseFloat(stats.priceChangePercent)||0;
       const price=parseFloat(stats.lastPrice)||null;
       const c1h=k1h&&k1h.length>=1?(parseFloat(k1h[k1h.length-1][4])-parseFloat(k1h[0][1]))/parseFloat(k1h[0][1])*100:0;
       const c4h=k4h&&k4h.length>=1?(parseFloat(k4h[k4h.length-1][4])-parseFloat(k4h[0][1]))/parseFloat(k4h[0][1])*100:0;
-      // Preserve previous 1H value before overwriting (for trailing detection)
       const prev=tickerChangeCache[tk];
       const prev1h=prev?prev.change1h:null;
-      tickerChangeCache[tk]={change1h:c1h,change4h:c4h,change24h:c24,fetchedAt:now,prev1h,price};
-    }catch(e){ /* ignore per-ticker errors */ }
+      tickerChangeCache[tk]={change1h:c1h,change4h:c4h,change24h:c24,fetchedAt:now,prev1h,price,source:'binance'};
+    }catch(e){
+      // Fallback: Hyperliquid
+      try{
+        const [mids, k1h, k4h, k24h] = await Promise.all([
+          hlFetchAllMids(),
+          hlFetchKlines(tk,'1h',2),
+          hlFetchKlines(tk,'4h',2),
+          hlFetchKlines(tk,'1d',2)
+        ]);
+        const price = mids[tk] ? parseFloat(mids[tk]) : null;
+        const c1h  = k1h.length>=2  ? (k1h[k1h.length-1].close - k1h[0].open) / k1h[0].open * 100 : 0;
+        const c4h  = k4h.length>=2  ? (k4h[k4h.length-1].close - k4h[0].open) / k4h[0].open * 100 : 0;
+        const c24  = k24h.length>=1 ? (k24h[k24h.length-1].close - k24h[0].open) / k24h[0].open * 100 : 0;
+        const prev  = tickerChangeCache[tk];
+        const prev1h= prev?prev.change1h:null;
+        tickerChangeCache[tk]={change1h:c1h,change4h:c4h,change24h:c24,fetchedAt:now,prev1h,price,source:'hyperliquid'};
+      }catch(e2){ /* ignore */ }
+    }
   }));
 }
 
@@ -3967,15 +4018,28 @@ async function refreshPrices(){
     } else {
       throw new Error('Binance failed');
     }
+    // Tickers que Binance no devolvió → intentar Hyperliquid
+    const missing = tickers.filter(tk=>!livePrices[tk]);
+    if(missing.length){
+      try{
+        const mids = await hlFetchAllMids();
+        missing.forEach(tk=>{ if(mids[tk]) livePrices[tk]=parseFloat(mids[tk]); });
+      }catch(_){}
+    }
   }catch(e){
+    // Binance totalmente caído → intentar Hyperliquid primero, luego CoinGecko
     try{
-      const ids=tickers.map(t=>TICKER_MAP[t]).filter(Boolean).join(',');
-      if(ids){
-        const cgData=await fetchWithRetry(`https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd`);
-        const revMap={};Object.entries(TICKER_MAP).forEach(([tk,id])=>{revMap[id]=tk;});
-        Object.entries(cgData).forEach(([id,prices])=>{
-          const tk=revMap[id];if(tk)livePrices[tk]=prices.usd;
-        });
+      const mids = await hlFetchAllMids();
+      tickers.forEach(tk=>{ if(mids[tk]) livePrices[tk]=parseFloat(mids[tk]); });
+      // Tickers no en HL → CoinGecko
+      const stillMissing = tickers.filter(tk=>!livePrices[tk]);
+      if(stillMissing.length){
+        const ids=stillMissing.map(t=>TICKER_MAP[t]).filter(Boolean).join(',');
+        if(ids){
+          const cgData=await fetchWithRetry(`https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd`);
+          const revMap={};Object.entries(TICKER_MAP).forEach(([tk,id])=>{revMap[id]=tk;});
+          Object.entries(cgData).forEach(([id,prices])=>{ const tk=revMap[id];if(tk)livePrices[tk]=prices.usd; });
+        }
       }
     }catch(e2){
       if(btn){btn.innerHTML='❌ Error — reintentá';setTimeout(()=>{if(btn){btn.innerHTML='⟳ Actualizar precios';btn.disabled=false;}},2500);}
@@ -4189,12 +4253,13 @@ function renderHistorial(){
     t.durMins=_tdur; // for sort
     // Live indicator for open trades
     const isLive=t.open&&livePrices[t.ticker];
+    const liveSource = isLive && tickerChangeCache[t.ticker]?.source === 'hyperliquid' ? ' <span style="font-size:8px;font-weight:900;color:#ff6b00;opacity:.8">HL</span>' : '';
     const obsId='obs-'+t.id;
     return`<tr class="clickable-row" onclick="loadTradeForEdit('${t.id}')">
       <td data-col="fecha" style="color:var(--text2);font-size:11px">${f}</td>
       <td data-col="ticker" style="font-weight:800"><span style="display:inline-block;width:14px;color:#00c853;font-size:11px">${t.open?'●':''}</span>${t.ticker}</td>
       <td data-col="pos"><span class="badge badge-${t.pos.toLowerCase()}">${t.pos}</span></td>
-      <td data-col="resultado" class="${rc}">${isLive?'<span class="live-dot"></span>':''}${precioPctStr}</td>
+      <td data-col="resultado" class="${rc}">${isLive?'<span class="live-dot"></span>'+liveSource:''}${precioPctStr}</td>
       <td data-col="maxMovePct" style="font-size:11px;font-weight:700;color:#00aaff">${t.maxMovePct!=null?(t.resultado>=0?'+':'-')+parseFloat(t.maxMovePct).toFixed(1)+'%':'<span style="color:var(--text2)">—</span>'}</td>
       <td data-col="efic" style="font-size:11px;font-weight:700;color:${(()=>{if(t.maxMovePct==null||t.maxMovePct==0)return'var(--text2)';const lev=t.lev||1;const e=Math.min(100,Math.round(Math.abs(t.resultado)/lev/t.maxMovePct*100));return e>=70?'#00c853':e>=40?'#ffd100':'#ff3d57';})()}">${(()=>{if(t.maxMovePct==null||t.maxMovePct==0)return'—';const lev=t.lev||1;return Math.min(100,Math.round(Math.abs(t.resultado)/lev/t.maxMovePct*100))+'%';})()}</td>
       <td data-col="pnlNeto" class="${pnlCol}" style="vertical-align:top;line-height:1.3">${netoCell}${detailCell}<br><span style="font-size:10px;font-weight:800;color:${pctSobreMargen>=0?'#00c853':'#ff3d57'}">${pctSobreMargenStr}</span></td>
@@ -9899,11 +9964,19 @@ function tdCalcATR(ohlcv,p=14){
   return atr;
 }
 
-async function tdFetchKlines(symbol,interval){
-  const resp=await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=300`);
-  if(!resp.ok){let msg=`Error ${resp.status}`;try{const j=await resp.json();msg=j.msg||msg;}catch{}throw new Error(msg);}
-  const data=await resp.json();
-  return data.map(k=>({time:k[0],open:parseFloat(k[1]),high:parseFloat(k[2]),low:parseFloat(k[3]),close:parseFloat(k[4])}));
+async function tdFetchKlines(symbol, interval){
+  // symbol puede ser 'HYPEUSDT' o 'HYPE' — intentar Binance primero
+  try{
+    const resp = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=300`);
+    if(!resp.ok){ const j=await resp.json(); throw new Error(j.msg||'Binance error'); }
+    const data = await resp.json();
+    if(!Array.isArray(data)||!data.length) throw new Error('empty');
+    return data.map(k=>({time:k[0],open:parseFloat(k[1]),high:parseFloat(k[2]),low:parseFloat(k[3]),close:parseFloat(k[4])}));
+  }catch(e){
+    // Fallback: Hyperliquid — extraer coin quitando USDT si viene con sufijo
+    const coin = symbol.endsWith('USDT') ? symbol.slice(0,-4) : symbol;
+    return hlFetchKlines(coin, interval, 300);
+  }
 }
 
 function tdAnalyzeCombo(ohlcvEntry,ohlcvTrend){
