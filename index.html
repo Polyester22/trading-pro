@@ -4225,7 +4225,7 @@ function renderHistorial(){
     // % neto sobre margen (para trades cerrados con margenOriginal, usar ese)
     const margenBase = (!t.open&&t.margenOriginal) ? t.margenOriginal : margenDisplay;
     const pctSobreMargen = margenBase>0 ? (pnlNeto/margenBase*100) : resultado;
-    const pctSobreMargenStr = (pctSobreMargen>=0?'+':'')+pctSobreMargen.toFixed(1)+'%';
+    const pctSobreMargenStr = (pctSobreMargen>=0?'+':'')+pctSobreMargen.toFixed(2)+'%';
     // Neto cell (principal)
     const netoCell = `<span style="font-weight:900">${parseFloat(pnl)>=0?'+':''}$${pnl}</span>`;
     // Detail toggle: bruto + fees (hidden by default, shown via global toggle)
@@ -4238,32 +4238,31 @@ function renderHistorial(){
     const lev = t.lev || 1;
     // R% precio: pure price movement without leverage
     const precioPct = t.open
-      ? (resultado / lev)                          // live: resultado already has lev applied via calcPct
+      ? (resultado / lev)
       : (t.entrada && t.actual && t.entrada > 0)
-        ? resultado / lev                           // closed with prices
-        : resultado / lev;                          // fallback
+        ? resultado / lev
+        : resultado / lev;
     const precioPctStr = (precioPct >= 0 ? '+' : '') + precioPct.toFixed(2) + '%';
     const rc = precioPct > 0 ? 'pos' : precioPct < 0 ? 'neg' : 'neutral';
     const f = t.fecha ? t.fecha.slice(5).replace('-','/') : ''
     const p10flag=t.p10?'<span class="badge-10">★</span>':'';
     const timingClass=t.timing?'timing-'+t.timing.toLowerCase().replace(' ',''):'';
-    // duration for this trade
     const _tdur=(t.fechahora&&t.closedHora)?Math.max(0,(new Date(t.closedHora)-new Date(t.fechahora))/60000):null;
     const _tdurStr=_tdur!==null?(_tdur<60?Math.round(_tdur)+'m':_tdur<1440?(Math.floor(_tdur/60)+'h '+Math.round(_tdur%60)+'m'):(Math.floor(_tdur/1440)+'d '+Math.floor((_tdur%1440)/60)+'h')):(t.open?'<span style="color:#00c853;font-size:10px">abierto</span>':'—');
-    t.durMins=_tdur; // for sort
-    // Live indicator for open trades
+    t.durMins=_tdur;
     const isLive=t.open&&livePrices[t.ticker];
     const liveSource = isLive && tickerChangeCache[t.ticker]?.source === 'hyperliquid' ? ' <span style="font-size:8px;font-weight:900;color:#ff6b00;opacity:.8">HL</span>' : '';
     const obsId='obs-'+t.id;
+    const margenFmt = margenDisplay!=null ? parseFloat(margenDisplay).toFixed(2) : '—';
     return`<tr class="clickable-row" onclick="loadTradeForEdit('${t.id}')">
       <td data-col="fecha" style="color:var(--text2);font-size:11px">${f}</td>
       <td data-col="ticker" style="font-weight:800"><span style="display:inline-block;width:14px;color:#00c853;font-size:11px">${t.open?'●':''}</span>${t.ticker}</td>
       <td data-col="pos"><span class="badge badge-${t.pos.toLowerCase()}">${t.pos}</span></td>
       <td data-col="resultado" class="${rc}">${isLive?'<span class="live-dot"></span>'+liveSource:''}${precioPctStr}</td>
-      <td data-col="maxMovePct" style="font-size:11px;font-weight:700;color:#00aaff">${t.maxMovePct!=null?(t.resultado>=0?'+':'-')+parseFloat(t.maxMovePct).toFixed(1)+'%':'<span style="color:var(--text2)">—</span>'}</td>
+      <td data-col="maxMovePct" style="font-size:11px;font-weight:700;color:#00aaff">${t.maxMovePct!=null?(t.resultado>=0?'+':'-')+parseFloat(t.maxMovePct).toFixed(2)+'%':'<span style="color:var(--text2)">—</span>'}</td>
       <td data-col="efic" style="font-size:11px;font-weight:700;color:${(()=>{if(t.maxMovePct==null||t.maxMovePct==0)return'var(--text2)';const lev=t.lev||1;const e=Math.min(100,Math.round(Math.abs(t.resultado)/lev/t.maxMovePct*100));return e>=70?'#00c853':e>=40?'#ffd100':'#ff3d57';})()}">${(()=>{if(t.maxMovePct==null||t.maxMovePct==0)return'—';const lev=t.lev||1;return Math.min(100,Math.round(Math.abs(t.resultado)/lev/t.maxMovePct*100))+'%';})()}</td>
       <td data-col="pnlNeto" class="${pnlCol}" style="vertical-align:top;line-height:1.3">${netoCell}${detailCell}<br><span style="font-size:10px;font-weight:800;color:${pctSobreMargen>=0?'#00c853':'#ff3d57'}">${pctSobreMargenStr}</span></td>
-      <td data-col="margen" style="font-size:11px;font-weight:600;color:var(--text2)">$${margenDisplay||'—'}</td>
+      <td data-col="margen" style="font-size:11px;font-weight:600;color:var(--text2)">$${margenFmt}</td>
       <td data-col="lev" style="font-size:11px;color:var(--text2)">${t.lev||1}x</td>
       <td data-col="temp" style="font-size:11px;color:var(--text2)">${t.temp||'—'}</td>
       <td data-col="estrategia" style="font-size:11px;color:var(--text2)">${t.estrategia||'—'}</td>
