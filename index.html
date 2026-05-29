@@ -2561,6 +2561,9 @@ function getMomentumTP(ticker, pos, consensus){
 }
 
 // ══ P&L TOGGLE: leveraged ↔ raw price (GLOBAL — afecta todos los trades) ══
+// ── DETALLE DEL BADGE: cambiá a true para restaurar los bloques ocultos ──
+const SHOW_DETAIL_BLOCKS = false;
+
 let pnlGlobalMode = 'lev'; // 'lev' | 'price'
 const pnlToggleState = new Proxy({}, {
   get: (_, id) => pnlGlobalMode,
@@ -3639,7 +3642,16 @@ function buildDetailHTML(t, livePrice, priceForCalc, pctColor, livePct, timeStr,
     +'</div>'
     + buildATRLevelsHTML(t, priceForCalc)
     +(t.obs?'<div style="margin-bottom:8px;font-size:11px;color:var(--text2);font-style:italic;padding:0 2px">'+t.obs+'</div>':'')
+    +(SHOW_DETAIL_BLOCKS ? tickerSemaphoreHTML(t, tickerChangeCache[t.ticker]||null) : '')
+    +(SHOW_DETAIL_BLOCKS ? trailingAlertHTML(t, livePct) : '')
+    +(SHOW_DETAIL_BLOCKS ? tpBlock : '')
     +renderTPProbBlock(t, livePct)
+    +(SHOW_DETAIL_BLOCKS
+      ? '<div style="display:flex;align-items:center;gap:8px;background:'+rec.bg+';border:1px solid '+rec.border+';border-radius:8px;padding:8px 10px;margin-top:8px">'
+        +'<div style="flex:1"><div style="font-size:12px;font-weight:900;color:'+rec.color+'">'+rec.action+'</div>'
+        +'<div style="font-size:10px;color:var(--text2);margin-top:1px">'+rec.reason+'</div></div>'
+        +cevBlock+'</div>'
+      : '')
     +'<div style="display:flex;gap:6px;margin-top:10px" onclick="event.stopPropagation()">'
     +'<button class="btn btn-dark btn-sm" style="flex:1;font-size:12px" onclick="loadTradeForEdit(this.dataset.id)" data-id="'+t.id+'">&#9998; Editar</button>'
     +'<button class="btn btn-dark btn-sm" style="flex:1;font-size:12px" onclick="openMCP(this.dataset.id,false)" data-id="'+t.id+'">&#128201; Cierre parcial</button>'
