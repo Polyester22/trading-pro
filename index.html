@@ -2575,7 +2575,7 @@ function getMomentumTP(ticker, pos, consensus){
 // ── DETALLE DEL BADGE: cambiá a true para restaurar los bloques ocultos ──
 const SHOW_DETAIL_BLOCKS = false;
 
-let pnlGlobalMode = 'lev'; // 'lev' | 'price' | 'realOnly' (real % sin apalancar, oculta el $ pnl)
+let pnlGlobalMode = localStorage.getItem('tpro_pnl_mode') || 'lev'; // 'lev' | 'price' | 'realOnly' (real % sin apalancar, oculta el $ pnl)
 const pnlToggleState = new Proxy({}, {
   get: (_, id) => pnlGlobalMode,
   set: () => true
@@ -2608,6 +2608,7 @@ function toggleOpenCard(id, ev){
 function togglePnlView(id, event){
   event.stopPropagation();
   pnlGlobalMode = pnlGlobalMode === 'lev' ? 'price' : pnlGlobalMode === 'price' ? 'realOnly' : 'lev';
+  localStorage.setItem('tpro_pnl_mode', pnlGlobalMode);
   renderOpenTrades();
 }
 
