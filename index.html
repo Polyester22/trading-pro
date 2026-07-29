@@ -1860,6 +1860,7 @@ function getRealisedPnl(t){
   return 0;
 }
 
+var weeklySummaryShown=8;
 function renderWeeklySummary(){
   var el=document.getElementById('weekly-summary-modal-body');
   if(!el)return;
@@ -1870,7 +1871,8 @@ function renderWeeklySummary(){
   // Group by week
   var byWeek={};
   allTrades.forEach(function(t){var wk=getWeekKey(t.fecha);if(!byWeek[wk])byWeek[wk]=[];byWeek[wk].push(t);});
-  var weeks=Object.keys(byWeek).sort().reverse().slice(0,8);
+  var allWeeks=Object.keys(byWeek).sort().reverse();
+  var weeks=allWeeks.slice(0,weeklySummaryShown);
 
   el.innerHTML=weeks.map(function(wk,idx){
     var trades=byWeek[wk];
@@ -1908,10 +1910,17 @@ function renderWeeklySummary(){
       '</div>':'')+
       (estadoStr?'<div style="font-size:11px;color:var(--text2)">🧠 Estado: '+estadoStr+'</div>':'')+
     '</div>';
-  }).join('');
+  }).join('')+
+  (allWeeks.length>weeks.length?'<div onclick="expandWeeklySummary()" style="text-align:center;padding:10px;font-size:12px;font-weight:800;color:#ff6b00;cursor:pointer;background:var(--surface2);border-radius:10px;margin-top:2px">Ver más semanas ('+(allWeeks.length-weeks.length)+' restantes)</div>':'');
+}
+
+function expandWeeklySummary(){
+  weeklySummaryShown+=8;
+  renderWeeklySummary();
 }
 
 function openWeeklySummary(){
+  weeklySummaryShown=8;
   document.getElementById('modal-weekly').classList.add('open');
   renderWeeklySummary();
 }
@@ -2105,6 +2114,10 @@ function renderRiskExposure(openTrades){
   const shortExposed=shortTrades.reduce((s,t)=>s+t.margen,0);
   const longPct=capital?((longExposed/capital)*100).toFixed(1):null;
   const shortPct=capital?((shortExposed/capital)*100).toFixed(1):null;
+  // Proporción long/short (relativa al total expuesto, siempre suma 100%)
+  const lsTotal=longExposed+shortExposed;
+  const longShare=lsTotal?(longExposed/lsTotal*100):50;
+  const shortShare=lsTotal?(shortExposed/lsTotal*100):50;
   box.style.display='block';
   box.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center">'+
     '<div style="font-size:11px;font-weight:700;color:var(--text2)">💼 Capital en riesgo</div>'+
@@ -2118,6 +2131,14 @@ function renderRiskExposure(openTrades){
     '<div style="display:flex;gap:14px;margin-top:6px">'+
       '<div style="font-size:10px;color:var(--text2);font-weight:700">🟢 Long <span style="color:#00c853;font-weight:900">$'+longExposed.toFixed(0)+'</span>'+(longPct?' <span style="color:var(--text2)">('+longPct+'%)</span>':'')+'</div>'+
       '<div style="font-size:10px;color:var(--text2);font-weight:700">🔴 Short <span style="color:#ff3d57;font-weight:900">$'+shortExposed.toFixed(0)+'</span>'+(shortPct?' <span style="color:var(--text2)">('+shortPct+'%)</span>':'')+'</div>'+
+    '</div>'+
+    '<div style="display:flex;height:6px;border-radius:3px;overflow:hidden;margin-top:6px;background:var(--border)">'+
+      (longShare>0?'<div style="width:'+longShare+'%;background:#00c853"></div>':'')+
+      (shortShare>0?'<div style="width:'+shortShare+'%;background:#ff3d57"></div>':'')+
+    '</div>'+
+    '<div style="display:flex;justify-content:space-between;margin-top:2px">'+
+      '<span style="font-size:9px;color:#00c853;font-weight:800">'+longShare.toFixed(0)+'%</span>'+
+      '<span style="font-size:9px;color:#ff3d57;font-weight:800">'+shortShare.toFixed(0)+'%</span>'+
     '</div>';
 }
 
