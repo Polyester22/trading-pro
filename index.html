@@ -2098,6 +2098,13 @@ function renderRiskExposure(openTrades){
   const pctNum=parseFloat(pctExposed)||0;
   const limit=riskPct*openTrades.length;
   const col=pctNum>riskPct*openTrades.length*2?'#ff3d57':pctNum>limit?'#ffd100':'#00c853';
+  // Desglose long/short
+  const longTrades=openTrades.filter(t=>t.pos==='Long');
+  const shortTrades=openTrades.filter(t=>t.pos==='Short');
+  const longExposed=longTrades.reduce((s,t)=>s+t.margen,0);
+  const shortExposed=shortTrades.reduce((s,t)=>s+t.margen,0);
+  const longPct=capital?((longExposed/capital)*100).toFixed(1):null;
+  const shortPct=capital?((shortExposed/capital)*100).toFixed(1):null;
   box.style.display='block';
   box.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center">'+
     '<div style="font-size:11px;font-weight:700;color:var(--text2)">💼 Capital en riesgo</div>'+
@@ -2107,6 +2114,10 @@ function renderRiskExposure(openTrades){
     '</div></div>'+
     '<div style="height:4px;background:var(--border);border-radius:2px;margin-top:6px;overflow:hidden">'+
     '<div style="height:100%;width:'+Math.min(pctNum,100)+'%;background:'+col+';border-radius:2px;transition:width .5s"></div>'+
+    '</div>'+
+    '<div style="display:flex;gap:14px;margin-top:6px">'+
+      '<div style="font-size:10px;color:var(--text2);font-weight:700">🟢 Long <span style="color:#00c853;font-weight:900">$'+longExposed.toFixed(0)+'</span>'+(longPct?' <span style="color:var(--text2)">('+longPct+'%)</span>':'')+'</div>'+
+      '<div style="font-size:10px;color:var(--text2);font-weight:700">🔴 Short <span style="color:#ff3d57;font-weight:900">$'+shortExposed.toFixed(0)+'</span>'+(shortPct?' <span style="color:var(--text2)">('+shortPct+'%)</span>':'')+'</div>'+
     '</div>';
 }
 
@@ -2564,7 +2575,7 @@ function getMomentumTP(ticker, pos, consensus){
 // ── DETALLE DEL BADGE: cambiá a true para restaurar los bloques ocultos ──
 const SHOW_DETAIL_BLOCKS = false;
 
-let pnlGlobalMode = 'lev'; // 'lev' | 'price'
+let pnlGlobalMode = 'lev'; // 'lev' | 'price' | 'realOnly' (real % sin apalancar, oculta el $ pnl)
 const pnlToggleState = new Proxy({}, {
   get: (_, id) => pnlGlobalMode,
   set: () => true
@@ -2596,7 +2607,7 @@ function toggleOpenCard(id, ev){
 }
 function togglePnlView(id, event){
   event.stopPropagation();
-  pnlGlobalMode = pnlGlobalMode === 'price' ? 'lev' : 'price';
+  pnlGlobalMode = pnlGlobalMode === 'lev' ? 'price' : pnlGlobalMode === 'price' ? 'realOnly' : 'lev';
   renderOpenTrades();
 }
 
@@ -3886,11 +3897,13 @@ function renderOpenTrades(){
     const rec = _consensus.rec;
     const cev = getCompositeEV(t);
     const isExpanded = !!openCardExpanded[t.id];
-    const showPrice = pnlToggleState[t.id] === 'price';
+    const pnlMode = pnlToggleState[t.id];
+    const showPrice = pnlMode === 'price' || pnlMode === 'realOnly';
+    const hideDollar = pnlMode === 'realOnly';
     const pricePct = (t.entrada && priceForCalc && t.entrada > 0)
       ? (priceForCalc - t.entrada) / t.entrada * 100 * (t.pos==='Short' ? -1 : 1) : null;
     const displayPct = showPrice ? pricePct : livePct;
-    const levTag = showPrice ? 'precio' : ('x'+(t.lev||1));
+    const levTag = pnlMode === 'realOnly' ? 'real' : showPrice ? 'precio' : ('x'+(t.lev||1));
     const detailHTML = isExpanded ? buildDetailHTML(t, livePrice, priceForCalc, pctColor, livePct, timeStr, rec, cev) : '';
     return`<div class="open-card" onclick="toggleOpenCard('${t.id}',event)" style="cursor:pointer">
       <div style="display:flex;align-items:stretch;gap:10px">
@@ -3921,7 +3934,7 @@ function renderOpenTrades(){
             <div style="font-size:24px;font-weight:900;line-height:1;color:${pctColor}">${displayPct!==null?(displayPct>=0?'+':'')+displayPct.toFixed(2)+'%':'—'}</div>
             <div style="display:flex;justify-content:flex-end;align-items:center;gap:5px;margin-top:3px">
               <span style="font-size:10px;font-weight:800;color:${showPrice?'#00aaff':'var(--text2)'};background:${showPrice?'rgba(0,170,255,.12)':'rgba(153,153,184,.1)'};border-radius:4px;padding:1px 5px">${levTag}</span>
-              <span style="font-size:14px;font-weight:800;color:${pctColor}">${livePnl!==null?(livePnl>=0?'+':'')+'$'+Math.abs(livePnl).toFixed(2):'—'}</span>
+              ${hideDollar?'':`<span style="font-size:14px;font-weight:800;color:${pctColor}">${livePnl!==null?(livePnl>=0?'+':'')+'$'+Math.abs(livePnl).toFixed(2):'—'}</span>`}
             </div>
           </div>
           <div style="font-size:16px;color:var(--text2);user-select:none;transition:transform .25s;transform:rotate(${isExpanded?180:0}deg)">&#9660;</div>
