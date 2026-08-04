@@ -2236,11 +2236,12 @@ async function hlFetchAllMids(){
 async function fetchBingxPrice(ticker){
   try{
     const r = await fetch(`https://open-api.bingx.com/openApi/swap/v2/quote/price?symbol=${encodeURIComponent(ticker)}-USDT`);
-    if(!r.ok) return null;
+    if(!r.ok){ console.warn('[BingX price] HTTP',r.status,'para',ticker); return null; }
     const data = await r.json();
     const price = parseFloat(data?.data?.price);
+    console.log('[BingX price]',ticker,'→',data);
     return (price>0) ? price : null;
-  }catch(_){ return null; }
+  }catch(err){ console.warn('[BingX price] fetch falló para',ticker,'(probablemente CORS):',err.message); return null; }
 }
 
 // Cotización de acciones (para acciones tokenizadas tipo BingX xStocks: AMZN, AAPL, TSLA, etc.)
@@ -2252,11 +2253,12 @@ async function fetchStockPrice(ticker){
   const proxied = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
   try{
     const r = await fetch(proxied);
-    if(!r.ok) return null;
+    if(!r.ok){ console.warn('[Yahoo price] HTTP',r.status,'para',ticker); return null; }
     const data = await r.json();
     const price = data?.chart?.result?.[0]?.meta?.regularMarketPrice;
+    console.log('[Yahoo price]',ticker,'→ precio:',price,'(puede ser el cierre si el mercado real está cerrado)');
     return (typeof price==='number' && price>0) ? price : null;
-  }catch(_){ return null; }
+  }catch(err){ console.warn('[Yahoo price] fetch falló para',ticker,':',err.message); return null; }
 }
 
 async function hlFetchKlines(coin, interval, limit=300){
