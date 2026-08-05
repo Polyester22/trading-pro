@@ -2253,11 +2253,34 @@ async function hlFetchAllMids(){
 // Finance con varios proxies CORS de respaldo, probados en orden hasta que uno responda.
 const STOCK_CORS_PROXIES = [
   url => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
-  url => `https://corsproxy.io/?url=${encodeURIComponent(url)}`,
   url => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
+  url => `https://corsproxy.io/?url=${encodeURIComponent(url)}`,
 ];
+// Alias para tickers de índices/BingX que no coinciden con el símbolo real de Yahoo Finance.
+const STOCK_TICKER_ALIASES = {
+  'DOWJONES':'^DJI', 'DOW':'^DJI', 'US30':'^DJI',
+  'SPX':'^GSPC', 'SP500':'^GSPC', 'US500':'^GSPC',
+  'NASDAQ':'^IXIC', 'NDX':'^NDX', 'US100':'^NDX', 'NAS100':'^NDX',
+  'DAX':'^GDAXI', 'UK100':'^FTSE', 'FTSE':'^FTSE', 'NIKKEI':'^N225', 'JPN225':'^N225',
+};
+// Cooldown: si un ticker falla repetidas veces en TODAS las fuentes, dejamos de reintentarlo
+// cada pocos segundos (evita el spam infinito de errores en consola para tickers que nunca
+// van a resolver, ej. un símbolo mal escrito).
+const stockRetryInfo = {}; // ticker -> {fails, nextTry}
+function stockOnCooldown(ticker){
+  const info = stockRetryInfo[ticker];
+  return info && Date.now() < info.nextTry;
+}
+function stockRegisterFail(ticker){
+  const info = stockRetryInfo[ticker] || {fails:0, nextTry:0};
+  info.fails++;
+  info.nextTry = Date.now() + Math.min(info.fails, 6) * 30000; // hasta 3min entre reintentos
+  stockRetryInfo[ticker] = info;
+}
+function stockRegisterSuccess(ticker){ delete stockRetryInfo[ticker]; }
 async function fetchStockPrice(ticker){
-  const clean = ticker.replace(/USDT$|-USD$|x$/i,''); // por si el ticker viene con sufijo
+  if(stockOnCooldown(ticker)) return null;
+  const clean = (STOCK_TICKER_ALIASES[ticker] || ticker).replace(/USDT$|-USD$|x$/i,'');
   const target = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(clean)}`;
   for(const buildUrl of STOCK_CORS_PROXIES){
     try{
@@ -2267,10 +2290,12 @@ async function fetchStockPrice(ticker){
       const price = data?.chart?.result?.[0]?.meta?.regularMarketPrice;
       if(typeof price==='number' && price>0){
         console.log('[Yahoo price]',ticker,'→',price);
+        stockRegisterSuccess(ticker);
         return price;
       }
     }catch(err){ console.warn('[Yahoo price] proxy falló/timeout para',ticker,':',err.message); }
   }
+  stockRegisterFail(ticker);
   return null;
 }
 
@@ -2302,6 +2327,8 @@ function isHLTicker(ticker){ return !ticker.endsWith('USDT') && ticker.length <=
 async function fetchTickerChanges(tickers){
   const now=Date.now();
   const toFetch=tickers.filter(tk=>{
+    if(nonCryptoTickers.has(tk))return false; // acción tokenizada confirmada: no tiene sentido pedirle a Binance/HL
+    if(stockOnCooldown(tk))return false; // viene fallando en todas las fuentes, dejamos de insistir por un rato
     const c=tickerChangeCache[tk];
     return!c||(now-c.fetchedAt)>90000; // 90s cache
   });
@@ -4073,9 +4100,10 @@ async function refreshPrices(){
   if(!openTrades.length)return;
   if(btn){btn.innerHTML='<span class="live-dot"></span> Actualizando...';btn.disabled=true;}
   const allTickers=[...new Set(openTrades.map(t=>t.ticker))];
-  // Separar de entrada los tickers ya confirmados como no-cripto (ej. acciones tokenizadas),
-  // así no arruinan el pedido en lote a Binance para el resto de los trades.
-  const tickers=allTickers.filter(tk=>!nonCryptoTickers.has(tk));
+  // Separar de entrada: (1) tickers ya confirmados como no-cripto (acciones tokenizadas), y
+  // (2) tickers que vienen fallando en TODAS las fuentes y están en cooldown (evita machacar
+  // Binance/proxies cada ciclo con un ticker que sabemos que no va a resolver por ahora).
+  const tickers=allTickers.filter(tk=>!nonCryptoTickers.has(tk) && !stockOnCooldown(tk));
 
   if(tickers.length) try{
     const symbols=tickers.map(tk=>tk+'USDT');
