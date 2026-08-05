@@ -886,6 +886,13 @@ tr.clickable-row:hover td{background:var(--table-hover)!important}
 
 // ══ GLOBAL STATE ══
 let livePrices={};
+// fetch con timeout: evita que un proxy colgado deje "Actualizando..." pegado para siempre.
+async function fetchTimeout(url, opts={}, ms=6000){
+  const ctrl = new AbortController();
+  const id = setTimeout(()=>ctrl.abort(), ms);
+  try{ return await fetch(url, {...opts, signal: ctrl.signal}); }
+  finally{ clearTimeout(id); }
+}
 // Tickers que ya confirmamos que NO existen en Binance/Hyperliquid/CoinGecko (ej: acciones
 // tokenizadas como AMZN, DOWJONES). Se excluyen de los pedidos en lote a Binance para que un
 // ticker inválido no tumbe la actualización de precio del resto de los trades cripto.
@@ -2235,7 +2242,7 @@ function getCompositeEV(t){
 const HL_API = 'https://api.hyperliquid.xyz/info';
 
 async function hlFetchAllMids(){
-  const r = await fetch(HL_API, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({type:'allMids'})});
+  const r = await fetchTimeout(HL_API, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({type:'allMids'})}, 6000);
   if(!r.ok) throw new Error('HL allMids failed');
   return r.json(); // {HYPE:"25.5", BTC:"67000", ...}
 }
@@ -2254,7 +2261,7 @@ async function fetchStockPrice(ticker){
   const target = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(clean)}`;
   for(const buildUrl of STOCK_CORS_PROXIES){
     try{
-      const r = await fetch(buildUrl(target));
+      const r = await fetchTimeout(buildUrl(target), {}, 5000);
       if(!r.ok){ console.warn('[Yahoo price] HTTP',r.status,'para',ticker,'via',buildUrl('')); continue; }
       const data = await r.json();
       const price = data?.chart?.result?.[0]?.meta?.regularMarketPrice;
@@ -2262,7 +2269,7 @@ async function fetchStockPrice(ticker){
         console.log('[Yahoo price]',ticker,'→',price);
         return price;
       }
-    }catch(err){ console.warn('[Yahoo price] proxy falló para',ticker,':',err.message); }
+    }catch(err){ console.warn('[Yahoo price] proxy falló/timeout para',ticker,':',err.message); }
   }
   return null;
 }
@@ -4073,7 +4080,7 @@ async function refreshPrices(){
   if(tickers.length) try{
     const symbols=tickers.map(tk=>tk+'USDT');
     const symParam=JSON.stringify(symbols);
-    const binRes=await fetch(`https://api.binance.com/api/v3/ticker/price?symbols=${encodeURIComponent(symParam)}`);
+    const binRes=await fetchTimeout(`https://api.binance.com/api/v3/ticker/price?symbols=${encodeURIComponent(symParam)}`, {}, 6000);
     if(binRes.ok){
       const binData=await binRes.json();
       binData.forEach(item=>{
@@ -4111,16 +4118,18 @@ async function refreshPrices(){
     }
   }
 
-  // Tickers que ninguna fuente cripto pudo resolver (o que ya sabíamos no-cripto) → probar como acción
+  // Tickers que ninguna fuente cripto pudo resolver (o que ya sabíamos no-cripto) → probar como acción.
+  // Esto corre EN SEGUNDO PLANO (sin await) para no dejar el botón "Actualizando..." colgado
+  // si algún proxy tarda o falla — cuando resuelve, actualiza el precio y re-renderiza sola.
   const nonCryptoMissing = allTickers.filter(tk=>!livePrices[tk]);
   if(nonCryptoMissing.length){
-    await Promise.all(nonCryptoMissing.map(async tk=>{
+    Promise.all(nonCryptoMissing.map(async tk=>{
       const sp = await fetchStockPrice(tk);
       if(sp){ livePrices[tk]=sp; markNonCrypto(tk); }
-    }));
+    })).then(()=>{ renderOpenTrades(); updateDotSilent(); });
   }
-  if(!Object.keys(livePrices).some(tk=>allTickers.includes(tk)) && btn){
-    // Ninguna fuente devolvió nada para ningún ticker abierto
+  if(!Object.keys(livePrices).some(tk=>allTickers.includes(tk)) && !nonCryptoMissing.length && btn){
+    // Ninguna fuente devolvió nada para ningún ticker abierto (y no hay nada pendiente en segundo plano)
     btn.innerHTML='❌ Error — reintentá';setTimeout(()=>{if(btn){btn.innerHTML='⟳ Actualizar precios';btn.disabled=false;}},2500);
     return;
   }
