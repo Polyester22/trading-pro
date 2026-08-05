@@ -1055,7 +1055,6 @@ function switchTab(tab){
   if(tab==='graficos')renderGraficos();
   if(tab==='abiertos'){
     renderOpenTrades();
-    if(location.protocol==='https:')refreshPrices();
     // Auto-refresh: immediately + every 60 seconds
     if(location.protocol.startsWith('https')){
       refreshPrices();
@@ -5593,9 +5592,14 @@ function migratePatronFromObs(){
 let _cgCache = null;
 let _cgCacheTime = 0;
 let _cgFetching = false;
+let _cgCooldownUntil = 0; // si CoinGecko viene devolviendo 429 seguido, esperamos antes de reintentar
 
 async function fetchCoinGeckoData(){
   if(_cgCache && (Date.now()-_cgCacheTime) < 90000) return _cgCache;
+  if(Date.now() < _cgCooldownUntil){
+    if(_cgCache) return _cgCache; // devolvemos lo último conocido en vez de martillar la API
+    throw new Error('CoinGecko en cooldown (rate limit)');
+  }
   if(_cgFetching){
     await new Promise(r=>setTimeout(r,600));
     if(_cgCache)return _cgCache;
@@ -5605,17 +5609,17 @@ async function fetchCoinGeckoData(){
 
   // Fetch with timeout + retry, returns null on failure (never throws)
   async function cgFetchSafe(url){
-    for(let attempt=0;attempt<3;attempt++){
+    for(let attempt=0;attempt<2;attempt++){
       try{
         const controller=new AbortController();
         const timer=setTimeout(()=>controller.abort(),8000);
         const res=await fetch(url,{signal:controller.signal});
         clearTimeout(timer);
-        if(res.status===429){await new Promise(r=>setTimeout(r,3000*(attempt+1)));continue;}
+        if(res.status===429){await new Promise(r=>setTimeout(r,2000*(attempt+1)));continue;}
         if(!res.ok)return null;
         return await res.json();
       }catch(e){
-        if(attempt<2)await new Promise(r=>setTimeout(r,1500*(attempt+1)));
+        if(attempt<1)await new Promise(r=>setTimeout(r,1000));
       }
     }
     return null;
@@ -5623,7 +5627,11 @@ async function fetchCoinGeckoData(){
 
   // Fetch BTC/ETH prices first (most important)
   const pd=await cgFetchSafe(BASE+'/simple/price?ids=bitcoin,ethereum&vs_currencies=usd&include_24hr_change=true&include_1hr_change=true');
-  if(!pd){_cgFetching=false;throw new Error('Sin conexión a CoinGecko');}
+  if(!pd){
+    _cgFetching=false;
+    _cgCooldownUntil=Date.now()+120000; // 2 min sin insistir — venía devolviendo 429
+    throw new Error('Sin conexión a CoinGecko (rate limit, reintentando en 2min)');
+  }
 
   // Fetch global and markets independently — partial failure OK
   await new Promise(r=>setTimeout(r,500));
