@@ -2251,9 +2251,9 @@ async function hlFetchAllMids(){
 // BingX no puede llamarse desde el navegador (bloquea con CORS/403), así que se usa Yahoo
 // Finance con varios proxies CORS de respaldo, probados en orden hasta que uno responda.
 const STOCK_CORS_PROXIES = [
+  url => `https://corsproxy.io/?url=${encodeURIComponent(url)}`,
   url => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
   url => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
-  url => `https://corsproxy.io/?url=${encodeURIComponent(url)}`,
 ];
 // Alias para tickers de índices/BingX que no coinciden con el símbolo real de Yahoo Finance.
 const STOCK_TICKER_ALIASES = {
